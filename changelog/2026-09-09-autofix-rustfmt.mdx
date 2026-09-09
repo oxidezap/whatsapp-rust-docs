@@ -1,0 +1,22 @@
+---
+title: "September 9, 2026 — rustfmt fixes now auto-commit to PRs"
+description: "autofix.ci runs cargo fmt on every pull request and commits any formatting fixes back to your branch, so rustfmt failures no longer bounce PRs."
+---
+
+PR [#1495](https://github.com/oxidezap/whatsapp-rust/pull/1495) adds an `autofix.ci` GitHub Actions workflow. It runs `cargo fmt --all` on every pull request and hands the resulting diff to [autofix.ci](https://autofix.ci), which commits any formatting fixes directly onto the PR branch. Formatting failures no longer bounce a PR back to the author for a manual `cargo fmt` round trip.
+
+## What changes for contributors
+
+- You no longer need to run `cargo fmt` before pushing. If your branch has formatting drift, autofix.ci pushes a fix-up commit to it within a few minutes of the workflow run.
+- After autofix.ci commits to your branch, pull before pushing again to avoid a non-fast-forward rejection.
+- The workflow uses the same pinned nightly toolchain as the `Format Check` gate in CI, so the fixer and the gate never disagree on formatting.
+
+## What stays manual
+
+Only rustfmt is automated, because it is deterministic and never changes semantics. Everything else remains a human-reviewed gate:
+
+- **Clippy.** `clippy --fix` can rewrite logic, so clippy findings still fail CI and require a manual fix.
+- **Generated artifacts.** Whatspec regeneration checks stay human-reviewed and are never auto-committed.
+- **Bartender image pins.** Pin updates stay human-reviewed.
+
+The workflow runs with read-only repository permissions. The commit-back step goes through the autofix.ci GitHub App rather than a repository token.

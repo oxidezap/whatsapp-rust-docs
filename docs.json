@@ -148,6 +148,7 @@
                 "group": "Changelog",
                 "pages": [
                   "changelog/overview",
+                  "changelog/2026-09-09-autofix-rustfmt",
                   "changelog/2026-08-07-release-0-7-0",
                   "changelog/2026-06-15-token-tiny-map",
                   "changelog/2026-06-14-drop-moka-portable-cache",
