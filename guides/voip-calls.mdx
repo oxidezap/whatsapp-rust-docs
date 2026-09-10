@@ -773,7 +773,7 @@ This is the encoder's only analysis-FFT path in current source. There is no feat
 
 Unlike MLow, whatsapp-rust does **not** implement an H.264 encoder or decoder — the codec is owned by the consumer. What `wacore` does implement, in pure Rust, is the RTP media plane around it:
 
-- **Packetization**: single-NAL and FU-A (fragmented) packet formats.
+- **Packetization**: single-NAL, STAP-A (aggregated non-VCL), and FU-A (fragmented) packet formats. VCL slices always go out as single-NAL or FU-A; consecutive small non-VCL NALs — SPS and PPS in practice — pack into one STAP-A payload so the parameter sets that open an IDR reach the peer in a single packet. See [PR #1496](https://github.com/oxidezap/whatsapp-rust/pull/1496) below.
 - **Reassembly**: single-NAL, STAP-A, and FU-A on receive, with sequence-aware fragment-loss handling and allocation caps.
 - **Keyframe recovery**: an authenticated peer PLI/FIR is treated as a decoder resync boundary — dependent access units are withheld until the next IDR packetizes successfully, matching what the official app expects for recovery.
 - **Requesting recovery**: the engine can also ask the *peer* for a keyframe, by RTCP PLI, when it's our decoder that lost an access unit — see [PR #1385](https://github.com/oxidezap/whatsapp-rust/pull/1385) below.
@@ -787,6 +787,10 @@ Unlike MLow, whatsapp-rust does **not** implement an H.264 encoder or decoder �
   [PR #1385](https://github.com/oxidezap/whatsapp-rust/pull/1385) added the other direction: until now the engine read the peer's PLI/FIR to drive our own encoder but had no way to send one, so a single lost inbound access unit stayed dark until the peer's own keyframe interval came round. Call `handle.request_peer_keyframe(urgency)` (see [Call Handle](#call-handle) above) whenever your decoder loses or discards an access unit — it's throttled in the engine (1000ms, or 200ms under `KeyframeUrgency::Immediate` for a decoder that has already failed and reset), so calling it on every dropped unit is the intended usage. It's fire-and-forget: the engine decides whether a request actually goes out and doesn't report the outcome back. The bundled facade already calls it on your behalf whenever the sink you handed to `.video()`/`start_video()`/`accept_video()` is too slow to take a reassembled frame.
 
   **Does nothing in a group call** — group video is routed through the participant registry, so a group PLI would need to name which participant's stream was lost, which is a different, not-yet-implemented request.
+</Note>
+
+<Note>
+  [PR #1496](https://github.com/oxidezap/whatsapp-rust/pull/1496) changed how the sender packetizes the parameter sets that open a keyframe. SPS and PPS used to leave as separate single-NAL RTP packets, and an Android peer that lost either one would keep asking for a keyframe without ever rendering a frame — the log shape was inbound PLIs against our video SSRC, encoder IDRs firing, packets arriving with zero local drops, and no video ever appearing on the peer. Consecutive small non-VCL NALs now pack into one STAP-A payload so an IDR's parameter sets ride in a single packet, and a run that overflows opens a fresh aggregate instead of stranding the triggering NAL. Slices still go out as single-NAL or FU-A exactly as before, so nothing on the send path changes for callers that don't hit the parameter-set case. Nothing in your `VideoSource`/`VideoSink` code needs to change to pick this up — hand the library the same H.264 Annex-B access units and the fix applies on the wire.
 </Note>
 
 WhatsApp's own encoder settings (for interop reference, not enforced by the library): H.264 Constrained Baseline, repeated SPS/PPS, adapting from a 15 fps low-bandwidth mode up to 1280×720 @ 20 fps / ~2 Mbps.
