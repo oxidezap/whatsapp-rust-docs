@@ -488,7 +488,12 @@ The library handles multi-device call scenarios automatically:
 
 - **Companion answering** — if another linked device picks up, the library performs a recv-key rekey to that device.
 - **Sibling dismiss** — if a sibling device declines or answers elsewhere, the call tears down cleanly on this device.
+- **Per-device rejects on outgoing calls** — a `<reject>` with reason `busy` or `enc` speaks for one callee device, not for the callee. `busy` means that device is already in a call, or is a companion with no voice support. `enc` means that device could not decrypt the offer's callKey because its registration changed. Neither ends your outgoing call: the callee's remaining devices keep ringing and may still answer. Any other reject reason, including none, is the callee's own decision and ends the call.
 - **Offline missed calls** — missed-call surfacing for devices that were offline when the call arrived.
+
+<Note>
+  [PR #1494](https://github.com/oxidezap/whatsapp-rust/pull/1494) extended the per-device handling to `reason="enc"`. Before that PR, an `enc` reject from a single stale companion device was treated as the callee declining, terminating the whole outgoing call before anyone could answer. Only `busy` was per-device. No API changed — the fix is entirely in how the library disposes of the reject.
+</Note>
 
 ## Group calls
 
