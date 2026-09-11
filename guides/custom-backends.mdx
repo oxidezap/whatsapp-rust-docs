@@ -1146,7 +1146,7 @@ let backend = Arc::new(SqliteStore::new("whatsapp.db").await?);
 ```
 
 <Note>
-  SQLite is bundled by default via the `bundled-sqlite` feature on `whatsapp-rust-sqlite-storage`. No system SQLite installation is required.
+  SQLite is bundled by default via the `sqlite-storage-bundled` feature on `whatsapp-rust` (which activates `bundled-sqlite` on `whatsapp-rust-sqlite-storage`). No system SQLite installation is required. If your binary already links another SQLite engine, keep `sqlite-storage` on and drop `sqlite-storage-bundled` — see [Unbundling SQLite](/installation#unbundling-sqlite).
 </Note>
 
 ## Custom cache store

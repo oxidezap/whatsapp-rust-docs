@@ -11,7 +11,7 @@ Before installing whatsapp-rust, ensure you have:
 - **Cargo** package manager
 
 <Note>
-  SQLite is bundled by default with the `whatsapp-rust-sqlite-storage` crate, so you don't need to install it separately. If you prefer to link against a system-installed SQLite, disable the default `bundled-sqlite` feature.
+  SQLite is bundled by default through the `sqlite-storage-bundled` feature on `whatsapp-rust`, so you don't need to install it separately. If you prefer to link against a system-installed SQLite — or you already link another SQLite build (`libsql-ffi`, `sqlcipher`, a custom amalgamation) and want to avoid duplicate `sqlite3_*` symbols — disable default features and enable `sqlite-storage` on its own. See [Unbundling SQLite](#unbundling-sqlite).
 </Note>
 
 ## Add to your project
@@ -76,7 +76,8 @@ whatsapp-rust supports several optional features:
 | `tokio-native` | Multi-threaded Tokio runtime (`tokio/rt-multi-thread`) | ✅ Yes |
 | `tokio-transport` | Tokio WebSocket transport | ✅ Yes |
 | `ureq-client` | Ureq HTTP client | ✅ Yes |
-| `sqlite-storage` | SQLite storage backend | ✅ Yes |
+| `sqlite-storage` | SQLite storage backend (the `SqliteStore` and its Diesel-backed schema) | ✅ Yes |
+| `sqlite-storage-bundled` | Compile and statically link SQLite from source via `libsqlite3-sys/bundled`. Implies `sqlite-storage`. Disable it when your binary already links another SQLite (`libsql-ffi`, `sqlcipher`, custom amalgamation) to avoid duplicate `sqlite3_*` symbols at link time | ✅ Yes |
 | `signal` | Unix signal handling (graceful shutdown on SIGTERM/Ctrl+C) | ✅ Yes |
 | `tracing` | Emit `tracing` spans/events across connect, send, receive, IQ, app state, pairing, media, and session flows. See [Observability](/advanced/observability) | ❌ No |
 | `tracing-pii` | Render raw phone numbers in `tracing` fields instead of redacted `pn#<token>`. Local debugging only — never enable in production | ❌ No |
@@ -151,9 +152,29 @@ The `whatsapp-rust-sqlite-storage` crate has its own feature flags:
 
 | Feature | Description | Included by default |
 |---------|-------------|-----------------|
-| `bundled-sqlite` | Bundles SQLite (compiles from source, no system library needed) | ✅ Yes |
+| `bundled-sqlite` | Bundles SQLite (compiles from source, no system library needed). Activated by `whatsapp-rust`'s `sqlite-storage-bundled` feature | ✅ Yes |
 
-To use a system-installed SQLite instead of the bundled version:
+### Unbundling SQLite
+
+Applications that already link another SQLite engine (`libsql-ffi`, `sqlcipher`, a custom `sqlite3.c` amalgamation) get duplicate `sqlite3_*` symbol errors at link time when `whatsapp-rust` also pulls in the bundled amalgamation. The default build has always bundled SQLite; as of [PR #1499](https://github.com/oxidezap/whatsapp-rust/pull/1499) that bundling is a separate feature (`sqlite-storage-bundled`) you can leave off without losing the SQLite storage backend itself.
+
+To keep the `SqliteStore` while linking against your own SQLite, disable defaults on `whatsapp-rust` and re-enable only the features you need — omitting `sqlite-storage-bundled`:
+
+```toml Cargo.toml
+[dependencies]
+whatsapp-rust = { version = "0.7", default-features = false, features = [
+    "sqlite-storage",
+    "tokio-transport",
+    "tokio-runtime",
+    "tokio-native",
+    "ureq-client",
+    "signal",
+] }
+```
+
+The dependency on `whatsapp-rust-sqlite-storage` is declared with `default-features = false` internally, so nothing else re-activates `bundled-sqlite` transitively.
+
+If you depend on `whatsapp-rust-sqlite-storage` directly, the same rule applies at that crate:
 
 ```toml Cargo.toml
 [dependencies]
