@@ -45,6 +45,10 @@ tokio = { version = "1.53", features = ["macros", "rt-multi-thread"] }
   [PR #1385](https://github.com/oxidezap/whatsapp-rust/pull/1385) added `CallHandle::request_peer_keyframe(urgency)`, so a 1:1 call can ask the peer to recover a dropped inbound access unit instead of waiting on its next scheduled keyframe — see [H.264 video plane](#h264-video-plane) below.
 </Note>
 
+<Note>
+  [PR #1498](https://github.com/oxidezap/whatsapp-rust/pull/1498) added `CallHandle::resume_video(source, sink)` and `CallHandle::video_states()`, and made `start_video`'s 5-second timeout direction-aware: an unanswerable request against a peer that's already video now stands only our direction down instead of killing the call. The exact timeout is also published as `voip::VIDEO_UPGRADE_TIMEOUT`. See [Video I/O](#video-io) below.
+</Note>
+
 `voip` is a backward-compatible aggregate for `voip-mlow` + `voip-libopus` + `voip-relay-native` — both codec adapters plus the native relay dialer, linked in. If you only need one codec, exchange codec packets with an external encoder/decoder, or supply your own way onto the media wire, pick narrower features instead:
 
 | Feature | Contents |
@@ -426,9 +430,32 @@ handle.stop_video().await?; // Idempotent.
   `stop_video` only stops the video **we** send. If the peer keeps sending, their plane and `is_video` stay up — it's no longer a full downgrade to audio-only for the call. To end video in both directions, each side calls `stop_video()` independently, or one side hangs up.
 </Note>
 
+**Either side** — re-add our video direction inside a call that's already video (peer is sending, our side is stopped):
+
+```rust
+handle.resume_video(camera_source, video_sink).await?;
+```
+
+`resume_video` re-attaches your endpoints, ungates the media plane, and announces a bare `Enabled` (`<video state=1 dec="H264" device_orientation=…>`). Unlike `start_video`, it opens no upgrade handshake and arms no timeout — the peer applies the bare `Enabled` unconditionally, which is the mute-path re-add official clients use in place of a second `11`. It refuses unless our direction is `Stopped` (or has never been enabled while the peer's is up) with no upgrade outstanding either way: a fresh upgrade belongs on `start_video`, and a pending peer request belongs on `accept_video`. The error message points at the right path (`CallError::Media("... use start_video() to upgrade")` or `"... use accept_video() instead"`). A failed send releases the plane and restores the previous direction, so a retry stays a resume.
+
 <Note>
-  An upgrade request you send with `start_video` auto-cancels after 5 seconds if the peer hasn't answered: the library sends `<video state=9>` (`VideoState::UpgradeCancelByTimeout`) and releases the local camera source/sink it had prepared. This mirrors the native app's upgrade timeout and means `start_video` isn't guaranteed to stay pending indefinitely — watch `CallEvent::VideoStateChanged` if you need to know when a request you initiated expires unanswered.
+  [PR #1498](https://github.com/oxidezap/whatsapp-rust/pull/1498) added `resume_video`, changed the `start_video` timeout so an unanswerable upgrade no longer kills the call, and published `VIDEO_UPGRADE_TIMEOUT`. The behavior changes below only affect the timeout branch — a normal `start_video` → `UpgradeAccept` → `Enabled` flow is unchanged.
 </Note>
+
+<Note>
+  An upgrade request you send with `start_video` auto-cancels after 5 seconds if the peer hasn't answered, but the announcement is now direction-aware:
+
+  - Genuine initial upgrade (both directions were `Stopped`): the library sends `<video state=9>` (`VideoState::UpgradeCancelByTimeout`) and releases the local camera source/sink — a mutual kill, unchanged from before.
+  - The peer was already video when your request went out (they ignore an `11` against their active direction, so there was never anything to answer): the library now stands only your direction down with `<video state=0>` (`VideoState::Stopped`) and releases the local source/sink while leaving the inbound sink attached, so the peer's picture keeps flowing. Their direction is untouched.
+
+  `start_video` and `re_request_local_video` refuse up-front when the peer direction is already `Enabled` (`CallError::Media("call already has video; use resume_video() to re-add a stopped direction")`), so the direction-local timeout only fires when the peer's video comes up between the request and the timer.
+
+  The exact 5-second value is published as `whatsapp_rust::voip::VIDEO_UPGRADE_TIMEOUT: Duration`. Arm your own answer-wait against it (a full second under is the recommended margin) instead of hardcoding the interval.
+</Note>
+
+<Tip>
+  Diagnose a video negotiation from outside with `handle.video_states() -> Option<(VideoState, VideoState)>`: returns `(self, peer)` for a live call, `None` once it's gone. Use it to confirm what the state machine holds before or after driving `start_video` / `accept_video` / `resume_video` — for example, checking whether `resume_video` will refuse (`peer_state.is_upgrade_request()` means answer with `accept_video` instead).
+</Tip>
 
 <Tip>
   `handle.events()` clones share one underlying queue — they're competing consumers, not a broadcast. If your app already drains events on one loop (for relay/RTCP/audio events, say), react to `VideoStateChanged` there rather than spawning a second `handle.events()` consumer, or the two loops will race for the same messages.
@@ -455,6 +482,8 @@ handle.stop_video().await?; // Idempotent.
 | `handle.accept_video(token, source, sink).await` | Accept the peer's pending video-upgrade request. `token` is the `VideoUpgradeToken` from that request's `CallEvent::VideoStateChanged`; a stale token returns `CallError::VideoUpgradeExpired` |
 | `handle.announce_video_enabled().await` | Send the standalone `Enabled` stanza that completes a `start_video` upgrade. `whatsapp-rust`'s standard `<call>` handler already does this automatically on the peer's `UpgradeAccept` — only call it yourself if you're driving call signaling outside that handler |
 | `handle.stop_video().await` | Stop our own outbound video; idempotent. The peer's video plane is unaffected if they keep sending — see Video I/O above |
+| `handle.resume_video(source, sink).await` | Re-add our video direction inside an already-video call: re-attaches endpoints, ungates the plane, and announces a bare `Enabled`. No handshake, no timeout. Refuses unless our direction is stopped with no upgrade outstanding either way — see Video I/O above |
+| `handle.video_states()` | Read back this call's `(self, peer)` `VideoState` pair, or `None` when the call is gone. Diagnostics for clients driving upgrades from outside |
 | `handle.request_peer_keyframe(urgency)` | Ask the peer to send a video keyframe, by RTCP PLI — call it when your decoder loses or discards an access unit. `urgency` is a `KeyframeUrgency`: `Coalesced` for an ordinary gap, `Immediate` for a decoder that has already failed and reset. Fire-and-forget, throttled in the engine, does nothing in a group call — see [H.264 video plane](#h264-video-plane) below |
 | `handle.events()` | Subscribe to engine events (relay allocate, audio/video state changes, RTCP, failures) |
 | `handle.media_stats()` | Snapshot of per-call audio- and video-path counters (`CallMediaStats`) — see [Media stats and silence detection](#media-stats-and-silence-detection) |
