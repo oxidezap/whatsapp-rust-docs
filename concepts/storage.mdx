@@ -738,7 +738,7 @@ Persisted as a single nullable `TEXT` column holding the record as JSON (see [Da
 **Location:** `storages/sqlite-storage/src/lib.rs`
 
 <Note>
-  As of v0.5, the `whatsapp-rust-sqlite-storage` crate bundles SQLite by default via the `bundled-sqlite` feature. You no longer need SQLite installed as a system dependency. To link against a system SQLite instead, disable the default features on the crate.
+  As of v0.5, the `whatsapp-rust-sqlite-storage` crate bundles SQLite by default via the `bundled-sqlite` feature. You no longer need SQLite installed as a system dependency. To link against a system SQLite — or to avoid duplicate `sqlite3_*` symbols when your binary already links `libsql-ffi`, `sqlcipher`, or a custom SQLite build — enable the `sqlite-storage` feature on `whatsapp-rust` without `sqlite-storage-bundled`. See [Unbundling SQLite](/installation#unbundling-sqlite).
 </Note>
 
 ### BLOB encoding
