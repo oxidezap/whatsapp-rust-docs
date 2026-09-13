@@ -254,3 +254,4 @@ Always use `tokio::task::spawn_blocking` for disk I/O inside the hook. Blocking 
 ## See also
 
 - [Retry Admission Hook](/advanced/retry-admission) — the sibling opt-in hook idiom (`OnceLock`, zero overhead unset) for gating inbound group/status retry receipts.
+- [History Sync Admission Hook](/advanced/history-sync-admission) — the sibling opt-in policy for rejecting inbound history-sync chunks before the major-sync queue.

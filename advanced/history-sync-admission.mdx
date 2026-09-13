@@ -1,0 +1,181 @@
+---
+title: History Sync Admission Hook
+description: Opt in to rejecting inbound history-sync chunks before they enter the sync queue, without changing the SDK's default behavior.
+---
+
+## Overview
+
+By default, every inbound history-sync notification from the phone is accepted and enters the major-sync queue for download, decompression, and dispatch as `Event::HistorySync`. That matches WhatsApp Web's behavior and is the right choice for a client that needs history.
+
+A bot that only cares about a subset of syncs — or that wants to skip peer-data-request chunks, cap per-chunk size, or drop everything past initial pairing — can register a `HistorySyncAdmission` policy. The policy runs synchronously on the receive path and can reject a notification before the client starts any history-sync activity.
+
+Leaving the policy unset keeps the default behavior at zero cost. The receive path only checks that the optional policy is `None`.
+
+<Note>
+This is an opt-in seam. Rejecting a notification is a deliberate decision to drop a chunk the phone offered; the SDK will never do this on its own.
+</Note>
+
+## When to use it
+
+Consider a policy when:
+
+- You want to admit some history-sync types but not others (for example, accept `INITIAL_BOOTSTRAP` but reject `RECENT`).
+- You want to bound per-chunk cost with a size guard on `file_length` or `inline_payload_len`.
+- You want to drop peer-data-request responses that your bot never issued.
+- You need finer control than the all-or-nothing `.skip_history_sync()` toggle already exposes.
+
+Use [`.skip_history_sync()`](/api/bot#skip_history_sync) if you want to drop every history-sync notification unconditionally. That toggle is simpler and takes precedence over any registered admission policy — the policy is not consulted when `skip_history_sync` is on.
+
+Registration for device pairing and the `require_full_sync` request are unchanged. The policy runs after pairing completes and only gates the delivery of individual history-sync chunks from the phone.
+
+## Scope
+
+The policy is consulted for every inbound history-sync notification that reaches `handle_history_sync`, except in two cases:
+
+- The client is shutting down (the notification is dropped without consulting the policy or sending a receipt).
+- `skip_history_sync` is enabled (the client sends a `hist_sync` receipt and never calls the policy).
+
+A `RejectAndAcknowledge` decision:
+
+- Sends a `hist_sync` receipt so the phone considers the chunk delivered and stops re-uploading it.
+- Does **not** enqueue the notification onto the major-sync worker.
+- Does **not** emit `Event::HistorySync`.
+
+The receipt is permanent from the phone's perspective. `RejectAndAcknowledge` is not a way to shed load and get the chunk back later — the phone will not offer it again. If you need transient load shedding, do it inside `Accept` by throttling downstream work, not by rejecting.
+
+## Types
+
+```rust
+#[non_exhaustive]
+pub struct HistorySyncMetadata<'a> {
+    /// Protocol history-sync type, using the core's stable numeric
+    /// representation of `HistorySync.HistorySyncType`.
+    pub sync_type: Option<i32>,
+    pub chunk_order: Option<u32>,
+    pub progress: Option<u32>,
+    /// Sender-declared file length. Not validated by the core.
+    pub file_length: Option<u64>,
+    pub inline_payload_len: Option<usize>,
+    pub peer_data_request_session_id: Option<&'a str>,
+}
+
+#[non_exhaustive]
+pub enum HistorySyncDecision {
+    Accept,
+    /// Send a `hist_sync` receipt that permanently acknowledges the chunk
+    /// and prevents retry. Do not use this for transient load shedding.
+    RejectAndAcknowledge,
+}
+
+pub trait HistorySyncAdmission: wacore::sync_marker::MaybeSendSync {
+    fn decide(&self, metadata: &HistorySyncMetadata<'_>) -> HistorySyncDecision;
+}
+```
+
+`HistorySyncMetadata` and `HistorySyncDecision` are `#[non_exhaustive]` — new fields or variants may appear in future releases. Match with a wildcard arm on `HistorySyncDecision` and treat missing metadata fields as unknown rather than empty.
+
+`HistorySyncAdmission` is object-safe and WASM-safe (`MaybeSendSync` is `Send + Sync` on native targets, unbounded on `wasm32`). It is re-exported from the crate root alongside `HistorySyncMetadata` and `HistorySyncDecision`.
+
+`decide` runs **inline on the receive path** and is deliberately synchronous. A slow or awaiting policy would stall history-sync intake. Keep it to a fast local decision (a comparison, an atomic counter, a bitmask over `sync_type`); do no I/O or blocking inside it.
+
+### Metadata fields
+
+| Field | Description |
+|---|---|
+| `sync_type` | The protocol `HistorySync.HistorySyncType` as `i32`. Common values include `INITIAL_BOOTSTRAP`, `INITIAL_STATUS_V3`, `FULL`, `RECENT`, `PUSH_NAME`, `NON_BLOCKING_DATA`, `ON_DEMAND`, `NO_HISTORY`. `None` if the phone omitted the field. |
+| `chunk_order` | Monotonic index the phone assigns to consecutive chunks of the same sync. Useful for admitting only the first N chunks. |
+| `progress` | Phone-reported percentage of the sync completed. |
+| `file_length` | Sender-declared external-blob size in bytes. Not validated — treat it as a hint for cost estimation, not a guaranteed bound. |
+| `inline_payload_len` | Length of the inline payload when the phone sent one directly instead of a CDN blob. |
+| `peer_data_request_session_id` | Set only for chunks that respond to a peer-data-request session the bot (or another linked device) issued. |
+
+## Opting in
+
+Register the policy on the builder before the client connects. Both `Bot::builder()` and `ClientBuilder` expose the same method.
+
+```rust
+use std::sync::Arc;
+use whatsapp_rust::prelude::*;
+use whatsapp_rust::{HistorySyncAdmission, HistorySyncDecision, HistorySyncMetadata};
+
+struct RejectPeerDataResponses;
+
+impl HistorySyncAdmission for RejectPeerDataResponses {
+    fn decide(&self, metadata: &HistorySyncMetadata<'_>) -> HistorySyncDecision {
+        if metadata.peer_data_request_session_id.is_some() {
+            HistorySyncDecision::RejectAndAcknowledge
+        } else {
+            HistorySyncDecision::Accept
+        }
+    }
+}
+
+let bot = Bot::builder()
+    .with_backend(SqliteStore::new("whatsapp.db").await?)
+    .with_history_sync_admission(RejectPeerDataResponses)
+    .build()
+    .await?;
+
+let handle = bot.run().await?;
+handle.await?;
+```
+
+If you already hold the policy behind an `Arc`, use `with_history_sync_admission_arc` to avoid re-boxing:
+
+```rust
+let policy: Arc<dyn HistorySyncAdmission> = Arc::new(RejectPeerDataResponses);
+
+let bot = Bot::builder()
+    .with_backend(SqliteStore::new("whatsapp.db").await?)
+    .with_history_sync_admission_arc(policy)
+    .build()
+    .await?;
+```
+
+The policy is fixed at build time. Live tuning belongs inside the policy itself (atomics, a shared config handle), not in re-registration.
+
+## Example: cap chunk size
+
+Drop any chunk whose sender-declared file size exceeds a threshold, and accept everything else.
+
+```rust
+use whatsapp_rust::{HistorySyncAdmission, HistorySyncDecision, HistorySyncMetadata};
+
+struct MaxChunkBytes(u64);
+
+impl HistorySyncAdmission for MaxChunkBytes {
+    fn decide(&self, metadata: &HistorySyncMetadata<'_>) -> HistorySyncDecision {
+        let external = metadata.file_length.unwrap_or(0);
+        let inline = metadata.inline_payload_len.unwrap_or(0) as u64;
+        if external.max(inline) > self.0 {
+            HistorySyncDecision::RejectAndAcknowledge
+        } else {
+            HistorySyncDecision::Accept
+        }
+    }
+}
+
+// Register with a 4 MiB per-chunk cap.
+let bot = Bot::builder()
+    .with_backend(SqliteStore::new("whatsapp.db").await?)
+    .with_history_sync_admission(MaxChunkBytes(4 * 1024 * 1024))
+    .build()
+    .await?;
+```
+
+Because `file_length` is sender-declared and not validated, this is a best-effort gate. A chunk whose actual payload exceeds the declared size will still be admitted if the declared value is under the cap; use the standard memory-report counters to observe realised cost.
+
+## Precedence
+
+Two related settings take precedence over the admission policy:
+
+1. **Shutdown.** During shutdown the notification is dropped silently, without a receipt and without consulting the policy.
+2. **`skip_history_sync`.** When on, the client sends a `hist_sync` receipt and skips the policy. Change the toggle at runtime with [`Client::set_skip_history_sync`](/api/client#set_skip_history_sync).
+
+The `require_full_sync` and `history_sync_config` fields set at pairing time are independent of this hook. They shape what the phone offers; the admission policy shapes what the client accepts once the phone offers it.
+
+## See also
+
+- [Retry Admission Hook](/advanced/retry-admission) — the sibling opt-in policy for gating inbound group/status retry receipts.
+- [Inbound Durability Hook](/advanced/inbound-durability) — the opt-in hook idiom this trait follows.
+- [`Bot.skip_history_sync`](/api/bot#skip_history_sync) — the all-or-nothing toggle that takes precedence over any admission policy.

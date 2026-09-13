@@ -1,0 +1,36 @@
+---
+title: "September 13, 2026 — History sync admission policy"
+description: "New opt-in HistorySyncAdmission trait lets you reject inbound history-sync chunks before they enter the major-sync queue. Zero cost when unset. Preserves skip_history_sync precedence and require_full_sync behavior."
+---
+
+## Features
+
+**Generic history-sync admission policy ([#1501](https://github.com/oxidezap/whatsapp-rust/pull/1501))**
+
+A new `HistorySyncAdmission` trait, re-exported from the crate root, gates inbound history-sync notifications before the client starts any history-sync activity. The policy receives a small `HistorySyncMetadata` view — sync type, chunk order, progress, sender-declared file length, inline payload length, and any peer-data-request session id — and returns `Accept` or `RejectAndAcknowledge`. A rejected notification sends a `hist_sync` receipt and is never enqueued.
+
+Register on either builder:
+
+```rust
+use whatsapp_rust::{HistorySyncAdmission, HistorySyncDecision, HistorySyncMetadata};
+
+struct RejectPeerDataResponses;
+
+impl HistorySyncAdmission for RejectPeerDataResponses {
+    fn decide(&self, metadata: &HistorySyncMetadata<'_>) -> HistorySyncDecision {
+        if metadata.peer_data_request_session_id.is_some() {
+            HistorySyncDecision::RejectAndAcknowledge
+        } else {
+            HistorySyncDecision::Accept
+        }
+    }
+}
+
+Bot::builder()
+    .with_history_sync_admission(RejectPeerDataResponses)
+    // ...
+```
+
+Leaving the policy unset keeps the default behavior at zero cost — the receive path only checks that the optional policy is `None`. The `skip_history_sync` toggle still takes precedence: when it is on, the client sends the receipt and never consults the policy. Device registration and `require_full_sync` are unchanged.
+
+See [History Sync Admission Hook](/advanced/history-sync-admission) for the full contract, the metadata field reference, and worked examples.

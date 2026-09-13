@@ -897,6 +897,46 @@ Bot::builder()
 For bots that only need to respond to new messages, enabling this can significantly reduce startup time and bandwidth usage.
 </Tip>
 
+### with_history_sync_admission
+
+```rust
+pub fn with_history_sync_admission<A>(self, admission: A) -> Self
+where
+    A: HistorySyncAdmission + 'static,
+
+pub fn with_history_sync_admission_arc(
+    self,
+    admission: Arc<dyn HistorySyncAdmission>,
+) -> Self
+```
+
+Registers a synchronous policy that can reject inbound history-sync notifications before they enter the major-sync queue. The policy runs after the `skip_history_sync` toggle (which still takes precedence) and receives a small `HistorySyncMetadata` view — sync type, chunk order, progress, declared file length, inline payload length, and any peer-data-request session id.
+
+Returning `HistorySyncDecision::RejectAndAcknowledge` sends a `hist_sync` receipt and skips the download. Returning `HistorySyncDecision::Accept` keeps the default path. Leaving the policy unset keeps every notification accepted, at zero cost on the receive path.
+
+See [History Sync Admission Hook](/advanced/history-sync-admission) for the full contract, metadata reference, and worked examples.
+
+**Example:**
+```rust
+use whatsapp_rust::{HistorySyncAdmission, HistorySyncDecision, HistorySyncMetadata};
+
+struct RejectPeerDataResponses;
+
+impl HistorySyncAdmission for RejectPeerDataResponses {
+    fn decide(&self, metadata: &HistorySyncMetadata<'_>) -> HistorySyncDecision {
+        if metadata.peer_data_request_session_id.is_some() {
+            HistorySyncDecision::RejectAndAcknowledge
+        } else {
+            HistorySyncDecision::Accept
+        }
+    }
+}
+
+Bot::builder()
+    .with_history_sync_admission(RejectPeerDataResponses)
+    // ...
+```
+
 ---
 
 ### with_wanted_pre_key_count
