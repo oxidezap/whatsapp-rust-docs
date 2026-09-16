@@ -646,6 +646,94 @@ What it does **not** do:
 
 Because of the write-serialization trade, reach for this with **mostly-idle fleets** — sessions that are connected but not writing continuously, which is the common shape — rather than as a default replacement for a store per session. See [Memory and Thread Tuning](/concepts/storage#memory-and-thread-tuning-sqlitestoreconfig) for measured numbers.
 
+### Account lifecycle
+
+`SqliteStore` exposes an account lifecycle API on top of its multi-account schema: enumerate the accounts in a database, allocate a new one without racing on the id, and reset or remove one atomically. Use this when your app manages several WhatsApp accounts in one database file — for example, a control-plane process that starts and stops accounts on demand.
+
+Every method routes through the same write-serialization semaphore as the rest of the store, and every mutation runs inside a `BEGIN IMMEDIATE` transaction so a partial failure never leaves an account half-created or half-deleted. `list_devices` uses the reader pool, so it doesn't queue behind writes.
+
+```rust
+pub async fn list_devices(&self) -> Result<Vec<StoredDeviceSummary>>;
+pub async fn create_sibling_device(&self) -> Result<(i32, SqliteStore)>;
+pub async fn reset_device(&self, device_id: i32) -> Result<SqliteStore>;
+pub async fn remove_device(&self, device_id: i32) -> Result<()>;
+```
+
+#### StoredDeviceSummary
+
+Returned by `list_devices`, one entry per row in `device`:
+
+```rust
+pub struct StoredDeviceSummary {
+    pub id: i32,
+    pub pn: Option<Jid>,
+    pub lid: Option<Jid>,
+    pub push_name: String,
+    pub linked: bool,
+}
+```
+
+`linked` mirrors `Device::is_registered`: the row exists from the moment `create_sibling_device` returns, but the account only counts as paired once the server has assigned it a phone number, which is what `pn` carries. An unpaired row reports `pn = None` and `linked = false`. `lid` is `None` until pairing completes as well. The type is re-exported from `whatsapp_rust_sqlite_storage`, `whatsapp_rust::store`, and the crate prelude.
+
+#### list_devices
+
+Enumerates every account row in the database, ordered by `id`. Use it at startup to discover the accounts already stored in a file, then bind each id through [`share_for_device`](#sharing-the-pool-with-sibling-devices) rather than opening a fresh store per account.
+
+```rust
+use whatsapp_rust_sqlite_storage::SqliteStore;
+
+let store = SqliteStore::new("whatsapp.db").await?;
+for account in store.list_devices().await? {
+    let session = store.share_for_device(account.id);
+    // hand `session` to your per-account client
+}
+```
+
+The method treats "the first row by id" as the primary account. If your app has a stronger rule for which account is primary, sort the returned `Vec` yourself.
+
+#### create_sibling_device
+
+Inserts a fresh, unpaired `device` row and returns its id together with a store handle already bound to it. The id comes from SQLite's `AUTOINCREMENT`, read via `last_insert_rowid()` on the same connection inside the same transaction as the insert, so two concurrent callers never receive the same id and a retry after a partial failure never leaves a second row behind.
+
+```rust
+let (id, account) = store.create_sibling_device().await?;
+assert_eq!(account.device_id(), id);
+// hand `account` to your per-account client to start pairing
+```
+
+Prefer this over the pre-existing `create_new_device` (which requires the caller to pick an id before it exists) whenever the caller doesn't already know which id it wants. The returned handle shares this store's pool, write permit, and reader pool via [`share_for_device`](#sharing-the-pool-with-sibling-devices) — see that method for what is shared and what it costs. Pairing then proceeds through the normal client flow; nothing about the account is WhatsApp-visible until you connect it.
+
+#### reset_device
+
+Wipes an account's state and starts it over under the same id, atomically. Every row in every account-scoped table (identities, sessions, prekeys, sender keys, app-state, `msg_secrets`, group metadata, pending inbound messages, sent messages, tcTokens, and the rest) is deleted, then a new `device` row is inserted with the same id and freshly generated keys. Existing `AccountId` references stay valid; state is what is discarded.
+
+```rust
+let reset = store.reset_device(id).await?;
+// `reset` is a fresh handle bound to the same id, ready to pair from zero
+```
+
+A missing account returns [`StoreError::DeviceNotFound`](#error-handling-1).
+
+<Warning>
+`reset_device` does not invalidate other handles for the same id. If a running client still holds live in-memory state for that account, its next `save` writes back onto the recreated row. Stop the account's background work (device background saver, Signal flush) before calling this — the storage layer cannot enforce it from here.
+</Warning>
+
+#### remove_device
+
+Deletes an account's state and its `device` row, atomically. Like `reset_device`, but the row does not come back and the id is retired for good: `AUTOINCREMENT` will not reissue it, so a later `create_sibling_device` can never hand back an id that once pointed at a different person.
+
+```rust
+store.remove_device(id).await?;
+```
+
+A missing account returns [`StoreError::DeviceNotFound`](#error-handling-1).
+
+<Warning>
+The same caller-side rule as `reset_device` applies: stop the account's background work before removing it, or a live handle can recreate the row on its next save.
+</Warning>
+
+Both teardown paths drive their deletes from one internal table list, so `reset_device` and `remove_device` always purge the same set of tables. Because each teardown issues one `DELETE` per account-scoped table on a `device_id` filter, cost scales with total table size, not with the account's row count — negligible on a small database, worth knowing on a very large one. This runs once per account operation and never on the message path.
+
 ### Features
 
 - **Connection pooling** - Uses Diesel r2d2 with pool size of 2
