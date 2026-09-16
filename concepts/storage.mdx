@@ -951,6 +951,34 @@ let pm2 = PersistenceManager::new(backend2).await?;
 SELECT * FROM sessions WHERE device_id = 1 AND address = ?;
 ```
 
+#### Account lifecycle API
+
+`new_for_device` opens an account whose id you already know. When your app needs to enumerate the accounts in a file, allocate a new one without racing on the id, or tear one down, use the account lifecycle API on `SqliteStore` instead:
+
+```rust
+use whatsapp_rust::store::SqliteStore;
+
+let store = SqliteStore::new("whatsapp.db").await?;
+
+// Enumerate accounts already in the file.
+for account in store.list_devices().await? {
+    let session = store.share_for_device(account.id);
+    // hand `session` to your per-account client
+}
+
+// Allocate a fresh, unpaired account. The id comes from SQLite so two
+// concurrent callers never collide, and a removed id is never reissued.
+let (new_id, new_account) = store.create_sibling_device().await?;
+
+// Wipe an account and start it over under the same id.
+let reset = store.reset_device(new_id).await?;
+
+// Delete an account for good; the id is retired.
+store.remove_device(new_id).await?;
+```
+
+`list_devices` returns [`StoredDeviceSummary`](/api/store#storeddevicesummary) rows: `id`, `pn`, `lid`, `push_name`, and a `linked` flag that is `true` only once the account is paired. `reset_device` and `remove_device` run one `BEGIN IMMEDIATE` transaction that purges every account-scoped table before recreating or deleting the `device` row, so a reader never sees a half-cleared account and a later `create_sibling_device` never inherits stale sessions from a removed one. A missing account returns [`StoreError::DeviceNotFound`](/api/store#error-handling-1). See [Account lifecycle](/api/store#account-lifecycle) for the full API and the caller-side rule about stopping background work before resetting or removing an account.
+
 ### Memory and Thread Tuning (`SqliteStoreConfig`)
 
 Each session owns its own `SqliteStore`, so the store's fixed costs (thread-pool threads, pooled connections, page cache) multiply with session count. On a host running many sessions the defaults from `SqliteStore::new` / `new_for_device` are deliberately low-memory; `SqliteStoreConfig` lets you override them when you need more throughput on a single session.
