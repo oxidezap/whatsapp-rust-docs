@@ -491,13 +491,18 @@ CREATE TABLE msg_secrets (
     msg_id TEXT NOT NULL,
     secret BLOB NOT NULL,
     device_id INTEGER NOT NULL DEFAULT 1,
-    created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
     expires_at INTEGER NOT NULL DEFAULT 0,  -- absolute unix-seconds deadline (0 = never)
     message_ts INTEGER NOT NULL DEFAULT 0,  -- parent message event time (edit-window check)
     PRIMARY KEY (chat, sender, msg_id, device_id)
 );
-CREATE INDEX idx_msg_secrets_expires ON msg_secrets (device_id, expires_at);
+CREATE INDEX idx_msg_secrets_expires
+    ON msg_secrets (device_id, expires_at)
+    WHERE expires_at <> 0;
 ```
+
+<Note>
+As of [whatsapp-rust#1504](https://github.com/oxidezap/whatsapp-rust/pull/1504), the `created_at` column is gone and the expiry index is partial. `created_at` was written on every insert and refreshed on every conflict update, but nothing ever read it — retention runs off the absolute `expires_at` deadline. Excluding never-expire rows (`expires_at = 0`) from the index matches the prune predicate and, on a database dominated by permanent rows, shrinks the index from about 4.6 MiB to about 0.34 MiB at 400k rows. Two migrations run at open, in the existing diesel harness, before the pool serves traffic; the point-lookup plan and the prune plan are unchanged. `MsgSecretEntry` never exposed `created_at`, so the Rust surface is unchanged.
+</Note>
 
 <Note>
 A custom backend only needs to implement three methods: `put_msg_secrets`, `get_msg_secret`, and `delete_expired_msg_secrets`. The other two have defaults — `put_msg_secret` delegates to `put_msg_secrets` with `expires_at = 0`, and `get_msg_secret_with_ts` pairs `get_msg_secret` with a `0` timestamp. Override `get_msg_secret_with_ts` only if your store persists `message_ts` and you want the edit-window enforced.
@@ -555,7 +560,7 @@ Added in [whatsapp-rust#1411](https://github.com/oxidezap/whatsapp-rust/pull/141
 
 As of [whatsapp-rust#1411](https://github.com/oxidezap/whatsapp-rust/pull/1411), the client drives three cadences off the keepalive tick while a connection stays up, rather than relying on reconnects to reach them:
 
-- **Retention sweeps** (`delete_expired_sent_messages`, `delete_expired_pending_inbound`, `delete_expired_base_keys`, `delete_expired_msg_secrets`) run in one task, sequentially, on every keepalive tick that already drives the cache sweep.
+- **Retention sweeps** (`delete_expired_sent_messages`, `delete_expired_pending_inbound`, `delete_expired_base_keys`, `delete_expired_msg_secrets`) run in one task, sequentially, on every keepalive tick that already drives the cache sweep. Since [whatsapp-rust#1504](https://github.com/oxidezap/whatsapp-rust/pull/1504) the same body also runs once at client startup, spawned detached from `start_services` after the store is migrated. The startup pass covers a process that opened the store without ever holding a connection (a batch job, an inspector) and would otherwise leave secrets that expired while it was closed sitting past their deadline. It skips `delete_expired_pending_inbound` on purpose: those rows are the only recoverable copy of a message whose inbound durability hook has not committed, and the server may still redeliver one — pruning them before the connection is up would ack the redelivery as a duplicate and lose the message. Each delete acquires its own write permit, so the startup and keepalive passes are safe to interleave.
 - **Session maintenance** (~6 hours) — signed pre-key rotation (see [Signed pre-key rotation (RotateKeyJob)](/advanced/signal-protocol#signed-pre-key-rotation-rotatekeyjob)) and tcToken pruning (see [Startup pruning](/api/tctoken#startup-pruning)) — previously ran only from the connect-time background init, so a session held open past their own cadences without a reconnect never reached them.
 - **Engine maintenance** (~1 hour) calls `DeviceStore::maintenance()` above.
 
@@ -777,6 +782,24 @@ When set to a non-zero value, this emits `PRAGMA mmap_size = <bytes>;`, moving r
 <Warning>
   mmap I/O covers *reads* of the main database file only. In WAL mode (this store's default), writes still go through the WAL, and a checkpoint briefly falls back to non-mmap I/O. `SqliteStore::resource_report()` (see [`DeviceStore::resource_report`](#resource_report)) does not account for `mmap_size` — with mmap enabled, some reads bypass the heap page cache it measures, so the reported estimate can overstate actual process-heap residency for that session.
 </Warning>
+
+### Opt-in incremental vacuum
+
+`SqliteStoreConfig` also exposes an opt-in `incremental_vacuum: bool` field (default `false`) plus a `incremental_vacuum_pages: u32` bound (default `400`, roughly 1.6 MiB at a 4 KiB page). Turn it on with the builder-style `with_incremental_vacuum(pages)`:
+
+```rust
+use whatsapp_rust_sqlite_storage::{SqliteStore, SqliteStoreConfig};
+
+// Reclaim up to 400 pages per maintenance pass (~1.6 MiB at 4 KiB pages).
+let config = SqliteStoreConfig::default().with_incremental_vacuum(400);
+let store = SqliteStore::with_config("whatsapp.db", config).await?;
+```
+
+When enabled, [`DeviceStore::maintenance()`](#maintenance) issues a bounded `PRAGMA incremental_vacuum(N)` on the ~1-hour engine tick, so free pages that the retention sweeps emptied return to the filesystem instead of sitting in the file's free list. `with_incremental_vacuum(0)` is the off switch: it clears the field and leaves the current `auto_vacuum` mode untouched.
+
+The store only enables `auto_vacuum = INCREMENTAL` on a brand-new empty database file, before WAL is set (WAL writes page 1, which would lock the mode in). On a database that already exists in the default mode, this flag is a no-op — switching modes requires a full `VACUUM`, which the library will never run, because the file may be shared with other tables (a rowid table, or an FTS `external-content` table) whose stable rowids a reorganization would invalidate. Consumers that need to convert an existing database run `VACUUM` themselves, when they know no reader holds a snapshot.
+
+Added in [whatsapp-rust#1504](https://github.com/oxidezap/whatsapp-rust/pull/1504).
 
 ### Connection init hook
 
