@@ -70,6 +70,7 @@
                   "advanced/wam-telemetry",
                   "advanced/inbound-durability",
                   "advanced/retry-admission",
+                  "advanced/history-sync-admission",
                   "advanced/plugins",
                   "advanced/build-flags"
                 ]
@@ -148,6 +149,7 @@
                 "group": "Changelog",
                 "pages": [
                   "changelog/overview",
+                  "changelog/2026-09-13-history-sync-admission",
                   "changelog/2026-09-09-autofix-rustfmt",
                   "changelog/2026-08-07-release-0-7-0",
                   "changelog/2026-06-15-token-tiny-map",
