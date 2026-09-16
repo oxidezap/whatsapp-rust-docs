@@ -167,6 +167,107 @@ To override the default request timeout for a single fetch, use `get_profile_pic
 The system/announcements JID (`0@s.whatsapp.net`, and its legacy form `0@c.us`) never answers this IQ, so it's short-circuited client-side: both `get_profile_picture` and `get_profile_picture_with_timeout` return `Ok(None)` immediately for it instead of waiting out the full request timeout. This mirrors WhatsApp Web, which never sends the request for this JID in the first place.
 </Note>
 
+### lookup_profile_picture
+
+Fetch a profile picture and preserve the server's outcome instead of collapsing every non-success into `None`. Use this when you need to distinguish a missing picture from a privacy block, an unchanged cache entry, or a rate-limit response.
+
+```rust
+pub async fn lookup_profile_picture(
+    &self,
+    jid: &Jid,
+    preview: bool,
+    existing_id: Option<&str>,
+) -> Result<ProfilePictureLookup, ContactError>
+```
+
+**Parameters:**
+- `jid` - Target JID (user, group, community parent, or bot)
+- `preview` - `true` for the preview thumbnail, `false` for the full-size image
+- `existing_id` - Picture ID you already hold, or `None`. When set, the server answers [`ProfilePictureLookup::Unchanged`](#profilepicturelookup) if the picture has not changed since that ID.
+
+**Returns:**
+- [`ProfilePictureLookup`](#profilepicturelookup) - Typed outcome (`Found`, `Unchanged`, `NotFound`, `NotAuthorized`, or `RateOverlimit`).
+
+A privacy token is attached automatically for user JIDs when the `PROFILE_PIC_PRIVACY_TOKEN` AB prop is enabled, the same way [`get_profile_picture`](#get_profile_picture) attaches it.
+
+**Example:**
+```rust
+use whatsapp_rust::ProfilePictureLookup;
+
+let jid: Jid = "15551234567@s.whatsapp.net".parse()?;
+
+match client.contacts().lookup_profile_picture(&jid, true, None).await? {
+    ProfilePictureLookup::Found(pic) => {
+        println!("Picture {} at {}", pic.id, pic.url);
+    }
+    ProfilePictureLookup::Unchanged => println!("Cached copy is still current"),
+    ProfilePictureLookup::NotFound => println!("No picture set"),
+    ProfilePictureLookup::NotAuthorized => println!("Privacy settings block the picture"),
+    ProfilePictureLookup::RateOverlimit => println!("Rate limit reached; back off before retrying"),
+}
+```
+
+**Conditional fetch with a cached ID:**
+```rust
+let cached_id = Some("1700000000");
+let lookup = client
+    .contacts()
+    .lookup_profile_picture(&jid, true, cached_id)
+    .await?;
+
+if lookup.is_unchanged() {
+    // Keep the cached picture; the server did not resend the payload.
+}
+```
+
+### lookup_profile_picture_with_options
+
+Fetch a profile picture with the full protocol surface: picture type, conditional cache ID, invite code, common group fallback, persona ID (for bots), and per-request timeout.
+
+```rust
+pub async fn lookup_profile_picture_with_options(
+    &self,
+    options: ProfilePictureLookupOptions<'_>,
+) -> Result<ProfilePictureLookup, ContactError>
+```
+
+**Parameters:**
+- `options` - [`ProfilePictureLookupOptions`](#profilepicturelookupoptions) built with a fluent builder
+
+**Returns:**
+- [`ProfilePictureLookup`](#profilepicturelookup)
+
+**Example — preview a group before joining, using its invite code:**
+```rust
+use whatsapp_rust::{ProfilePictureLookup, ProfilePictureLookupOptions};
+
+let group_jid: Jid = "120363012345678@g.us".parse()?;
+let options = ProfilePictureLookupOptions::new(&group_jid)
+    .preview(false)
+    .invite(Some("AbCdEfGh"));
+
+let lookup = client
+    .contacts()
+    .lookup_profile_picture_with_options(options)
+    .await?;
+
+if let Some(pic) = lookup.found() {
+    println!("Group picture: {}", pic.url);
+}
+```
+
+**Example — Meta AI bot picture keyed by persona:**
+```rust
+let bot_jid: Jid = "12345@bot".parse()?;
+let options = ProfilePictureLookupOptions::new(&bot_jid)
+    .persona_id(Some("persona-abc-123"));
+
+let lookup = client
+    .contacts()
+    .lookup_profile_picture_with_options(options)
+    .await?;
+```
+
 ### get_user_info
 
 Get user information by JID.
@@ -307,6 +408,76 @@ match client.contacts().find_by_username("example.handle", None).await? {
         println!("This account requires its username key to resolve");
     }
     UsernameLookup::NotFound => println!("No account answers to that username"),
+}
+```
+
+## Types
+
+### ProfilePictureLookup
+
+Typed outcome of a profile picture query. Returned by [`lookup_profile_picture`](#lookup_profile_picture), [`lookup_profile_picture_with_options`](#lookup_profile_picture_with_options), [`Groups::lookup_profile_picture`](/api/groups#lookup_profile_picture), and [`Groups::lookup_community_profile_picture`](/api/groups#lookup_community_profile_picture).
+
+```rust
+#[non_exhaustive]
+pub enum ProfilePictureLookup {
+    Found(ProfilePicture),
+    Unchanged,
+    NotFound,
+    NotAuthorized,
+    RateOverlimit,
+}
+```
+
+**Variants:**
+- `Found(ProfilePicture)` - Picture available. See [`ProfilePicture`](#get_profile_picture) for fields (`id`, `url`, `direct_path`, `hash`).
+- `Unchanged` - Picture has not changed since the caller's `existing_id` (server returned `304` or an empty `<iq type="result"/>`).
+- `NotFound` - No picture is set, or the entity does not exist (server returned `404` or `204`).
+- `NotAuthorized` - Privacy settings or an expired privacy token prevent viewing (server returned `401` or `403`).
+- `RateOverlimit` - Profile picture query rate limit exceeded (server returned `429`).
+
+**Methods:**
+- `found(&self) -> Option<&ProfilePicture>` - Borrow the picture on `Found`, otherwise `None`.
+- `into_found(self) -> Option<ProfilePicture>` - Consume into `Option<ProfilePicture>`, dropping non-found states. This is what [`get_profile_picture`](#get_profile_picture) uses internally.
+- `is_found(&self) -> bool`
+- `is_unchanged(&self) -> bool`
+- `is_not_found(&self) -> bool`
+- `is_not_authorized(&self) -> bool`
+- `is_rate_overlimit(&self) -> bool`
+
+### ProfilePictureLookupOptions
+
+Fluent builder for [`lookup_profile_picture_with_options`](#lookup_profile_picture_with_options).
+
+```rust
+pub struct ProfilePictureLookupOptions<'a> {
+    pub jid: &'a Jid,
+    pub picture_type: ProfilePictureType,
+    pub existing_id: Option<&'a str>,
+    pub common_gid: Option<&'a Jid>,
+    pub invite: Option<&'a str>,
+    pub persona_id: Option<&'a str>,
+    pub timeout: Option<Duration>,
+}
+```
+
+**Constructor:**
+- `ProfilePictureLookupOptions::new(jid: &Jid)` - Start from a target JID. Defaults to `ProfilePictureType::Preview` with no other options set.
+
+**Builder methods:**
+- `.preview(bool)` - `true` for the thumbnail (default), `false` for the full-size image.
+- `.picture_type(ProfilePictureType)` - Set the picture type directly (`Preview` or `Full`).
+- `.existing_id(Option<&str>)` - Cached picture ID for conditional fetch. Yields `ProfilePictureLookup::Unchanged` when the current picture matches.
+- `.common_gid(Option<&Jid>)` - A group JID shared with the contact. Only sent as a fallback when no privacy token is resolved; matches WhatsApp Web's behavior.
+- `.invite(Option<&str>)` - Group invite code, for previewing a group the caller has not joined yet.
+- `.persona_id(Option<&str>)` - Persona ID for Meta AI bot pictures.
+- `.timeout(Option<Duration>)` - Per-request timeout override; `None` uses the default.
+
+### ProfilePictureType
+
+```rust
+pub enum ProfilePictureType {
+    Preview,  // Small thumbnail (wire value: "preview")
+    Full,     // Full-size image (wire value: "image")
 }
 ```
 

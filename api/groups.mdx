@@ -1252,7 +1252,7 @@ See [`SetProfilePictureResponse`](/api/profile#setprofilepictureresponse) for th
 
 ### get_profile_pictures
 
-Batch fetch group profile pictures.
+Batch fetch group profile pictures. Each entry carries the server's per-item status code (`200`, `304` unchanged, `204` not found, `500` server error, `405` not-linked), so a caller can tell the states apart instead of only checking whether `url` is present.
 
 ```rust
 pub async fn get_profile_pictures(
@@ -1267,11 +1267,11 @@ pub async fn get_profile_pictures(
 - `picture_type` - `PictureType::Preview` for thumbnails or `PictureType::Image` for full-size
 
 **Returns:**
-- `Vec<GroupProfilePicture>` - Profile picture data for each group
+- `Vec<GroupProfilePicture>` - Profile picture data plus per-item status for each group. Use [`outcome()`](#groupprofilepicture) for a typed classification instead of branching on `status` yourself.
 
 **Example:**
 ```rust
-use whatsapp_rust::features::groups::{PictureType, GroupProfilePicture};
+use whatsapp_rust::features::groups::{GroupProfilePicture, GroupProfilePictureOutcome, PictureType};
 
 let group_jids: Vec<Jid> = vec![
     "120363012345678@g.us".parse()?,
@@ -1281,9 +1281,92 @@ let group_jids: Vec<Jid> = vec![
 let pictures = client.groups().get_profile_pictures(group_jids, PictureType::Preview).await?;
 
 for pic in pictures {
-    if let Some(url) = &pic.url {
-        println!("Group {}: {}", pic.group_jid, url);
+    match pic.outcome() {
+        GroupProfilePictureOutcome::Found { url, .. } => {
+            println!("Group {}: {}", pic.group_jid, url);
+        }
+        GroupProfilePictureOutcome::Unchanged => {
+            println!("Group {}: cached copy is still current", pic.group_jid);
+        }
+        GroupProfilePictureOutcome::NotFound => {
+            println!("Group {}: no picture set", pic.group_jid);
+        }
+        GroupProfilePictureOutcome::Error { code } => {
+            println!("Group {}: server error {}", pic.group_jid, code);
+        }
     }
+}
+```
+
+### lookup_profile_picture
+
+Fetch a single group's profile picture and preserve the server's outcome instead of collapsing every non-success into `None`. Mirrors [`Contacts::lookup_profile_picture`](/api/contacts#lookup_profile_picture) for group JIDs.
+
+```rust
+pub async fn lookup_profile_picture(
+    &self,
+    group_jid: &Jid,
+    preview: bool,
+    existing_id: Option<&str>,
+) -> Result<ProfilePictureLookup, GroupError>
+```
+
+**Parameters:**
+- `group_jid` - Group JID (must end with `@g.us`)
+- `preview` - `true` for the preview thumbnail, `false` for the full-size image
+- `existing_id` - Picture ID you already hold, or `None`. When set, the server returns [`ProfilePictureLookup::Unchanged`](/api/contacts#profilepicturelookup) if the picture has not changed.
+
+**Returns:**
+- [`ProfilePictureLookup`](/api/contacts#profilepicturelookup) - Typed outcome (`Found`, `Unchanged`, `NotFound`, `NotAuthorized`, or `RateOverlimit`).
+
+**Example:**
+```rust
+use whatsapp_rust::ProfilePictureLookup;
+
+let group_jid: Jid = "120363012345678@g.us".parse()?;
+
+match client.groups().lookup_profile_picture(&group_jid, true, None).await? {
+    ProfilePictureLookup::Found(pic) => println!("Group picture: {}", pic.url),
+    ProfilePictureLookup::Unchanged => println!("Cached copy is still current"),
+    ProfilePictureLookup::NotFound => println!("Group has no picture"),
+    ProfilePictureLookup::NotAuthorized => println!("Not allowed to view this picture"),
+    ProfilePictureLookup::RateOverlimit => println!("Rate limit reached; back off before retrying"),
+}
+```
+
+### lookup_community_profile_picture
+
+Fetch a community parent group's profile picture. Communities use the group (`w:g2`) IQ addressed directly to the community JID, which is different from the per-contact/group profile IQ used by [`lookup_profile_picture`](#lookup_profile_picture) — this method sends the community-shaped request.
+
+```rust
+pub async fn lookup_community_profile_picture(
+    &self,
+    community_jid: &Jid,
+    preview: bool,
+    existing_id: Option<&str>,
+) -> Result<ProfilePictureLookup, GroupError>
+```
+
+**Parameters:**
+- `community_jid` - Community parent group JID
+- `preview` - `true` for the preview thumbnail, `false` for the full-size image
+- `existing_id` - Picture ID you already hold, or `None` for an unconditional fetch
+
+**Returns:**
+- [`ProfilePictureLookup`](/api/contacts#profilepicturelookup)
+
+**Example:**
+```rust
+use whatsapp_rust::ProfilePictureLookup;
+
+let community_jid: Jid = "120363012345678@g.us".parse()?;
+
+if let ProfilePictureLookup::Found(pic) = client
+    .groups()
+    .lookup_community_profile_picture(&community_jid, false, None)
+    .await?
+{
+    println!("Community picture: {}", pic.url);
 }
 ```
 
@@ -1688,7 +1771,7 @@ pub enum PictureType {
 
 ### GroupProfilePicture
 
-A single group profile picture result from a batch query.
+A single group profile picture result from a batch [`get_profile_pictures`](#get_profile_pictures) query.
 
 ```rust
 pub struct GroupProfilePicture {
@@ -1696,8 +1779,45 @@ pub struct GroupProfilePicture {
     pub url: Option<String>,
     pub direct_path: Option<String>,
     pub photo_id: Option<String>,
+    pub status: Option<u16>,
 }
 ```
+
+**Fields:**
+- `group_jid` - The group this entry describes.
+- `url` - Direct URL to the picture, when present.
+- `direct_path` - Direct path for media download.
+- `photo_id` - Picture ID / version tag, for use as `existing_id` on a later conditional fetch.
+- `status` - HTTP-like status the server returned for this entry (e.g. `200`, `304`, `204`, `500`, `405`).
+
+**Methods:**
+- `outcome(&self) -> GroupProfilePictureOutcome` - Classify this entry into a typed [`GroupProfilePictureOutcome`](#groupprofilepictureoutcome). Prefer this over inspecting `status` directly.
+- `is_found(&self) -> bool` - Convenience for `url.is_some()`.
+- `is_unchanged(&self) -> bool` - `status == Some(304)`.
+- `is_not_found(&self) -> bool` - `status == Some(204)`.
+
+### GroupProfilePictureOutcome
+
+Typed classification of a [`GroupProfilePicture`](#groupprofilepicture) entry returned by [`get_profile_pictures`](#get_profile_pictures).
+
+```rust
+pub enum GroupProfilePictureOutcome {
+    Found {
+        url: String,
+        direct_path: Option<String>,
+        photo_id: Option<String>,
+    },
+    Unchanged,
+    NotFound,
+    Error { code: u16 },
+}
+```
+
+**Variants:**
+- `Found { .. }` - Picture available for this group.
+- `Unchanged` - Cached picture is still current (server status `304`).
+- `NotFound` - No picture set for this group (server status `204`, or a response with no URL).
+- `Error { code }` - Server error for this entry, e.g. `500` (server error) or `405` (not a linked group).
 
 ### CreateGroupResult
 
