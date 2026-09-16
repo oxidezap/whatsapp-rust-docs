@@ -1379,10 +1379,37 @@ pub trait OriginalMessageResolver: Send + Sync {
         sender: &str,
         msg_id: &str,
     ) -> Option<[u8; 32]>;
+
+    /// Metadata-carrying variant. Override this to return the parent
+    /// message's event time so the receive path can enforce the
+    /// 20-minute edit-processing window. Defaulted to the plain
+    /// secret with an unknown timestamp, so an existing implementation
+    /// keeps compiling and keeps the historical permissive behavior.
+    async fn resolve_msg_secret_with_metadata(
+        &self,
+        chat: &str,
+        sender: &str,
+        msg_id: &str,
+    ) -> Option<ResolvedMessageSecret> {
+        self.resolve_msg_secret(chat, sender, msg_id)
+            .await
+            .map(ResolvedMessageSecret::without_timestamp)
+    }
+}
+
+pub struct ResolvedMessageSecret {
+    pub secret: [u8; 32],
+    /// Parent message event time (unix seconds). `Some` enables the
+    /// edit-window check; `None` leaves it unenforced.
+    pub message_ts: Option<i64>,
 }
 ```
 
 It is consulted only after the in-core [`MsgSecretStore`](/api/store#msgsecretstore) and the LID/PN alternate lookups miss.
+
+<Note>
+`resolve_msg_secret_with_metadata` was added in [whatsapp-rust#1504](https://github.com/oxidezap/whatsapp-rust/pull/1504). Override it (not `resolve_msg_secret`) if your store tracks the parent message's timestamp — a `Some(message_ts)` return lets the receive path apply the same `editTs < message_ts + EDIT_PROCESSING_WINDOW_SECS` check that a store row uses, so a stale edit that WhatsApp Web would drop is dropped here too. A resolver that implements only `resolve_msg_secret` keeps working and stays permissive; the app-supplied timestamp is only checked when you provide one.
+</Note>
 
 <Note>
 `MsgSecretPolicy`, `MsgSecretRetention`, and `OriginalMessageResolver` are re-exported from the crate root (`whatsapp_rust::{MsgSecretPolicy, MsgSecretRetention, OriginalMessageResolver}`). The default `Managed` policy is bounded and needs no tuning for most apps.
