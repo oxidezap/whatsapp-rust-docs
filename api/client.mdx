@@ -851,6 +851,8 @@ Access group management operations.
 - `acknowledge(jid: &Jid)` - Acknowledge a group
 - `batch_get_info(jids: Vec<Jid>)` - Batch fetch group metadata for multiple groups
 - `get_profile_pictures(group_jids: Vec<Jid>, picture_type: PictureType)` - Batch fetch group profile pictures
+- `lookup_profile_picture(group_jid: &Jid, preview: bool, existing_id: Option<&str>)` - Fetch one group's picture with a typed outcome (`Found`, `Unchanged`, `NotFound`, `NotAuthorized`, `RateOverlimit`)
+- `lookup_community_profile_picture(community_jid: &Jid, preview: bool, existing_id: Option<&str>)` - Fetch a community parent group's picture over the community protocol
 
 **Example:**
 ```rust
@@ -927,6 +929,8 @@ Access contact operations.
 - `is_on_whatsapp(jids: &[Jid])` - Check if JIDs are registered on WhatsApp (supports PN and LID JIDs)
 - `get_user_info(jids: &[Jid])` - Get profile info for users by JID
 - `get_profile_picture(jid: &Jid, preview: bool)` - Get profile picture URL (preview or full size)
+- `lookup_profile_picture(jid: &Jid, preview: bool, existing_id: Option<&str>)` - Same fetch, but with a typed [`ProfilePictureLookup`](/api/contacts#profilepicturelookup) outcome instead of `Option`
+- `lookup_profile_picture_with_options(options: ProfilePictureLookupOptions<'_>)` - Full protocol surface: cache ID, group invite code, common group fallback, bot persona ID, timeout
 
 ### tc_token
 
