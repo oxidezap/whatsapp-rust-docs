@@ -1803,6 +1803,111 @@ Fire-and-forget: the primary's reply arrives later as an ordinary peer message a
   App-state collection name (e.g. `"regular"`, `"regular_low"`). Refused with an `Err` for `"critical_block"` (never recovered this way — rebuilding the block list from a possibly-behind primary risks messaging someone who was blocked) and for any name this client doesn't recognize. Also refused when the account has the `enable_peer_snapshot_recovery` ab-prop explicitly turned off.
 </ParamField>
 
+### resync_app_state
+
+Ask the server to re-sync one or more app-state collections. Every other app-state sync in the client is raised by the server (bootstrap, `server_sync` notifications, dirty bits). This is the escape hatch a consumer raises itself when its own mirror of chat metadata (mutes, pins, archives, contacts, labels, locks) has drifted from the server's copy.
+
+```rust
+pub async fn resync_app_state(
+    &self,
+    collections: impl IntoIterator<Item = WAPatchName>,
+    mode: AppStateResyncMode,
+) -> Result<AppStateResyncReport, AppStateError>
+```
+
+<ParamField path="collections" type="impl IntoIterator<Item = WAPatchName>" required>
+  The collections to re-sync. Duplicates are asked for once. An empty iterator is a no-op and never reaches the wire. Passing `WAPatchName::Unknown` returns `AppStateError::InvalidRequest`.
+</ParamField>
+
+<ParamField path="mode" type="AppStateResyncMode" required>
+  `Incremental` asks for patches recorded after the persisted version — the cheap repair for when the client's own store is behind. `Snapshot` discards what is stored and rebuilds the collection from the server's snapshot, replaying every mutation the server still holds with `from_full_sync: true`. Use `Snapshot` when a consumer's mirror drifted from the client's store (a handler that failed, an event dropped on a full mailbox, a database restored behind the client's). See [Consumer replay caveats](#consumer-replay-caveats) below.
+</ParamField>
+
+**Returns:** [`AppStateResyncReport`](#appstateresyncreport), which reports per-collection outcome (`synced`, `fatal`, `retryable`, `skipped`). `Err` is reserved for the request never reaching the server at all (`NotConnected`, `Internal`, `InvalidRequest`).
+
+**Example:**
+```rust
+use whatsapp_rust::{AppStateResyncMode, WAPatchName};
+
+let report = client
+    .resync_app_state([WAPatchName::Regular], AppStateResyncMode::Incremental)
+    .await?;
+if !report.all_synced() {
+    println!("still stale: {:?}", report.unsynced().collect::<Vec<_>>());
+}
+```
+
+<Note>
+This waits for a usable connection before asking anything, bounded only by the client's lifetime. Bound it with a timeout if a caller must, but bound the *wait*, not the whole call: dropping the future once a response is being applied cancels between the writes that replace a collection's baseline. Nothing is lost that a later sync cannot rebuild, but a cancelled apply is not a clean stop.
+
+`resync_app_state` does not retry on its own. What a run left `retryable` comes back in the report; re-asking in a tight loop is how a client earns a 403. Space attempts out, and treat `fatal` as an answer rather than as a failure to retry.
+</Note>
+
+### resync_app_state_collection
+
+Convenience wrapper around [`resync_app_state`](#resync_app_state) for the common case: replay one collection from the beginning by discarding the stored version and rerunning the full sync.
+
+```rust
+pub async fn resync_app_state_collection(
+    &self,
+    name: WAPatchName,
+) -> Result<AppStateResyncReport, AppStateError>
+```
+
+Equivalent to `resync_app_state([name], AppStateResyncMode::Snapshot)`.
+
+<ParamField path="name" type="WAPatchName" required>
+  The collection to replay. Passing `WAPatchName::Unknown` returns `AppStateError::InvalidRequest`.
+</ParamField>
+
+**When to use it:**
+- A consumer added a handler for an event kind (for example, [`LockChatUpdate`](/concepts/events#lockchatupdate)) it did not have before, and needs to replay past mutations the server still holds — an incremental sync alone would send nothing, because the client's store is already up to date.
+- A local mirror was rebuilt from scratch or restored from a backup and needs the server's snapshot to reseed it.
+
+**Example:**
+```rust
+use whatsapp_rust::WAPatchName;
+
+// Replay every mutation in regular_low, including locks recorded on the phone
+// before the consumer could handle them.
+let report = client
+    .resync_app_state_collection(WAPatchName::RegularLow)
+    .await?;
+```
+
+#### Consumer replay caveats
+
+A snapshot **replays; it does not reconcile.** The response carries what the collection holds *now*, and every record is dispatched as a fresh mutation with `from_full_sync: true` and the original server timestamp. Nothing is dispatched for a record the server no longer has, so a consumer's mirror that carries a contact, label, mute, or lock the server has since deleted still carries it afterwards.
+
+Consequences a consumer must plan for:
+
+- **Be idempotent and order-guarded.** The replay may re-deliver mutations the consumer already applied.
+- **Clear before replay** if the goal is to purge records the server dropped. Empty the local mirror of the collection first, then call `resync_app_state_collection`.
+- **Report is about the sync, not the mirror.** A collection reported `synced` only guarantees the server response was fetched, applied, and persisted, and mutations were dispatched to the event bus. It does not mean handlers have run. Under [`EventDelivery::Ordered`](/api/bot#eventdelivery), a full mailbox can drop callbacks.
+
+#### AppStateResyncReport
+
+```rust
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct AppStateResyncReport {
+    /// Fetched, applied, and persisted.
+    pub synced: Vec<WAPatchName>,
+    /// Server refused outright (400/404). Retrying gets the same answer.
+    pub fatal: Vec<WAPatchName>,
+    /// Not synced, but a later attempt can succeed: retryable server error,
+    /// a snapshot the response did not carry, a missing decode key, a writer
+    /// that held the collection past the wait, connection lost mid-run, or
+    /// the pagination cap.
+    pub retryable: Vec<WAPatchName>,
+    /// Another sync was already fetching the collection. Empty in practice
+    /// for this call, which waits for a holder rather than standing down.
+    pub skipped: Vec<WAPatchName>,
+}
+```
+
+Helpers: `all_synced()` returns `true` when every requested collection came back `synced`; `unsynced()` iterates every collection that was not synced, whatever the reason.
+
 ---
 
 ## Protocol Operations

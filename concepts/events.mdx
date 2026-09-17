@@ -186,6 +186,7 @@ pub enum Event {
     LabelAssociationUpdate(LabelAssociationUpdate),
     MessageLabelAssociationUpdate(MessageLabelAssociationUpdate),
     QuickReplyUpdate(QuickReplyUpdate),
+    LockChatUpdate(LockChatUpdate),
 
     // History Sync
     HistorySync(Box<LazyHistorySync>),
@@ -1893,6 +1894,23 @@ pub struct MuteUpdate {
     pub from_full_sync: bool,
 }
 ```
+
+### LockChatUpdate
+
+**Emitted:** When a chat is moved into or out of the hidden "locked chats" folder on another linked device, or replayed during a snapshot resync.
+
+```rust
+#[derive(Debug, Clone, Serialize, bon::Builder)]
+#[non_exhaustive]
+pub struct LockChatUpdate {
+    pub jid: Jid,
+    pub timestamp: DateTime<Utc>,
+    pub action: Box<wa::sync_action_value::LockChatAction>,
+    pub from_full_sync: bool,
+}
+```
+
+Chat lock is the account-wide toggle for WhatsApp's locked-chats folder on the primary device. Only the lock state syncs; message content and keys never leave the device. See [Chat actions — Lock chat](/api/chat-actions#lock-chat) for the outbound API (`lock_chat`, `unlock_chat`).
 
 ### ArchiveUpdate
 

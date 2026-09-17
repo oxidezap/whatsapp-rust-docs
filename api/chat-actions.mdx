@@ -167,6 +167,45 @@ pub async fn unmute_chat(&self, jid: &Jid) -> Result<(), AppStateError>
 client.chat_actions().unmute_chat(&jid).await?;
 ```
 
+## Lock chat
+
+Chat lock moves a chat into the account's hidden "locked chats" folder on the primary device. Only the lock state syncs across linked devices; no message content or key leaves the device. Use these methods to surface WhatsApp's locked-chats folder in your own client (for example, to hide the chat from the main list, search, and unread badge).
+
+### lock_chat
+
+Move a chat into the locked-chats folder.
+
+```rust
+pub async fn lock_chat(&self, jid: &Jid) -> Result<(), AppStateError>
+```
+
+**Parameters:**
+- `jid` - The chat JID to lock
+
+**Example:**
+```rust
+let jid: Jid = "15551234567@s.whatsapp.net".parse()?;
+client.chat_actions().lock_chat(&jid).await?;
+```
+
+### unlock_chat
+
+Remove a chat from the locked-chats folder.
+
+```rust
+pub async fn unlock_chat(&self, jid: &Jid) -> Result<(), AppStateError>
+```
+
+**Parameters:**
+- `jid` - The chat JID to unlock
+
+**Example:**
+```rust
+client.chat_actions().unlock_chat(&jid).await?;
+```
+
+A lock change on another linked device arrives as an [`Event::LockChatUpdate`](/concepts/events#lockchatupdate).
+
 ## Star messages
 
 ### star_message
@@ -593,6 +632,7 @@ All chat actions are synced across devices using WhatsApp's app state synchroniz
 | Pin | `regular_low` |
 | Mark chat as read | `regular_low` |
 | Mute | `regular_high` |
+| Lock chat | `regular_low` |
 | Star | `regular_high` |
 | Delete chat | `regular_high` |
 | Delete message for me | `regular_high` |
@@ -620,6 +660,9 @@ use wacore::types::events::Event;
     match &*event {
         Event::MuteUpdate(update) => {
             println!("Chat {} muted: {:?}", update.jid, update.action.muted);
+        }
+        Event::LockChatUpdate(update) => {
+            println!("Chat {} locked: {:?}", update.jid, update.action.locked);
         }
         Event::PinUpdate(update) => {
             println!("Chat {} pinned: {:?}", update.jid, update.action.pinned);
