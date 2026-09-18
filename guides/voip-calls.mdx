@@ -49,11 +49,17 @@ tokio = { version = "1.53", features = ["macros", "rt-multi-thread"] }
   [PR #1498](https://github.com/oxidezap/whatsapp-rust/pull/1498) added `CallHandle::resume_video(source, sink)` and `CallHandle::video_states()`, and made `start_video`'s 5-second timeout direction-aware: an unanswerable request against a peer that's already video now stands only our direction down instead of killing the call. The exact timeout is also published as `voip::VIDEO_UPGRADE_TIMEOUT`. See [Video I/O](#video-io) below.
 </Note>
 
+<Note>
+  [PR #1509](https://github.com/oxidezap/whatsapp-rust/pull/1509) split the media engine from the control plane behind a neutral contract, added the `voip-control` and `voip-engine-wacore` features, and exposed [`ClientBuilder::with_voip_media_backend`](#pluggable-media-backend) so a call can run on a foreign media backend instead of the resident engine. Existing `voip-*` builds behave the same — every codec profile still pulls the resident engine in through the new composition. See [Pluggable media backend](#pluggable-media-backend) below.
+</Note>
+
 `voip` is a backward-compatible aggregate for `voip-mlow` + `voip-libopus` + `voip-relay-native` — both codec adapters plus the native relay dialer, linked in. If you only need one codec, exchange codec packets with an external encoder/decoder, or supply your own way onto the media wire, pick narrower features instead:
 
 | Feature | Contents |
 |---------|----------|
-| `voip-runtime` | The portable half: call signaling, the facade, `CallHandle`, and the orchestration around `wacore`'s sans-IO engine. Owns no socket and reads no clock, so it builds on `wasm32` too — and no longer pulls in `tokio-runtime`. No audio codec, and no way onto the media wire by itself; you'll normally reach for `voip-encoded` or a codec feature below instead of naming this one directly |
+| `voip-control` | The neutral control-plane media contract, re-exported as `whatsapp_rust::voip_control`. Compiles the call flow — signaling, facade, `CallHandle`, registry — with no media engine linked. The contract is what a media backend implements; a `voip-control`-only build with no backend injected reports the typed `MediaSetupError::NoBackend` when a call tries to start media, never a panic or silent no-op. See [Pluggable media backend](#pluggable-media-backend) |
+| `voip-engine-wacore` | The resident media backend that implements `voip-control`'s traits on top of `wacore`'s `CallEngine`. Composed automatically by every `voip-*` codec feature below, so an existing call profile keeps the engine it always had. Name it directly only when you want the resident engine without either bundled codec adapter |
+| `voip-runtime` | Composition of `voip-control` + `voip-engine-wacore`. Owns no socket and reads no clock, so it builds on `wasm32` too — and no longer pulls in `tokio-runtime`. No audio codec, and no way onto the media wire by itself; you'll normally reach for `voip-encoded` or a codec feature below instead of naming this one directly |
 | `voip-relay-native` | The native relay media transport: one UDP socket per call, DTLS, SCTP, and the pre-negotiated DataChannel over them. This is the half that cannot build on `wasm32`/`espidf` — a `compile_error!` now lives here rather than across the whole profile. Skip it and install your own [`RelayTransportProvider`](#custom-relay-transport) wherever you have no UDP socket, a browser above all |
 | `voip-encoded` | `voip-runtime` plus the encoded-audio boundary (`encoded_audio`, `AudioFormat`) — bring your own codec. Does **not** pull in `voip-relay-native` |
 | `voip-mlow` | `voip-runtime` plus the bundled pure-Rust MLOW adapter. Does **not** pull in `voip-relay-native` |
@@ -721,6 +727,53 @@ The core `CallEngine` lives in `wacore` and is **sans-IO** — it owns no socket
 
 <Note>
   Building `whatsapp-rust` itself (not just `wacore`) for `wasm32` also needs `default-features = false`: the crate's defaults (`tokio-native`, `sqlite-storage`, `tokio-transport`, `ureq-client`, `signal`) assume a native multi-threaded runtime, SQLite storage, and a native HTTP client, none of which build on `wasm32-unknown-unknown`. `cargo check -p whatsapp-rust --lib --target wasm32-unknown-unknown --no-default-features --features voip-mlow` is exactly the check this PR added to CI — mirror both flags in your own `Cargo.toml`, e.g. `whatsapp-rust = { version = "0.7", default-features = false, features = ["voip-mlow"] }`, and supply your own storage/transport/HTTP implementations in their place.
+</Note>
+
+### Pluggable media backend
+
+[PR #1509](https://github.com/oxidezap/whatsapp-rust/pull/1509) separated the control plane from the media engine behind a neutral contract. The call registry stores an `Arc<dyn VoipMediaSession>`; it never names an engine type. A `VoipMediaBackend` is what a call reserves and opens a session from — the resident engine is one implementation of that trait, and you can supply another.
+
+Reach for this in two cases:
+
+- **Ship the call flow without the resident engine.** The `voip-control` feature compiles signaling, the facade, `CallHandle`, and the registry, and links no `wacore::voip` symbols. That is the build for a browser or embedded target that has its own media stack (a WASM engine, a native FFI codec/transport, an out-of-process daemon) and wants to route media through it instead of the resident `CallEngine`.
+- **Compose with the resident engine still in.** The `voip-engine-wacore` feature adds `WacoreVoipMediaBackend` on top and is what every codec profile (`voip-mlow`, `voip-libopus`, `voip`) enables automatically. Existing builds keep the resident engine as the default backend; call `with_voip_media_backend` only to override it.
+
+Install a backend on the builder:
+
+```rust
+use std::sync::Arc;
+use whatsapp_rust::Client;
+use whatsapp_rust::voip_control::{
+    MediaCommand, MediaEvent, MediaSessionSpec, MediaSetupError,
+    VoipMediaBackend, VoipMediaSession,
+};
+
+struct MyBackend { /* engine handle, transport, whatever the platform needs */ }
+
+// Trait signatures use `#[async_trait]` — mirror the same cfg the trait uses so
+// a wasm32 backend built around !Send handles compiles too.
+#[cfg_attr(target_arch = "wasm32", whatsapp_rust::async_trait(?Send))]
+#[cfg_attr(not(target_arch = "wasm32"), whatsapp_rust::async_trait)]
+impl VoipMediaBackend for MyBackend {
+    // Implement reserve/open/submit/stats/subscribe/close against the neutral
+    // MediaCommand / MediaEvent / MediaStats types re-exported above — no
+    // `wacore::voip` type appears in any signature.
+    // ...
+}
+
+let client = Client::builder()
+    // ...
+    .with_voip_media_backend(MyBackend { /* ... */ })
+    .build()
+    .await?;
+```
+
+`whatsapp_rust::voip_control` re-exports every trait, command, event, spec, and port a backend implementation names — including `MediaSessionSpec`, `MediaCommand`, `MediaEvent`, `MediaStats`, `MediaOpenContext`, `MediaAudioPorts`, `MediaVideoChannels`, and `MediaSetupError` — so an external backend crate imports only from `whatsapp_rust::voip_control` and does not need `wacore` in its dependency tree.
+
+A backend is installed at most once per client. Calling `with_voip_media_backend` twice, or building a `voip-engine-wacore` client that already has the resident backend and passing another, fails the builder with `ClientBuilderError::VoipMediaBackendAlreadyInstalled`. On a `voip-control`-only build with no backend supplied, starting media fails each call with `MediaSetupError::NoBackend` — a typed refusal, not a panic, and observable on the handle just like any other setup failure.
+
+<Note>
+  The resident backend (`WacoreVoipMediaBackend`) is the default on any `voip-engine-wacore` build and needs no explicit `with_voip_media_backend` call to be wired in. Every observable of an existing VoIP client is unchanged by the split: the engine is constructed with the same config, driven by the same `run_call`, and events reach `CallHandle::events()` on the same stream. Relay-connect failures still surface as `CallError::Connect` (now via `MediaSetupError::Connect`) and everything else as `CallError::Setup`.
 </Note>
 
 ### Custom relay transport

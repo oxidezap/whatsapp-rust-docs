@@ -1,0 +1,31 @@
+---
+title: "September 18, 2026 — Pluggable VoIP media backend"
+description: "Split the VoIP control plane from the resident media engine behind a neutral contract. New voip-control / voip-engine-wacore features. Existing voip-* builds behave the same."
+---
+
+## Features
+
+**Pluggable media backend behind a neutral contract ([#1509](https://github.com/oxidezap/whatsapp-rust/pull/1509))**
+
+The call flow (signaling, facade, `CallHandle`, registry) and the media engine (`wacore::voip::CallEngine`) are now separated by a neutral trait contract, `whatsapp_rust::voip_control`. The registry stores an `Arc<dyn VoipMediaSession>` and never names an engine type. That opens two new build shapes:
+
+- **`voip-control`** — compiles the whole call flow with **no media engine linked**. A `voip-control`-only build with no backend injected fails each media start with the typed `MediaSetupError::NoBackend`, never a panic or silent no-op.
+- **`voip-engine-wacore`** — the resident backend that implements the contract on top of `wacore::voip::CallEngine`. Composed automatically by every codec profile (`voip-mlow`, `voip-libopus`, `voip`), so existing VoIP clients ship the engine as their default backend with no code changes.
+
+Install a foreign backend on the builder:
+
+```rust
+use whatsapp_rust::voip_control::{VoipMediaBackend, VoipMediaSession};
+
+let client = Client::builder()
+    // ...
+    .with_voip_media_backend(MyBackend::new())
+    .build()
+    .await?;
+```
+
+`whatsapp_rust::voip_control` re-exports every trait, command, event, spec, and port a backend implementation names, so an external backend crate imports only from `whatsapp_rust::voip_control` and does not need `wacore` in its dependency tree. Calling `with_voip_media_backend` twice, or overriding the default resident backend with another, returns `ClientBuilderError::VoipMediaBackendAlreadyInstalled`.
+
+`voip-runtime` now means the composition of `voip-control` + `voip-engine-wacore` — every `voip-*` codec feature already includes both, so a Cargo.toml that names one of the codec features (or the `voip` aggregate) needs no update. Observable behavior for existing VoIP users does not change: the engine is constructed with the same config, driven by the same `run_call`, and events reach `CallHandle::events()` on the same stream, with the same pairing. Relay-connect failures surface as `CallError::Connect` (through the new `MediaSetupError::Connect`) and everything else as `CallError::Setup`.
+
+See [VoIP Calls — Pluggable media backend](/guides/voip-calls#pluggable-media-backend) for the full walkthrough and the updated [Feature flags](/installation#feature-flags) table.
