@@ -149,6 +149,7 @@
                 "group": "Changelog",
                 "pages": [
                   "changelog/overview",
+                  "changelog/2026-09-18-voip-pluggable-media-backend",
                   "changelog/2026-09-13-history-sync-admission",
                   "changelog/2026-09-09-autofix-rustfmt",
                   "changelog/2026-08-07-release-0-7-0",
