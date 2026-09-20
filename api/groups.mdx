@@ -16,15 +16,16 @@ let groups = client.groups();
 ## Methods
 
 <Tip>
-The public group surface is split into three, purpose-built views. Pick based on what you're doing with the result:
+The public group surface is split into purpose-built views. Pick based on what you're doing with the result:
 
 | API | Returns | Use for |
 |---|---|---|
 | [`list_participating`](#list_participating) | `Vec<GroupOverview>` — id, subject, [hierarchy](#grouphierarchy), participant count | Populating a chat list, browsing the account's groups |
 | [`fetch_overviews`](#fetch_overviews) | `Vec<GroupOverviewResult>` for a chosen subset | Refreshing a known set of chats without pulling every participant |
 | [`fetch_metadata`](#fetch_metadata) | `GroupMetadata` — full state, participants, settings | Displaying or auditing a single group |
+| [`routing_info`](#routing_info) | `Arc<GroupRoutingInfo>` — participants, addressing mode, LID/PN map | Reading the cached participant roster used by the send path |
 
-Routing snapshots used by the send path (the old `GroupInfo` cache) are now internal — you never call them directly. Sending a message consults them for you.
+Sending a message consults the routing cache for you. Call [`routing_info`](#routing_info) directly only when you need to inspect the participant list the send path will use — for example, to render a roster without paying for the full `fetch_metadata` payload.
 </Tip>
 
 ### list_participating
@@ -128,6 +129,44 @@ for participant in &metadata.participants {
         .map(|jid| jid.to_string())
         .unwrap_or_else(|| "(unknown)".to_string());
     println!("{} -> {display_pn}", participant.jid);
+}
+```
+
+### routing_info
+
+Return the cached, send-oriented routing view of a group.
+
+```rust
+pub async fn routing_info(&self, jid: &Jid) -> Result<Arc<GroupRoutingInfo>, GroupError>
+```
+
+**Parameters:**
+- `jid` — Group JID (must end with `@g.us`).
+
+**Returns:**
+- `Arc<GroupRoutingInfo>` — the slim view the encryption path uses: participant JIDs, [`AddressingMode`](#addressingmode), the LID/PN mapping, and whether the group is a community announcement group. See [`GroupRoutingInfo`](#grouproutinginfo) for the full shape.
+
+`routing_info` is cache-preferred. A warm entry returns immediately with no I/O. A cache miss sends one IQ request with the persisted participant phash, so an unchanged group costs a `not-modified` response instead of a full metadata download. The returned `Arc` is the same allocation the send path uses, so repeated calls on a warm group are effectively free.
+
+Prefer this over [`fetch_metadata`](#fetch_metadata) when you only need the participant roster the send path will use — for example, when rebuilding a client-side participant list after a reconnect. Use [`fetch_metadata`](#fetch_metadata) for user-facing fields (subject, description, admin roles, group settings), which `GroupRoutingInfo` does not carry.
+
+To force a fresh network read, call [`fetch_metadata`](#fetch_metadata) instead. The send path controls its own refresh policy through [`Freshness`](#freshness); the public `routing_info` is always cache-preferred.
+
+**Example:**
+```rust
+use std::sync::Arc;
+use whatsapp_rust::Jid;
+use wacore::client::context::GroupRoutingInfo;
+
+let group_jid: Jid = "123456789@g.us".parse()?;
+let routing: Arc<GroupRoutingInfo> = client.groups().routing_info(&group_jid).await?;
+
+println!("Addressing: {:?}", routing.addressing_mode);
+println!("{} participants", routing.participants.len());
+
+// Resolve a LID to the mapped phone-number JID (LID-addressed groups only).
+if let Some(pn) = routing.phone_jid_for_lid_user("1234567890") {
+    println!("LID maps to {pn}");
 }
 ```
 
@@ -1802,6 +1841,26 @@ pub enum AddressingMode {
     Lid,  // LID (privacy) addressing
 }
 ```
+
+### GroupRoutingInfo
+
+Send-oriented view of a group. Returned by [`routing_info`](#routing_info) as an `Arc` shared with the send path. Imported from `wacore::client::context::GroupRoutingInfo`.
+
+```rust
+pub struct GroupRoutingInfo {
+    pub participants: Vec<Jid>,
+    pub addressing_mode: AddressingMode,
+    /// `None` when the persisted snapshot predates the field.
+    pub is_community_announce: Option<bool>,
+    // LID/PN mapping is private; use the accessors below.
+}
+```
+
+**Accessors:**
+- `phone_jid_for_lid_user(&self, lid_user: &str) -> Option<&Jid>` — resolve a LID user part to the mapped phone-number JID. Returns `None` for `Pn`-addressed groups and for LIDs the server has not mapped yet.
+- `lid_user_for_phone_user(&self, phone_user: &str) -> Option<&CompactString>` — reverse lookup, keyed by the phone-number user part.
+
+Carries only what the encryption path needs. User-facing fields (subject, description, admin roles, group settings) live on [`GroupMetadata`](#groupmetadata-fields-reference). See [Cache and storage](/concepts/storage) for how the routing cache is stored and invalidated.
 
 ### GroupMetadataResult
 
