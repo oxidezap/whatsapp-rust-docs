@@ -817,9 +817,10 @@ pub fn groups(&self) -> Groups<'_>
 Access group management operations.
 
 **Methods:**
-- `query_info(jid: &Jid)` - Get cached group info
-- `get_metadata(jid: &Jid)` - Fetch group metadata from server
-- `get_participating()` - List all groups you're in
+- `list_participating()` - List all groups you're in as slim `GroupOverview` records
+- `fetch_overviews(jids: &[Jid])` - Batch fetch slim `GroupOverview` records for a chosen subset
+- `fetch_metadata(jid: &Jid)` - Fetch full group metadata from server
+- `resolve_participant_addresses(&mut GroupMetadata)` - Opt-in LID → PN backfill on fetched metadata
 - `create_group(options: GroupCreateOptions)` - Create a new group
 - `set_subject(jid: &Jid, subject: GroupSubject)` - Change group name
 - `set_description(jid: &Jid, desc: Option<GroupDescription>, prev: PreviousDescription<'_>)` - Change description; `prev` is an optimistic-concurrency token ([`PreviousDescription::Resolve`](/api/groups#previousdescription) reads the current one for you)
@@ -849,7 +850,7 @@ Access group management operations.
 - `cancel_membership_requests(jid: &Jid, participants: &[Jid])` - Cancel pending membership requests
 - `revoke_request_code(jid: &Jid, participants: &[Jid])` - Revoke request codes for participants
 - `acknowledge(jid: &Jid)` - Acknowledge a group
-- `batch_get_info(jids: Vec<Jid>)` - Batch fetch group metadata for multiple groups
+- `fetch_metadata_batch(jids: &[Jid])` - Batch fetch full group metadata for multiple groups
 - `get_profile_pictures(group_jids: Vec<Jid>, picture_type: PictureType)` - Batch fetch group profile pictures
 - `lookup_profile_picture(group_jid: &Jid, preview: bool, existing_id: Option<&str>)` - Fetch one group's picture with a typed outcome (`Found`, `Unchanged`, `NotFound`, `NotAuthorized`, `RateOverlimit`)
 - `lookup_community_profile_picture(community_jid: &Jid, preview: bool, existing_id: Option<&str>)` - Fetch a community parent group's picture over the community protocol
@@ -2698,7 +2699,7 @@ Entry counts plus estimated retained heap bytes for the client's internal collec
 | `pdo_requested` | `u64` | PDO once-per-message memo cache (count only) |
 | `session_locks` | `u64` | Per-device session locks (count only) |
 | `ensure_inflight` | `u64` | Addresses whose `ensure_e2e_sessions` prekey fetch is in flight, so a concurrent caller for the same address waits on it instead of fetching the same bundle again (count only). Normally zero — it only holds an address for the span of one prekey fetch. A value that stays nonzero across repeated samples warrants investigation, though sustained request turnover across many addresses can also keep it nonzero without any single fetch being stuck ([#1315](https://github.com/oxidezap/whatsapp-rust/pull/1315)) |
-| `group_metadata_inflight` | `u64` | Groups whose [`get_metadata`](/api/groups#get_metadata) query is in flight, so a concurrent caller for the same group shares that round trip instead of sending its own (count only). Normally zero — it only holds a group for the span of one query. A value that stays nonzero across repeated samples warrants investigation, though sustained request turnover across many groups can also keep it nonzero without any single query being stuck ([#1316](https://github.com/oxidezap/whatsapp-rust/pull/1316)) |
+| `group_metadata_inflight` | `u64` | Groups whose [`fetch_metadata`](/api/groups#fetch_metadata) query is in flight, so a concurrent caller for the same group shares that round trip instead of sending its own (count only). Normally zero — it only holds a group for the span of one query. A value that stays nonzero across repeated samples warrants investigation, though sustained request turnover across many groups can also keep it nonzero without any single query being stuck ([#1316](https://github.com/oxidezap/whatsapp-rust/pull/1316)) |
 | `chat_lanes` | `u64` | Per-chat lanes — combined enqueue lock + message queue (count only) |
 | `group_distribution_locks` | `u64` | Live per-group sender-key distribution lanes (count only) |
 | `group_distribution_lock_evictions` | `u64` | Cumulative capacity evictions of cold (non-live) distribution lanes; poll successive reports to derive a rate |

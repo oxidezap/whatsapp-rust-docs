@@ -15,103 +15,129 @@ let groups = client.groups();
 
 ## Methods
 
-### query_info
-
-Query group information with caching support.
-
 <Tip>
-`query_info` and [`get_metadata`](#get_metadata) return different, purpose-built views of a group — pick based on what you're doing with the result:
+The public group surface is split into three, purpose-built views. Pick based on what you're doing with the result:
 
-| | `query_info` | `get_metadata` |
+| API | Returns | Use for |
 |---|---|---|
-| Returns | `Arc<GroupInfo>` (slim) | `GroupMetadata` (full) |
-| Fields | Participant JIDs, addressing mode, LID/PN mapping, CAG flag | Subject, description, admin roles, ephemeral/membership settings, and everything else |
-| Cache | Cached; a hit is free, a miss sends the persisted phash so an unchanged group costs a `not-modified` reply | Hits the network; no phash sent, no population of the group cache. Concurrent calls for the same group share one round trip — see [`get_metadata`](#get_metadata) |
-| Use for | Routing and encrypting a message (the send path's own choice) | Displaying or auditing a group |
+| [`list_participating`](#list_participating) | `Vec<GroupOverview>` — id, subject, [hierarchy](#grouphierarchy), participant count | Populating a chat list, browsing the account's groups |
+| [`fetch_overviews`](#fetch_overviews) | `Vec<GroupOverviewResult>` for a chosen subset | Refreshing a known set of chats without pulling every participant |
+| [`fetch_metadata`](#fetch_metadata) | `GroupMetadata` — full state, participants, settings | Displaying or auditing a single group |
 
-Use [`query_info_with_freshness`](#query_info_with_freshness) when you need explicit control over `query_info`'s staleness instead of the default cache-preferred behavior.
+Routing snapshots used by the send path (the old `GroupInfo` cache) are now internal — you never call them directly. Sending a message consults them for you.
 </Tip>
 
+### list_participating
+
+List every group the account participates in as slim [`GroupOverview`](#groupoverview) records. One IQ round trip; participants and descriptions are never materialized, and no LID/PN backfill runs.
+
 ```rust
-pub async fn query_info(&self, jid: &Jid) -> Result<Arc<GroupInfo>, GroupError>
+pub async fn list_participating(&self) -> Result<Vec<GroupOverview>, GroupError>
 ```
 
-**Parameters:**
-- `jid` - Group JID (must end with `@g.us`)
-
 **Returns:**
-- `Arc<GroupInfo>` - Shared, reference-counted snapshot containing the participants list and addressing mode. Repeated calls for the same group return the same `Arc` from the in-memory cache, so warm sends avoid deep-cloning group metadata.
+- `Vec<GroupOverview>` — one overview per group. Each carries id, optional subject (the protocol can omit it), [`GroupHierarchy`](#grouphierarchy), and `participant_count`. No participant list, no settings.
+
+Use this for chat-list style rendering. When you need the full state of one group, follow up with [`fetch_metadata`](#fetch_metadata).
 
 **Example:**
 ```rust
-use std::sync::Arc;
-use wacore::client::context::GroupInfo;
+use whatsapp_rust::features::groups::{GroupHierarchy, SubgroupKind};
 
-let group_jid: Jid = "123456789@g.us".parse()?;
-let info: Arc<GroupInfo> = client.groups().query_info(&group_jid).await?;
+let overviews = client.groups().list_participating().await?;
 
-println!("Participants: {}", info.participants.len());
-println!("Addressing mode: {:?}", info.addressing_mode);
+for overview in overviews {
+    let subject = overview.subject.as_deref().unwrap_or("(no subject)");
+    let count = overview.participant_count.unwrap_or(0);
+    println!("{} — {} ({} members)", overview.id, subject, count);
 
-// Cheaply share the snapshot across tasks without copying participants.
-let info_for_task = info.clone();
-tokio::spawn(async move {
-    println!("Participants in task: {}", info_for_task.participants.len());
-});
+    match overview.hierarchy {
+        GroupHierarchy::Standalone => {}
+        GroupHierarchy::Community => println!("  parent community"),
+        GroupHierarchy::Subgroup { parent, kind } => {
+            let label = match kind {
+                SubgroupKind::Regular => "subgroup",
+                SubgroupKind::Announcement => "announcement subgroup",
+                SubgroupKind::General => "general chat",
+            };
+            println!("  {label} of {parent}");
+        }
+    }
+}
 ```
 
-### `query_info_with_freshness`
+### fetch_metadata
 
-Query group information with an explicit cache [`Freshness`](#freshness) policy, instead of the always-cache-preferred behavior of `query_info`.
+Fetch the complete, user-facing metadata of a single group.
 
 ```rust
-pub async fn query_info_with_freshness(
-    &self,
-    jid: &Jid,
-    freshness: Freshness,
-) -> Result<Arc<GroupInfo>, GroupError>
+pub async fn fetch_metadata(&self, jid: &Jid) -> Result<GroupMetadata, GroupError>
 ```
 
 **Parameters:**
-- `jid` - Group JID (must end with `@g.us`)
-- `freshness` - `Freshness::CachePreferred` (same as `query_info`) or `Freshness::Refresh` to force a network round-trip
+- `jid` — Group JID (must end with `@g.us`)
 
 **Returns:**
-- `Arc<GroupInfo>` - Same shared snapshot type as `query_info`
+- `GroupMetadata` — Owned, full metadata: subject, description, creator, per-participant admin roles, and ephemeral/membership settings (see the [type reference](#groupmetadata) for every field).
 
-A `Refresh` query leaves the currently cached snapshot readable to concurrent callers while the network request is in flight, then atomically replaces it once the response arrives — there is no window where the cache is empty.
+The query hits the network (no phash is sent, so the server never answers `not-modified`) and the result does not populate the send-path routing cache.
 
-**Example:**
-```rust
-use whatsapp_rust::Freshness;
-
-// Force a refresh after a notification implies the cached snapshot is stale.
-let info = client
-    .groups()
-    .query_info_with_freshness(&group_jid, Freshness::Refresh)
-    .await?;
-```
-
-### get_participating
-
-Get all groups the client is participating in.
-
-```rust
-pub async fn get_participating(&self) -> Result<HashMap<Jid, GroupMetadata>, GroupError>
-```
-
-**Returns:**
-- `HashMap<Jid, GroupMetadata>` - Map of group `Jid` to metadata
+`fetch_metadata` returns protocol data only. It does not backfill missing participant phone numbers for LID-addressed groups. When you need PN-keyed display data, call [`resolve_participant_addresses`](#resolve_participant_addresses) on the returned metadata; the extra cache/database cost then reads at the callsite instead of hiding inside the fetch.
 
 <Note>
-This map is keyed by `Jid`. Call `.to_string()` on the key if you need the string form.
+**Concurrent calls for one group share a round trip.** A call that arrives while another is already in flight for the same group is answered by that in-flight query instead of sending its own, so the metadata it returns can describe an instant slightly before the call was made, bounded by how long the in-flight query has been running. Sequential calls are unaffected: each one sends its own query. If an earlier `fetch_metadata` call is already in flight, wait for it to finish before calling `fetch_metadata` again. Then issue a new sequential call when you need a result ordered after that earlier call.
 </Note>
+
+**Example:**
+```rust
+let group_jid: Jid = "123456789@g.us".parse()?;
+let mut metadata = client.groups().fetch_metadata(&group_jid).await?;
+
+let subject = metadata.subject.as_deref().unwrap_or("(no subject)");
+println!("Subject: {}", subject);
+println!("Mode: {:?}", metadata.addressing_mode);
+
+// Opt in to PN backfill when you'll render phone numbers.
+client.groups().resolve_participant_addresses(&mut metadata).await;
+```
+
+### resolve_participant_addresses
+
+Backfill missing `phone_number` fields on the participants of a [`GroupMetadata`](#groupmetadata) from the client's LID-to-PN cache. The server often omits the PN attribute on `<participant>` nodes of LID-addressed groups, so consumers that key off PN would otherwise treat current members as absent.
+
+```rust
+pub async fn resolve_participant_addresses(&self, meta: &mut GroupMetadata)
+```
+
+**Parameters:**
+- `meta` — Metadata (typically from [`fetch_metadata`](#fetch_metadata) or [`fetch_metadata_batch`](#fetch_metadata_batch)) to enrich in place.
+
+No-op outside LID-addressed groups or when the PN is already present. Participants whose mapping is unknown are left untouched (`phone_number` stays `None`).
+
+Kept separate from `fetch_metadata` so the extra cache/database cost is visible at the callsite. Prefer this over `fetch_metadata` alone when rendering participant phone numbers; skip it when only protocol data (subject, roles, settings) is needed.
+
+**Example:**
+```rust
+let mut metadata = client.groups().fetch_metadata(&group_jid).await?;
+client.groups().resolve_participant_addresses(&mut metadata).await;
+
+for participant in &metadata.participants {
+    let display_pn = participant
+        .phone_number
+        .as_ref()
+        .map(|jid| jid.to_string())
+        .unwrap_or_else(|| "(unknown)".to_string());
+    println!("{} -> {display_pn}", participant.jid);
+}
+```
+
+### GroupMetadata fields reference
 
 `GroupMetadata` implements `PartialEq` and `Eq`, allowing direct comparison of group metadata instances.
 
 **GroupMetadata fields:**
 - `id: Jid` - Group JID
-- `subject: String` - Group name
+- `subject: Option<String>` - Group name. `None` when the protocol explicitly omits the subject; `Some("")` for an explicit empty subject
 - `notify: Option<String>` - Display notification string reported by the server (from the `notify` attribute)
 - `participants: Vec<GroupParticipant>` - List of participants
 - `addressing_mode: AddressingMode` - Phone number or LID mode
@@ -183,49 +209,6 @@ See [Community API](/api/community) for community-specific operations.
 - `participant_type: ParticipantType` - Participant role (member, admin, or super admin)
 - `details: Option<Box<GroupParticipantDetails>>` - Less-common participant metadata (label, join time, display name, etc.); boxed and only populated when at least one field is present
 
-**Example:**
-```rust
-let groups = client.groups().get_participating().await?;
-
-for (jid, metadata) in groups {
-    println!("Group: {} ({})", metadata.subject, jid);
-    println!("  Participants: {}", metadata.participants.len());
-    
-    for participant in &metadata.participants {
-        println!("    {} ({:?})", participant.jid, participant.participant_type);
-    }
-}
-```
-
-### get_metadata
-
-Get metadata for a specific group.
-
-```rust
-pub async fn get_metadata(&self, jid: &Jid) -> Result<GroupMetadata, GroupError>
-```
-
-**Parameters:**
-- `jid` - Group JID
-
-**Returns:**
-- `GroupMetadata` - Owned, full user-facing metadata: subject, description, creator, per-participant admin roles, and ephemeral/membership settings (see `get_participating` for the full field list). In a LID-addressed group, participant phone numbers the server left out are backfilled from known LID/PN mappings on a best-effort basis; a participant with no known mapping keeps `phone_number: None`.
-
-The query hits the network (no phash is sent, so the server never answers `not-modified`) and the result does not populate the group cache. Use this for displaying or auditing a group; when you only need the participant list to send a message, prefer the cached [`query_info`](#query_info).
-
-<Note>
-**Concurrent calls for one group share a round trip.** A call that arrives while another is already in flight for the same group is answered by that in-flight query instead of sending its own — so the metadata it returns can describe an instant slightly before the call was made, bounded by how long the query in flight has been running. Sequential calls are unaffected: each one sends its own query. If an earlier `get_metadata` call is already in flight, wait for it to finish before calling `get_metadata` again. Then issue a new sequential call when you need a result ordered after that earlier call.
-</Note>
-
-**Example:**
-```rust
-let group_jid: Jid = "123456789@g.us".parse()?;
-let metadata = client.groups().get_metadata(&group_jid).await?;
-
-println!("Subject: {}", metadata.subject);
-println!("Mode: {:?}", metadata.addressing_mode);
-```
-
 ### create_group
 
 Create a new group.
@@ -280,7 +263,7 @@ for participant in &result.metadata.participants {
 ```
 
 <Note>
-Since v0.6, `create_group` returns the full `GroupMetadata` (matching `get_metadata`) instead of just the JID. Inspect `result.metadata` for participants, addressing mode, ephemeral timer, and parent linkage in a single round-trip. `GroupMetadata.participants` is a `Vec<GroupParticipant>` (the IQ-response shape), not the `GroupParticipantInfo` used by group notification events — but masked-number `display_name` labels are available here too, via `participant.details.as_ref().and_then(|d| d.display_name.as_deref())`, in addition to the event-side `GroupParticipantInfo.display_name` for live group-update events.
+Since v0.6, `create_group` returns the full `GroupMetadata` (matching [`fetch_metadata`](#fetch_metadata)) instead of just the JID. Inspect `result.metadata` for participants, addressing mode, ephemeral timer, and parent linkage in a single round-trip. `GroupMetadata.participants` is a `Vec<GroupParticipant>` (the IQ-response shape), not the `GroupParticipantInfo` used by group notification events — but masked-number `display_name` labels are available here too, via `participant.details.as_ref().and_then(|d| d.display_name.as_deref())`, in addition to the event-side `GroupParticipantInfo.display_name` for live group-update events.
 </Note>
 
 ### set_subject
@@ -339,7 +322,7 @@ client.groups().set_description(&group_jid, Some(desc), PreviousDescription::Res
 
 // Skip the extra round trip with a token already on hand
 let updated = GroupDescription::new("Updated topic")?;
-let metadata = client.groups().get_metadata(&group_jid).await?;
+let metadata = client.groups().fetch_metadata(&group_jid).await?;
 client.groups()
     .set_description(&group_jid, Some(updated), metadata.description_id.as_deref().into())
     .await?;
@@ -645,7 +628,7 @@ pub async fn get_invite_info(&self, code: &str) -> Result<GroupMetadata, GroupEr
 - `code` - Invite code or full URL
 
 **Returns:**
-- `GroupMetadata` - Group metadata (see `get_participating` for fields)
+- `GroupMetadata` - Group metadata (see the [`GroupMetadata` fields reference](#groupmetadata-fields-reference))
 
 **Example:**
 ```rust
@@ -1141,48 +1124,93 @@ println!("Label update sent as message {}", message_id);
 `update_member_label` is a thin wrapper around `update_member_label_with_id` that discards the message ID and returns `Result<(), GroupError>`, for callers that don't need it.
 </Note>
 
-### batch_get_info
+### fetch_metadata_batch
 
-Batch query group info for multiple groups at once.
+Batch fetch full metadata for a chosen set of groups.
 
 ```rust
-pub async fn batch_get_info(
+pub async fn fetch_metadata_batch(
     &self,
-    jids: Vec<Jid>,
-) -> Result<Vec<BatchGroupResult>, GroupError>
+    jids: &[Jid],
+) -> Result<Vec<GroupMetadataResult>, GroupError>
 ```
 
 **Parameters:**
-- `jids` - List of group JIDs to query (max 10,000)
+- `jids` — Group JIDs to query (max 10,000). An empty slice returns an empty vector without sending a request.
 
 **Returns:**
-- `Vec<BatchGroupResult>` - Result for each group
+- `Vec<GroupMetadataResult>` — one [`GroupMetadataResult`](#groupmetadataresult) per input JID. Only `403` maps to `Forbidden` and only `404` maps to `NotFound`; any other server error fails the whole call rather than being misreported as a missing group.
+
+Returns protocol data only; no participant-address backfill. Call [`resolve_participant_addresses`](#resolve_participant_addresses) on each `Full` variant when PN-keyed display data is needed.
+
+When you only need the display fields (id, subject, hierarchy, participant count) prefer [`fetch_overviews`](#fetch_overviews) — it uses a slim parser and never materializes participants.
 
 **Example:**
 ```rust
-use whatsapp_rust::features::groups::BatchGroupResult;
+use whatsapp_rust::features::groups::GroupMetadataResult;
 
 let group_jids: Vec<Jid> = vec![
     "120363012345678@g.us".parse()?,
     "120363087654321@g.us".parse()?,
 ];
 
-let results = client.groups().batch_get_info(group_jids).await?;
+let results = client.groups().fetch_metadata_batch(&group_jids).await?;
 
 for result in results {
     match result {
-        BatchGroupResult::Full(metadata) => {
-            println!("Group: {} - {}", metadata.id, metadata.subject);
+        GroupMetadataResult::Full(metadata) => {
+            let subject = metadata.subject.as_deref().unwrap_or("(no subject)");
+            println!("Group: {} — {}", metadata.id, subject);
         }
-        BatchGroupResult::Truncated { id, size } => {
-            println!("Truncated: {} (size: {:?})", id, size);
+        GroupMetadataResult::Truncated { id, size } => {
+            println!("Truncated: {id} ({size} members)");
         }
-        BatchGroupResult::Forbidden(id) => {
-            println!("Forbidden: {}", id);
+        GroupMetadataResult::Forbidden(id) => println!("Forbidden: {id}"),
+        GroupMetadataResult::NotFound(id) => println!("Not found: {id}"),
+    }
+}
+```
+
+### fetch_overviews
+
+Batch fetch slim [`GroupOverview`](#groupoverview) records for a chosen set of groups.
+
+```rust
+pub async fn fetch_overviews(
+    &self,
+    jids: &[Jid],
+) -> Result<Vec<GroupOverviewResult>, GroupError>
+```
+
+**Parameters:**
+- `jids` — Group JIDs to query (max 10,000). An empty slice returns an empty vector without sending a request.
+
+**Returns:**
+- `Vec<GroupOverviewResult>` — one [`GroupOverviewResult`](#groupoverviewresult) per input JID. Same strict `403`/`404` refusal classification as [`fetch_metadata_batch`](#fetch_metadata_batch).
+
+Same wire request as `fetch_metadata_batch`, but each `<group>` node is parsed by the slim overview parser: id, subject, hierarchy flags, participant count. Participants and description are never collected, and no LID/PN backfill runs. Use this to refresh a known set of chats without paying for full metadata.
+
+**Example:**
+```rust
+use whatsapp_rust::features::groups::GroupOverviewResult;
+
+let jids: Vec<Jid> = vec![
+    "120363012345678@g.us".parse()?,
+    "120363087654321@g.us".parse()?,
+];
+
+for outcome in client.groups().fetch_overviews(&jids).await? {
+    match outcome {
+        GroupOverviewResult::Found(overview) => {
+            let subject = overview.subject.as_deref().unwrap_or("(no subject)");
+            let count = overview.participant_count.unwrap_or(0);
+            println!("{}: {subject} ({count} members)", overview.id);
         }
-        BatchGroupResult::NotFound(id) => {
-            println!("Not found: {}", id);
+        GroupOverviewResult::Truncated { id, participant_count } => {
+            println!("Truncated: {id} ({participant_count} members)");
         }
+        GroupOverviewResult::Forbidden(id) => println!("Forbidden: {id}"),
+        GroupOverviewResult::NotFound(id) => println!("Not found: {id}"),
     }
 }
 ```
@@ -1446,7 +1474,7 @@ for report in reports {
 
 ### `Freshness`
 
-Selects whether an operation may return an existing cached snapshot or must consult its source before returning. Shared across the SDK wherever a cache-backed lookup accepts an explicit staleness policy — `Groups::query_info_with_freshness` here, and `StatusSendOptions::device_freshness` (see [Status](/api/status#statussendoptions)).
+Selects whether an operation may return an existing cached snapshot or must consult its source before returning. Shared across the SDK wherever a cache-backed lookup accepts an explicit staleness policy — for example `MessageRetransmission::with_group_metadata_freshness` and `StatusSendOptions::device_freshness` (see [Status](/api/status#statussendoptions)).
 
 ```rust
 #[non_exhaustive]
@@ -1461,44 +1489,85 @@ pub enum Freshness {
 
 `Freshness` is re-exported from the crate root, so you can import it directly: `use whatsapp_rust::Freshness;`. When you pass `Refresh`, you never see a caller-visible gap — the previous snapshot stays servable until the new one is published.
 
-### GroupInfo
+### GroupOverview
 
-Cached group information returned by `query_info`. Contains participant list, addressing mode, and LID-to-phone mappings for privacy-addressed groups.
+Slim, display-oriented view of one group: identity, subject, hierarchy, and membership size. No participants, no settings.
 
-`query_info` returns `Arc<GroupInfo>` so that repeated lookups and warm sends share the same snapshot without deep-cloning the participants list.
+Returned by [`list_participating`](#list_participating) and, wrapped in [`GroupOverviewResult`](#groupoverviewresult), by [`fetch_overviews`](#fetch_overviews). Both queries always hit the network and never backfill LID/PN mappings.
 
 ```rust
-pub struct GroupInfo {
-    pub participants: Vec<Jid>,
-    pub addressing_mode: AddressingMode,
+#[non_exhaustive]
+pub struct GroupOverview {
+    pub id: Jid,
+    pub subject: Option<String>,
+    pub hierarchy: GroupHierarchy,
+    pub participant_count: Option<u32>,
 }
 ```
 
-**Methods:**
+- `subject` is `None` when the protocol omits the subject, distinct from `Some("")` (explicit empty subject).
+- `participant_count` is `None` when the server sent no `size` attribute.
+
+**Convenience accessors:**
 
 | Method | Description |
 |---|---|
-| `phone_jid_for_lid_user(lid_user: &str) -> Option<&Jid>` | Look up the phone JID for a LID user |
-| `lid_user_for_phone_user(phone_user: &str) -> Option<&CompactString>` | Look up the LID user string for a phone number |
-| `phone_device_jid_to_lid(phone_device_jid: &Jid) -> Jid` | Convert a phone-based device JID to LID format |
+| `is_parent_group() -> bool` | `true` when [`hierarchy`](#grouphierarchy) is `Community` |
+| `parent_group_jid() -> Option<&Jid>` | Parent community JID for subgroups |
+| `is_default_sub_group() -> bool` | `true` for a community's announcement subgroup |
+| `is_general_chat() -> bool` | `true` for a community's general chat |
 
-**Example:**
+### GroupHierarchy
+
+Where a group sits in the community hierarchy, derived from the same flags the wire already carries (`<parent>`, `<linked_parent>`, `<default_sub_group>`, `<general_chat>`). Use this instead of reading the individual boolean flags on [`GroupMetadata`](#groupmetadata).
 
 ```rust
-let info = client.groups().query_info(&group_jid).await?; // Arc<GroupInfo>
-
-// Access participants and addressing mode
-for participant in &info.participants {
-    println!("Participant: {}", participant);
-}
-
-// For LID-addressed groups, resolve phone numbers
-if info.addressing_mode == AddressingMode::Lid {
-    if let Some(phone_jid) = info.phone_jid_for_lid_user("lid_user_id") {
-        println!("Phone: {}", phone_jid);
-    }
+#[non_exhaustive]
+pub enum GroupHierarchy {
+    /// An ordinary group: not a community, not a subgroup.
+    Standalone,
+    /// A community parent group.
+    Community,
+    /// A subgroup of a community.
+    Subgroup { parent: Jid, kind: SubgroupKind },
 }
 ```
+
+Precedence when both flags arrive together: an explicit `<linked_parent>` names a subgroup and wins over a bare `<parent>` marker.
+
+For a full metadata value, `GroupHierarchy::from_metadata(&metadata)` returns the same value as reading the equivalent overview.
+
+### SubgroupKind
+
+Which role a community subgroup plays.
+
+```rust
+#[non_exhaustive]
+pub enum SubgroupKind {
+    /// An ordinary subgroup.
+    Regular,
+    /// The community's default announcement subgroup.
+    Announcement,
+    /// The community's general chat.
+    General,
+}
+```
+
+### GroupOverviewResult
+
+Per-JID outcome for a group in a [`fetch_overviews`](#fetch_overviews) batch.
+
+```rust
+#[non_exhaustive]
+pub enum GroupOverviewResult {
+    Found(GroupOverview),
+    Truncated { id: Jid, participant_count: u32 },
+    Forbidden(Jid),  // server refused with 403
+    NotFound(Jid),   // server returned 404
+}
+```
+
+Only `403` maps to `Forbidden` and only `404` to `NotFound`. Any other error code fails the whole batch call rather than being reported as a per-group refusal.
 
 ### GroupSubject
 
@@ -1538,7 +1607,7 @@ impl<'a> From<Option<&'a str>> for PreviousDescription<'a>
 
 - `Resolve` (default) — read the group's current description id from the server before sending. The only variant that's correct without knowing anything about the group, and the only one that costs a round trip.
 - `Absent` — the group carries no description yet (e.g. one you just created), so no token is sent.
-- `Id(&str)` — a description id you already hold, typically [`GroupMetadata::description_id`](#groupmetadata) from a recent [`get_metadata`](#get_metadata) call.
+- `Id(&str)` — a description id you already hold, typically [`GroupMetadata::description_id`](#groupmetadata) from a recent [`fetch_metadata`](#fetch_metadata) call.
 
 `From<Option<&str>>` lets you turn a held `GroupMetadata::description_id` into a token directly: `None` maps to `Absent` (that metadata says the group has no description), `Some(id)` maps to `Id(id)`. Use `Resolve` instead when the metadata's age is unknown, since stale metadata that missed a description added since would otherwise surface as `GroupError::DescriptionConflict`.
 
@@ -1734,18 +1803,21 @@ pub enum AddressingMode {
 }
 ```
 
-### BatchGroupResult
+### GroupMetadataResult
 
-Result for a single group in a batch query.
+Per-JID outcome for a group in a [`fetch_metadata_batch`](#fetch_metadata_batch) response.
 
 ```rust
-pub enum BatchGroupResult {
-    Full(Box<GroupMetadata>),           // Full group metadata
-    Truncated { id: Jid, size: Option<u32> },  // Only ID and size returned
-    Forbidden(Jid),                     // Access denied
-    NotFound(Jid),                      // Group does not exist
+#[non_exhaustive]
+pub enum GroupMetadataResult {
+    Full(Box<GroupMetadata>),                   // Full group metadata
+    Truncated { id: Jid, size: u32 },           // Server returned only id and size
+    Forbidden(Jid),                             // Server refused with 403
+    NotFound(Jid),                              // Server returned 404
 }
 ```
+
+Only `403` maps to `Forbidden` and only `404` to `NotFound`. Any other server error fails the whole batch call rather than being misreported as a missing group.
 
 ### GrowthLockInfo
 
@@ -1834,7 +1906,7 @@ pub struct CreateGroupResult {
 `CreateGroupResult` is `#[non_exhaustive]`. Field reads are unaffected; only exhaustive struct destructuring from outside the crate requires adding `..`.
 </Note>
 
-The `metadata` field carries the full group state returned by the server (same shape as [`get_metadata`](#get_metadata)). `metadata.participants` is `Vec<GroupParticipant>` — masked-number `display_name` labels are reachable via `participant.details.as_ref().and_then(|d| d.display_name.as_deref())`, or from the event-side `GroupParticipantInfo` (which carries `<participant>` children of *notification* events) when handling live group-update events.
+The `metadata` field carries the full group state returned by the server (same shape as [`fetch_metadata`](#fetch_metadata)). `metadata.participants` is `Vec<GroupParticipant>` — masked-number `display_name` labels are reachable via `participant.details.as_ref().and_then(|d| d.display_name.as_deref())`, or from the event-side `GroupParticipantInfo` (which carries `<participant>` children of *notification* events) when handling live group-update events.
 
 <Note>
 Prior to v0.6 this struct only exposed a `gid: Jid`. Replace `result.gid` with `result.metadata.id` when upgrading (`GroupMetadata.id`, not `jid`). The same migration applies to `CreateCommunityResult`.

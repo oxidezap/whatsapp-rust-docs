@@ -166,17 +166,19 @@ See [Community API reference](/api/community#join_subgroup) for details.
 
 ### List communities you're in
 
-Fetch all parent/community groups the logged-in account currently participates in:
+Fetch all parent/community groups the logged-in account currently participates in. Use [`list_participating`](/api/community#list_participating) for the slim overview shape (id, subject, hierarchy, participant count) or [`fetch_participating_metadata`](/api/community#fetch_participating_metadata) when you need the full state:
 
 ```rust
-let communities = client.community().get_participating().await?;
+let overviews = client.community().list_participating().await?;
 
-for (jid, metadata) in communities {
-    println!("{}: {} ({} participants)", jid, metadata.subject, metadata.participants.len());
+for overview in overviews {
+    let subject = overview.subject.as_deref().unwrap_or("(no subject)");
+    let count = overview.participant_count.unwrap_or(0);
+    println!("{}: {subject} ({count} participants)", overview.id);
 }
 ```
 
-See [Community API reference](/api/community#get_participating) for details.
+See [Community API reference](/api/community#list_participating) for details.
 
 ### List subgroups
 
@@ -252,7 +254,7 @@ Use the `group_type` function to classify a group within the community hierarchy
 ```rust
 use whatsapp_rust::features::community::{group_type, GroupType};
 
-let metadata = client.groups().get_metadata(&group_jid).await?;
+let metadata = client.groups().fetch_metadata(&group_jid).await?;
 
 match group_type(&metadata) {
     GroupType::Community => println!("This is a community parent group"),
@@ -274,7 +276,7 @@ The classification is based on these `GroupMetadata` fields:
 | `is_general_chat` | `true` for the general chat subgroup |
 | `allow_non_admin_sub_group_creation` | Whether non-admin members can create subgroups |
 
-See [Groups API reference](/api/groups#get_metadata) for all `GroupMetadata` fields.
+See [Groups API reference](/api/groups#fetch_metadata) for all `GroupMetadata` fields. Prefer the [`GroupHierarchy`](/api/groups#grouphierarchy) enum on [`GroupOverview`](/api/groups#groupoverview) when you only need the hierarchy classification — `group_type(&metadata)` is a projection of the same information.
 
 ## Community Announcement Group (CAG) reactions
 
@@ -298,7 +300,7 @@ client.send_reaction(&cag_jid, target_key.clone(), "🔥").await?;
 client.send_reaction(&cag_jid, target_key, "").await?;
 ```
 
-For CAG chats the library checks `GroupInfo::is_community_announce` (populated from metadata and cached). When `true`, the reaction is encrypted with the target post's `messageSecret` (captured when the post was received) and shipped as an `enc_reaction_message` envelope. If the parent secret is not available the call fails with a descriptive error rather than emitting a plaintext reaction the channel would drop.
+For CAG chats the library checks the internal `is_community_announce` flag on its send-path routing snapshot (populated from metadata and cached). When `true`, the reaction is encrypted with the target post's `messageSecret` (captured when the post was received) and shipped as an `enc_reaction_message` envelope. If the parent secret is not available the call fails with a descriptive error rather than emitting a plaintext reaction the channel would drop.
 
 Incoming encrypted reactions from CAG posts are decrypted transparently by the receive path and surfaced as a normal `reaction_message` event. The `key` field is filled from the envelope's `target_message_key`, so your event handler looks identical to a regular group reaction:
 
