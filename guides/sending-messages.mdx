@@ -711,7 +711,7 @@ This sets `contextInfo.expiration` on the protobuf message, which tells WhatsApp
 For groups, read the timer from group metadata:
 
 ```rust
-let metadata = client.groups().get_metadata(&group_jid).await?;
+let metadata = client.groups().fetch_metadata(&group_jid).await?;
 let expiration = metadata.ephemeral.as_ref().and_then(|e| e.expiration).unwrap_or(0);
 ```
 

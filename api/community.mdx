@@ -51,23 +51,52 @@ if let Some(desc) = &result.metadata.description {
 Since v0.6, `community().create()` returns the full `GroupMetadata` instead of just the JID. The library inlines the community description directly into the create stanza (matching WA Web), so the returned metadata already contains it — no separate `set_description` round-trip is needed. If you previously read `result.gid`, switch to `result.metadata.id` (`GroupMetadata` uses `id: Jid`).
 </Note>
 
-### get_participating
+### list_participating
 
-Fetch all parent/community groups the logged-in account currently participates in.
+List every parent community the account participates in as slim [`GroupOverview`](/api/groups#groupoverview) records. Same slim wire projection as [`Groups::list_participating`](/api/groups#list_participating): id, subject, [hierarchy](/api/groups#grouphierarchy), and participant count — no subgroup members, no settings, one round trip.
 
 ```rust
-pub async fn get_participating(&self) -> Result<HashMap<Jid, GroupMetadata>, CommunityError>
+pub async fn list_participating(
+    &self,
+) -> Result<Vec<GroupOverview>, CommunityError>
 ```
 
 **Returns:**
-- `HashMap<Jid, GroupMetadata>` — Map of community JID to metadata
+- `Vec<GroupOverview>` — one overview per parent community.
 
 **Example:**
 ```rust
-let communities = client.community().get_participating().await?;
+let communities = client.community().list_participating().await?;
+
+for overview in communities {
+    let subject = overview.subject.as_deref().unwrap_or("(no subject)");
+    let count = overview.participant_count.unwrap_or(0);
+    println!("Community: {subject} ({}) — {count} members", overview.id);
+}
+```
+
+### fetch_participating_metadata
+
+Fetch full [`GroupMetadata`](/api/groups#groupmetadata) for every parent community the account participates in.
+
+```rust
+pub async fn fetch_participating_metadata(
+    &self,
+) -> Result<HashMap<Jid, GroupMetadata>, CommunityError>
+```
+
+**Returns:**
+- `HashMap<Jid, GroupMetadata>` — Map of community JID to metadata.
+
+Always hits the network. Returns protocol data only; call [`Groups::resolve_participant_addresses`](/api/groups#resolve_participant_addresses) per result when PN-keyed display data is needed. Prefer [`list_participating`](#list_participating) when the display fields are all you need.
+
+**Example:**
+```rust
+let communities = client.community().fetch_participating_metadata().await?;
 
 for (jid, metadata) in communities {
-    println!("Community: {} ({})", metadata.subject, jid);
+    let subject = metadata.subject.as_deref().unwrap_or("(no subject)");
+    println!("Community: {subject} ({jid})");
 }
 ```
 
@@ -265,7 +294,7 @@ pub async fn query_linked_group(
 - `subgroup_jid` — JID of the subgroup to query
 
 **Returns:**
-- `GroupMetadata` — Full group metadata (see [Groups API](/api/groups#get_metadata))
+- `GroupMetadata` — Full group metadata (see [Groups API](/api/groups#fetch_metadata))
 
 **Example:**
 ```rust
@@ -502,7 +531,7 @@ Use the `group_type()` function to classify a group:
 ```rust
 use whatsapp_rust::features::community::{group_type, GroupType};
 
-let metadata = client.groups().get_metadata(&group_jid).await?;
+let metadata = client.groups().fetch_metadata(&group_jid).await?;
 let gtype = group_type(&metadata);
 ```
 

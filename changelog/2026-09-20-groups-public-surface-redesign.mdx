@@ -1,0 +1,80 @@
+---
+title: "September 20, 2026 — Groups public surface redesign"
+description: "Breaking: query_info and GroupInfo are internal now. New GroupOverview / GroupHierarchy types split display data from send-path routing. get_metadata and batch_get_info renamed to fetch_metadata and fetch_metadata_batch, and a new fetch_overviews API returns slim per-group projections."
+---
+
+## Breaking changes
+
+**Groups public surface redesigned around overviews, routing, and metadata ([#1513](https://github.com/oxidezap/whatsapp-rust/pull/1513))**
+
+The `Groups` API is now split into three purpose-built views so no caller can mistake the send-path routing cache for display data.
+
+- **`GroupOverview`** — new slim, display-oriented type: `id`, `subject`, [`hierarchy`](/api/groups#grouphierarchy), and `participant_count`. Canonical source of subject, community hierarchy, parent, and subgroup kind for high-level callers.
+- **`GroupMetadata`** — unchanged full object, still the entry point for participants, roles, and settings.
+- **Routing snapshots** — the old `GroupInfo` (now `GroupRoutingInfo`) is `pub(crate)`. It powers the send path only; sending a message consults it for you.
+
+New enums: `GroupHierarchy { Standalone, Community, Subgroup { parent, kind } }` and `SubgroupKind { Regular, Announcement, General }`. Both are `#[non_exhaustive]`.
+
+### Renames
+
+| Before | After |
+|---|---|
+| `Groups::query_info` / `query_info_with_freshness` | removed (routing is internal; sending consults it for you) |
+| `Groups::get_participating` | [`list_participating`](/api/groups#list_participating) — returns `Vec<GroupOverview>` |
+| `Groups::get_metadata` | [`fetch_metadata`](/api/groups#fetch_metadata) |
+| `Groups::batch_get_info` | [`fetch_metadata_batch`](/api/groups#fetch_metadata_batch) |
+| `BatchGroupResult` | `GroupMetadataResult` |
+| `GroupInfo` | `GroupRoutingInfo` (crate-private) |
+| `GroupInfoResponse` | `GroupMetadataResponse` |
+| `Community::get_participating` | [`list_participating`](/api/community#list_participating) / [`fetch_participating_metadata`](/api/community#fetch_participating_metadata) |
+
+### New APIs
+
+- [`Groups::fetch_overviews(&[Jid])`](/api/groups#fetch_overviews) — batch fetch slim overviews for a chosen set of groups. Returns `Found` / `Truncated` / `Forbidden` / `NotFound` per JID. Same wire request as `fetch_metadata_batch`, but each `<group>` node is parsed with a slim parser that never materializes participants.
+- [`Groups::resolve_participant_addresses(&mut GroupMetadata)`](/api/groups#resolve_participant_addresses) — opt-in LID → PN backfill. `fetch_metadata` no longer runs this implicitly; call it at the callsite when you need PN-keyed display data. The extra cache/database cost now reads at the point of use.
+- [`Community::list_participating`](/api/community#list_participating) — parent-community-only overview list.
+
+### Behavior changes
+
+- **`GroupMetadata.subject` and `GroupMetadataResponse.subject` are now `Option<String>`.** Protocol absence (`None`) is kept distinct from an explicit empty subject (`Some("")`).
+- **Strict batch refusal classification.** Only `403` maps to `Forbidden` and only `404` maps to `NotFound`. Any other server error fails the whole batch call rather than being misreported as a missing group.
+- **Empty batches never send a wire-invalid zero-group request.** `fetch_metadata_batch(&[])` and `fetch_overviews(&[])` return an empty vector directly.
+- `list_participating` omits `<participants>` and `<description>` presence flags from its request, matching WhatsApp Web's overview projection. It never fans out per group and never runs LID/PN backfill.
+
+### Migration
+
+```rust
+// Before
+let groups = client.groups().get_participating().await?;
+for (jid, metadata) in groups {
+    println!("{}: {}", jid, metadata.subject);
+}
+
+// After
+let overviews = client.groups().list_participating().await?;
+for overview in overviews {
+    let subject = overview.subject.as_deref().unwrap_or("(no subject)");
+    println!("{}: {subject}", overview.id);
+}
+```
+
+```rust
+// Before
+let metadata = client.groups().get_metadata(&jid).await?;
+
+// After — participant PN backfill is now opt-in
+let mut metadata = client.groups().fetch_metadata(&jid).await?;
+client.groups().resolve_participant_addresses(&mut metadata).await;
+```
+
+```rust
+// Before
+use whatsapp_rust::features::groups::BatchGroupResult;
+let results = client.groups().batch_get_info(jids).await?;
+
+// After
+use whatsapp_rust::features::groups::GroupMetadataResult;
+let results = client.groups().fetch_metadata_batch(&jids).await?;
+```
+
+See [Groups API reference](/api/groups) and the [group management guide](/guides/group-management) for the full updated surface.

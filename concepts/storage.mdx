@@ -1379,13 +1379,13 @@ let cache = TypedCache::from_store(store, "group", Some(Duration::from_secs(3600
 `CacheEntryConfig` provides a `build_typed_ttl` convenience method that automatically selects the right backend: if a custom `CacheStore` is provided, it creates a `TypedCache` backed by the store; otherwise it falls back to an in-process `PortableCache`.
 
 ```rust
-let cache: TypedCache<Jid, Arc<GroupInfo>> = config.group_cache.build_typed_ttl(
+let cache: TypedCache<Jid, Arc<GroupRoutingInfo>> = config.group_cache.build_typed_ttl(
     config.cache_stores.group_cache.clone(),
     "group",
 );
 ```
 
-The group cache stores `Arc<GroupInfo>` so that warm sends and repeated `query_info` calls reuse the same snapshot instead of deep-cloning the participants list.
+The group cache stores `Arc<GroupRoutingInfo>` so that warm sends reuse the same routing snapshot instead of deep-cloning the participants list. `GroupRoutingInfo` is the send-path's private view of a group (participants, addressing mode, LID/PN mapping, CAG flag) — user-facing display data lives on [`GroupOverview`](/api/groups#groupoverview) and [`GroupMetadata`](/api/groups#groupmetadata) instead.
 
 #### `invalidate_all` and `clear`
 
@@ -1491,13 +1491,13 @@ When a notification arrives with only a hash (no device list), that hash names t
 
 **Group metadata** (`src/handlers/notification.rs`, `src/features/groups.rs`)
 
-When participant add/remove notifications arrive, the cached `GroupInfo` is patched in place:
+When participant add/remove notifications arrive, the cached `GroupRoutingInfo` is patched in place:
 
-- Participant adds use `GroupInfo::add_participants()`, which deduplicates by user and backfills LID-to-PN maps for LID-addressed groups
-- Participant removes use `GroupInfo::remove_participants()`, which also cleans up both LID-to-PN and PN-to-LID maps bidirectionally
+- Participant adds use `GroupRoutingInfo::add_participants()`, which deduplicates by user and backfills LID-to-PN maps for LID-addressed groups
+- Participant removes use `GroupRoutingInfo::remove_participants()`, which also cleans up both LID-to-PN and PN-to-LID maps bidirectionally
 - API calls (`client.groups().add_participants()`, `client.groups().remove_participants()`) also patch the cache after a successful server response, filtering to only participants the server accepted (status 200)
 
-Group patches are cache-only — they are not persisted to the backend. If the cache entry is evicted, the next `query_info()` call re-fetches from the server.
+Group patches are cache-only — they are not persisted to the backend. If the cache entry is evicted, the next send transparently re-fetches the routing snapshot from the server.
 
 Only `leave()` uses full invalidation.
 

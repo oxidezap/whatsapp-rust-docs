@@ -122,19 +122,26 @@ assert!(description.is_err());  // Fails validation
 
 ## Querying group information
 
-### Get group metadata
+### Get full group metadata
+
+Use [`fetch_metadata`](/api/groups#fetch_metadata) when you need the complete server state for one group: subject, description, per-participant roles, and settings.
 
 ```rust
 let group_jid: Jid = "120363012345678@g.us".parse()?;
 
-let metadata = client.groups().get_metadata(&group_jid).await?;
+let mut metadata = client.groups().fetch_metadata(&group_jid).await?;
 
-println!("Group: {}", metadata.subject);
+// Opt in to LID -> phone-number backfill when rendering PN-keyed data.
+client.groups().resolve_participant_addresses(&mut metadata).await;
+
+let subject = metadata.subject.as_deref().unwrap_or("(no subject)");
+println!("Group: {subject}");
 println!("Participants: {}", metadata.participants.len());
 println!("Addressing mode: {:?}", metadata.addressing_mode);
 
 for participant in &metadata.participants {
-    println!("- {} ({:?}, admin: {})",
+    println!(
+        "- {} ({:?}, admin: {})",
         participant.jid,
         participant.participant_type,
         participant.is_admin(),
@@ -143,58 +150,47 @@ for participant in &metadata.participants {
         println!("  ^ Group creator");
     }
     if let Some(phone) = &participant.phone_number {
-        println!("  Phone: {}", phone);
+        println!("  Phone: {phone}");
     }
 }
 ```
 
-See [Groups API reference](/api/groups#get_metadata) for metadata fields.
+`fetch_metadata` returns protocol data only. Call [`resolve_participant_addresses`](/api/groups#resolve_participant_addresses) when you need `phone_number` filled in for LID-addressed groups; the extra cache/database cost is intentionally at the callsite so it reads where it lives.
+
+See [Groups API reference](/api/groups#fetch_metadata) for every field on `GroupMetadata`.
 
 ### List all groups
 
-```rust
-use std::collections::HashMap;
-
-let groups: HashMap<String, GroupMetadata> = client
-    .groups()
-    .get_participating()
-    .await?;
-
-for (jid, metadata) in groups {
-    println!("{}: {} ({} members)",
-        jid,
-        metadata.subject,
-        metadata.participants.len()
-    );
-}
-```
-
-See [Groups API reference](/api/groups#get_participating) for details.
-
-### Query group info (internal)
-
-For lower-level access with caching:
+Use [`list_participating`](/api/groups#list_participating) when you want a chat-list style summary of every group the account is in. It returns slim [`GroupOverview`](/api/groups#groupoverview) records in one round trip; participants and descriptions are never materialized.
 
 ```rust
-use std::sync::Arc;
-use wacore::client::context::GroupInfo;
+use whatsapp_rust::features::groups::{GroupHierarchy, SubgroupKind};
 
-// `query_info` returns an `Arc<GroupInfo>` so repeated lookups and warm sends
-// share the same snapshot without copying the participants list.
-let info: Arc<GroupInfo> = client.groups().query_info(&group_jid).await?;
+let overviews = client.groups().list_participating().await?;
 
-println!("Participants: {:?}", info.participants);
-println!("Addressing mode: {:?}", info.addressing_mode);
+for overview in overviews {
+    let subject = overview.subject.as_deref().unwrap_or("(no subject)");
+    let count = overview.participant_count.unwrap_or(0);
+    println!("{}: {subject} ({count} members)", overview.id);
 
-// Look up phone numbers for LID participants
-for participant in &info.participants {
-    if let Some(phone_jid) = info.phone_jid_for_lid_user(&participant.user) {
-        println!("LID {} -> Phone {}", participant, phone_jid);
+    match overview.hierarchy {
+        GroupHierarchy::Standalone => {}
+        GroupHierarchy::Community => println!("  parent community"),
+        GroupHierarchy::Subgroup { parent, kind } => {
+            let label = match kind {
+                SubgroupKind::Regular => "subgroup",
+                SubgroupKind::Announcement => "announcement subgroup",
+                SubgroupKind::General => "general chat",
+            };
+            println!("  {label} of {parent}");
+        }
     }
 }
 ```
 
-See [Groups API reference](/api/groups#query_info) for details.
+For a chosen subset of groups (say, the chats on screen), call [`fetch_overviews`](/api/groups#fetch_overviews) instead. It uses the same slim projection and reports `Forbidden`/`NotFound`/`Truncated` per JID.
+
+When you need full state for a specific group, follow up with `fetch_metadata`.
 
 ## Updating group metadata
 
@@ -496,37 +492,36 @@ See [Groups API reference](/api/groups#revoke_request_code) for details.
 
 ### Batch query group info
 
-Query metadata for multiple groups in a single request (up to 10,000 groups):
+Fetch metadata for a chosen set of groups in a single request (up to 10,000 groups). Use [`fetch_metadata_batch`](/api/groups#fetch_metadata_batch) when you need full state; use [`fetch_overviews`](/api/groups#fetch_overviews) when you only want id, subject, hierarchy, and participant count.
 
 ```rust
-use whatsapp_rust::features::groups::BatchGroupResult;
+use whatsapp_rust::features::groups::GroupMetadataResult;
 
 let group_jids: Vec<Jid> = vec![
     "120363012345678@g.us".parse()?,
     "120363087654321@g.us".parse()?,
 ];
 
-let results = client.groups().batch_get_info(group_jids).await?;
+let results = client.groups().fetch_metadata_batch(&group_jids).await?;
 
 for result in results {
     match result {
-        BatchGroupResult::Full(metadata) => {
-            println!("Group: {} - {}", metadata.id, metadata.subject);
+        GroupMetadataResult::Full(metadata) => {
+            let subject = metadata.subject.as_deref().unwrap_or("(no subject)");
+            println!("Group: {} — {subject}", metadata.id);
         }
-        BatchGroupResult::Truncated { id, size } => {
-            println!("Truncated info: {} (size: {:?})", id, size);
+        GroupMetadataResult::Truncated { id, size } => {
+            println!("Truncated info: {id} ({size} members)");
         }
-        BatchGroupResult::Forbidden(id) => {
-            println!("Access denied: {}", id);
-        }
-        BatchGroupResult::NotFound(id) => {
-            println!("Not found: {}", id);
-        }
+        GroupMetadataResult::Forbidden(id) => println!("Access denied: {id}"),
+        GroupMetadataResult::NotFound(id) => println!("Not found: {id}"),
     }
 }
 ```
 
-See [Groups API reference](/api/groups#batch_get_info) for details.
+Batch parsers use strict refusal classification: only `403` is `Forbidden` and only `404` is `NotFound`. Any other error code fails the whole call rather than being reported as a missing group. An empty `jids` slice returns an empty vector without sending a request.
+
+See [Groups API reference](/api/groups#fetch_metadata_batch) for details.
 
 ### Batch fetch profile pictures
 
@@ -774,8 +769,8 @@ pub enum AddressingMode {
 }
 
 // Check the group's addressing mode
-let info = client.groups().query_info(&group_jid).await?;
-match info.addressing_mode {
+let metadata = client.groups().fetch_metadata(&group_jid).await?;
+match metadata.addressing_mode {
     AddressingMode::Pn => println!("Group uses phone numbers"),
     AddressingMode::Lid => println!("Group uses LIDs (privacy mode)"),
 }
@@ -846,16 +841,18 @@ async fn create_group_safely(
 
 ### Handling LID groups
 
-For LID-based groups, you may need phone number mappings:
+For LID-based groups, you may need phone number mappings. Fetch metadata and opt into address resolution so each participant's `phone_number` is backfilled from the client's LID-PN cache:
 
 ```rust
-let info = client.groups().query_info(&group_jid).await?;
+let mut metadata = client.groups().fetch_metadata(&group_jid).await?;
 
-if info.addressing_mode == AddressingMode::Lid {
-    // Look up phone number for each LID participant
-    for participant in &info.participants {
-        if let Some(phone_jid) = info.phone_jid_for_lid_user(&participant.user) {
-            println!("LID {} maps to phone {}", participant, phone_jid);
+if metadata.addressing_mode == AddressingMode::Lid {
+    client.groups().resolve_participant_addresses(&mut metadata).await;
+
+    for participant in &metadata.participants {
+        match &participant.phone_number {
+            Some(phone) => println!("LID {} maps to phone {phone}", participant.jid),
+            None => println!("LID {} has no known PN mapping", participant.jid),
         }
     }
 }
@@ -929,11 +926,12 @@ if !failed.is_empty() {
 Be aware of LID vs PN addressing:
 
 ```rust
-let info = client.groups().query_info(&group_jid).await?;
+let metadata = client.groups().fetch_metadata(&group_jid).await?;
 
-if info.addressing_mode == AddressingMode::Lid {
+if metadata.addressing_mode == AddressingMode::Lid {
     // Handle LID-based group
-    // Phone numbers may not be directly visible
+    // Phone numbers may not be directly visible until you call
+    // `resolve_participant_addresses` on the metadata.
 } else {
     // Handle phone-number-based group
 }
@@ -941,17 +939,9 @@ if info.addressing_mode == AddressingMode::Lid {
 
 ### Cache group information
 
-The library automatically caches group info:
+The library keeps its own routing cache for the send path — you don't manage it. Sending a message consults the cache and hits the network only on a miss. The public group APIs ([`list_participating`](/api/groups#list_participating), [`fetch_overviews`](/api/groups#fetch_overviews), [`fetch_metadata`](/api/groups#fetch_metadata), [`fetch_metadata_batch`](/api/groups#fetch_metadata_batch)) always hit the network; call them when you need a fresh view of a group.
 
-```rust
-// First call: fetches from server
-let info = client.groups().query_info(&group_jid).await?;
-
-// Second call: uses cache
-let info = client.groups().query_info(&group_jid).await?;
-```
-
-When the server sends a `groups_dirty` notification naming a group as stale, the library automatically invalidates the cache. On your next `query_info` call, the library re-fetches the group instead of returning the outdated snapshot. See [Stale group metadata](/concepts/events#stale-group-metadata-groups_dirty) for details.
+When the server sends a `groups_dirty` notification naming a group as stale, the library automatically invalidates its send-path cache, so the next send picks up the update transparently. See [Stale group metadata](/concepts/events#stale-group-metadata-groups_dirty) for details.
 
 </Steps>
 

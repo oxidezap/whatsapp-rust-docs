@@ -1697,7 +1697,7 @@ A single group notification from the server can contain multiple actions. The li
 
 The server can also send `<notification type="w:gp2">` wrapping a `<groups_dirty>` child, naming one or more groups whose cached metadata is now stale (for example, after a bulk membership change made elsewhere). This is not an ordinary group notification — its `from` is the group server, not a group JID — so it produces no `GroupUpdate` event. Instead, the library evicts the cached snapshot for each named group and still dispatches the raw stanza as [`Event::Notification`](#notification) — an exception to that event's usual "unhandled types only" rule, since the library both acts on `groups_dirty` (the cache eviction) and forwards it.
 
-The next `query_info` (or a send) for an affected group transparently re-fetches its metadata from the server, since `query_info`'s default `Freshness::CachePreferred` behavior only serves the cache when it is populated. You do not need to call `query_info_with_freshness(&jid, Freshness::Refresh)` yourself in response to this notification — see [Cache group information](/guides/group-management#cache-group-information).
+The next send to an affected group transparently re-fetches its routing snapshot from the server, since the send-path cache only serves an entry when it is populated. You do not need to fetch anything yourself in response to this notification — see [Cache group information](/guides/group-management#cache-group-information).
 
 ## Contact notification events
 

@@ -244,7 +244,7 @@ pub struct GroupQueryIq {
 }
 
 impl IqSpec for GroupQueryIq {
-    type Response = GroupInfoResponse;
+    type Response = GroupMetadataResponse;
     fn build_iq(&self) -> InfoQuery<'static> { /* ... */ }
     fn parse_response(&self, response: &NodeRef<'_>) -> Result<Self::Response> { /* ... */ }
 }
@@ -260,7 +260,7 @@ impl IqSpec for GroupQueryIq {
 ```rust
 // src/features/groups.rs
 impl<'a> Groups<'a> {
-    pub async fn get_metadata(&self, jid: &Jid) -> Result<GroupMetadata> {
+    pub async fn fetch_metadata(&self, jid: &Jid) -> Result<GroupMetadata> {
         // Use wacore IqSpec for protocol
         self.client.execute(GroupQueryIq::new(jid)?).await
     }
@@ -725,7 +725,7 @@ Media upload and download operations are in `src/download.rs` and `src/upload.rs
 **Pattern:** Features are accessed through accessor methods on `Client`:
 ```rust
 // Access features through the client
-let metadata = client.groups().get_metadata(&group_jid).await?;
+let metadata = client.groups().fetch_metadata(&group_jid).await?;
 let result = client.groups().create_group(options).await?;
 client.presence().set_available().await?;
 ```
