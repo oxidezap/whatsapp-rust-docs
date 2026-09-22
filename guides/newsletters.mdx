@@ -186,26 +186,55 @@ Don't call `Client::edit_message` or `Client::revoke_message` with a newsletter 
 Retrieve past messages with pagination support:
 
 ```rust
+use whatsapp_rust::NewsletterMessageType;
+use wacore::types::message::EditAttribute;
+
 // Fetch the latest 50 messages
 let messages = client.newsletter()
     .get_messages(&newsletter_jid, 50, None)
     .await?;
 
 for msg in &messages {
-    println!("ID: {}, time: {}, type: {}",
+    println!("ID: {}, time: {}, type: {:?}",
         msg.server_id, msg.timestamp, msg.message_type);
-    
+
+    match msg.edit {
+        EditAttribute::AdminEdit => println!("  (edited)"),
+        EditAttribute::AdminRevoke => println!("  (revoked)"),
+        _ => {}
+    }
+
     if let Some(decoded) = &msg.message {
         if let Some(text) = &decoded.conversation {
             println!("  Text: {}", text);
         }
     }
-    
+
     for reaction in &msg.reactions {
         println!("  {} x{}", reaction.code, reaction.count);
     }
+
+    if msg.message_type == NewsletterMessageType::Poll {
+        for vote in &msg.votes {
+            println!("  poll option {}: {}", hex::encode(vote.option_hash), vote.count);
+        }
+    }
+
+    if let Some(forwards) = msg.forwards_count {
+        println!("  forwards: {}", forwards);
+    }
 }
 ```
+
+Each [`NewsletterMessage`](/api/newsletter#newslettermessage) also carries the message's `message_id` (for [`edit_message`](/api/newsletter#edit_message) and [`revoke_message`](/api/newsletter#revoke_message)), the `<plaintext>` `media_type` hint, `<meta>` metadata (`original_timestamp`, `last_edit_timestamp_ms`, `poll_type`, `content_type`, `question_type`, `message_association_type`, `is_wamo_sub`, `admin_profile`), and the opaque `rcat` bytes. See [`NewsletterMessage`](/api/newsletter#newslettermessage) for the full field list.
+
+<Note>
+`forwards_count`, `views_count`, and `responses_count` are `Option<u64>`. `None` means the server sent no counter, which is not the same as `Some(0)`. `views_count` and `responses_count` are typically only populated when the viewer's role in the channel entitles them to those figures.
+</Note>
+
+<Note>
+An edited message updates `timestamp` and carries `EditAttribute::AdminEdit` in `edit`; `last_edit_timestamp_ms` records the edit time in **milliseconds**, while every other timestamp on `NewsletterMessage` is in **seconds**. A revoked message carries `EditAttribute::AdminRevoke`, has an empty `<plaintext/>`, `message = None`, and no forward counter.
+</Note>
 
 ### Pagination
 
