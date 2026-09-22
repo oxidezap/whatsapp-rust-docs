@@ -109,6 +109,50 @@ This is a shortcut for creating a group and then calling `link_subgroups` — bo
 
 See [Community API reference](/api/community#create_subgroup) for details.
 
+### Hidden subgroups
+
+Every subgroup has a visibility fixed at creation or link time. `SubgroupVisibility::Visible` (the default) lists the subgroup in the community's subgroup list for everyone. `SubgroupVisibility::Hidden` omits it for users who are not members, so only members and admins see it.
+
+Visibility is set once. WhatsApp does not support changing a subgroup's visibility later; to swap a linked group between visible and hidden you must unlink and re-link it.
+
+Create a subgroup as hidden with [`create_subgroup_with_options`](/api/community#create_subgroup_with_options):
+
+```rust
+use whatsapp_rust::features::community::{CreateSubgroupOptions, SubgroupVisibility};
+
+let participants = vec!["15551234567@s.whatsapp.net".parse()?];
+
+let options = CreateSubgroupOptions::new("Mods only", &participants, community_jid.clone())
+    .with_visibility(SubgroupVisibility::Hidden);
+
+let result = client.community()
+    .create_subgroup_with_options(options)
+    .await?;
+```
+
+Link a mix of visible and hidden groups in a single request with [`link_subgroups_with_options`](/api/community#link_subgroups_with_options):
+
+```rust
+use whatsapp_rust::features::community::{LinkSubgroupOptions, SubgroupVisibility};
+
+let options = vec![
+    LinkSubgroupOptions::new(
+        "120363001111111@g.us".parse()?,
+        SubgroupVisibility::Visible,
+    ),
+    LinkSubgroupOptions::new(
+        "120363002222222@g.us".parse()?,
+        SubgroupVisibility::Hidden,
+    ),
+];
+
+let result = client.community()
+    .link_subgroups_with_options(&community_jid, &options)
+    .await?;
+```
+
+`get_subgroups` reports each subgroup's current visibility on [`CommunitySubgroup::is_hidden_group`](/api/community#communitysubgroup).
+
 ### Unlink subgroups
 
 Unlink subgroups from a community:
@@ -190,8 +234,8 @@ let subgroups = client.community()
     .await?;
 
 for sg in &subgroups {
-    println!("{}: {} (default: {}, general: {})",
-        sg.id, sg.subject, sg.is_default_sub_group, sg.is_general_chat);
+    println!("{}: {} (default: {}, general: {}, hidden: {})",
+        sg.id, sg.subject, sg.is_default_sub_group, sg.is_general_chat, sg.is_hidden_group);
     if let Some(count) = sg.participant_count {
         println!("  Participants: {}", count);
     }
