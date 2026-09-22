@@ -118,7 +118,7 @@ client.community().deactivate(&community_jid).await?;
 
 ### link_subgroups
 
-Link existing groups as subgroups of a community.
+Link existing groups as subgroups of a community. All groups are linked with the default [`SubgroupVisibility::Visible`](#subgroupvisibility); use [`link_subgroups_with_options`](#link_subgroups_with_options) to mix visible and hidden groups in a single request.
 
 ```rust
 pub async fn link_subgroups(
@@ -152,9 +152,52 @@ for (jid, error_code) in &result.failed_groups {
 }
 ```
 
+### link_subgroups_with_options
+
+Link existing groups to a community with a per-group visibility. A single request can mix visible and hidden groups.
+
+```rust
+pub async fn link_subgroups_with_options(
+    &self,
+    community_jid: &Jid,
+    subgroup_options: &[LinkSubgroupOptions],
+) -> Result<LinkSubgroupsResult, CommunityError>
+```
+
+**Parameters:**
+- `community_jid` — JID of the parent community
+- `subgroup_options` — Array of per-group link options (see [`LinkSubgroupOptions`](#linksubgroupoptions))
+
+**Returns:**
+- `LinkSubgroupsResult` — Same shape as [`link_subgroups`](#link_subgroups).
+
+**Example:**
+```rust
+use whatsapp_rust::features::community::{LinkSubgroupOptions, SubgroupVisibility};
+
+let options = vec![
+    LinkSubgroupOptions::new(
+        "120363001111111@g.us".parse()?,
+        SubgroupVisibility::Visible,
+    ),
+    LinkSubgroupOptions::new(
+        "120363002222222@g.us".parse()?,
+        SubgroupVisibility::Hidden,
+    ),
+];
+
+let result = client.community()
+    .link_subgroups_with_options(&community_jid, &options)
+    .await?;
+```
+
+<Note>
+Visibility is set at link time. To change a group's visibility later you must unlink and re-link it.
+</Note>
+
 ### create_subgroup
 
-Create a new group that is already linked as a subgroup of a community, in one call.
+Create a new group that is already linked as a subgroup of a community, in one call. The subgroup is created with the default [`SubgroupVisibility::Visible`](#subgroupvisibility).
 
 ```rust
 pub async fn create_subgroup(
@@ -188,6 +231,41 @@ println!("Created subgroup: {} ({})", result.metadata.subject, result.metadata.i
 
 <Note>
 Equivalent to creating a group and then calling [`link_subgroups`](#link_subgroups), but done in a single round-trip.
+</Note>
+
+### create_subgroup_with_options
+
+Create a new subgroup linked to a community with an explicit visibility. Use this when the subgroup should be hidden from non-members in the community's subgroup list.
+
+```rust
+pub async fn create_subgroup_with_options(
+    &self,
+    options: CreateSubgroupOptions,
+) -> Result<CreateCommunityResult, CommunityError>
+```
+
+**Parameters:**
+- `options` — Subgroup creation options (see [`CreateSubgroupOptions`](#createsubgroupoptions))
+
+**Returns:**
+- `CreateCommunityResult` — Contains the full `metadata: GroupMetadata` for the created subgroup
+
+**Example:**
+```rust
+use whatsapp_rust::features::community::{CreateSubgroupOptions, SubgroupVisibility};
+
+let participants = vec!["5511999999999@s.whatsapp.net".parse()?];
+
+let options = CreateSubgroupOptions::new("Mods only", &participants, community_jid.clone())
+    .with_visibility(SubgroupVisibility::Hidden);
+
+let result = client.community()
+    .create_subgroup_with_options(options)
+    .await?;
+```
+
+<Note>
+Visibility is fixed at creation time. WhatsApp does not support changing a subgroup's visibility later.
 </Note>
 
 ### unlink_subgroups
@@ -244,8 +322,8 @@ let subgroups = client.community()
     .await?;
 
 for sg in &subgroups {
-    println!("{}: {} (default: {}, general: {})",
-        sg.id, sg.subject, sg.is_default_sub_group, sg.is_general_chat);
+    println!("{}: {} (default: {}, general: {}, hidden: {})",
+        sg.id, sg.subject, sg.is_default_sub_group, sg.is_general_chat, sg.is_hidden_group);
 }
 ```
 
@@ -453,10 +531,11 @@ pub struct CommunitySubgroup {
     pub id: Jid,
     pub subject: String,
     pub participant_count: Option<u32>,
-    pub is_default_sub_group: bool,
-    pub is_general_chat: bool,
     pub creation: Option<u64>,
     pub owner: Option<Jid>,
+    pub is_default_sub_group: bool,
+    pub is_general_chat: bool,
+    pub is_hidden_group: bool,
 }
 ```
 
@@ -466,10 +545,81 @@ pub struct CommunitySubgroup {
 - `id` — Subgroup JID
 - `subject` — Subgroup name
 - `participant_count` — Number of participants (if available)
-- `is_default_sub_group` — Whether this is the default announcement subgroup
-- `is_general_chat` — Whether this is the general chat subgroup
 - `creation` — Subgroup creation timestamp (Unix seconds), if available
 - `owner` — JID of the subgroup owner, if available
+- `is_default_sub_group` — Whether this is the default announcement subgroup
+- `is_general_chat` — Whether this is the general chat subgroup
+- `is_hidden_group` — Whether this subgroup is hidden from non-members in the community's subgroup list. Reflects the `hidden_group` property parsed from the MEX response; defaults to `false` if the server omits it.
+
+### SubgroupVisibility
+
+Visibility selected when a subgroup is created or linked. Implements `Copy`, `PartialEq`, `Eq`, and `Default` (`Visible`).
+
+```rust
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub enum SubgroupVisibility {
+    #[default]
+    Visible,
+    Hidden,
+}
+```
+
+**Variants:**
+- `Visible` — The subgroup appears in the community's subgroup list.
+- `Hidden` — The subgroup is omitted from the community's subgroup list for users who are not members. Visibility cannot be changed after linking.
+
+### CreateSubgroupOptions
+
+Options passed to [`create_subgroup_with_options`](#create_subgroup_with_options) when creating a subgroup already linked to a community.
+
+```rust
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct CreateSubgroupOptions {
+    pub name: String,
+    pub participants: Vec<Jid>,
+    pub parent_jid: Jid,
+    pub visibility: SubgroupVisibility,
+}
+```
+
+**Fields:**
+- `name` — Name of the new subgroup
+- `participants` — Initial participant JIDs to add to the subgroup
+- `parent_jid` — JID of the parent community to link the new subgroup under
+- `visibility` — Visibility applied at creation time (defaults to `Visible`)
+
+**Constructors:**
+```rust
+// Visible-by-default options
+let options = CreateSubgroupOptions::new("Announcements", &participants, community_jid.clone());
+
+// Override the visibility
+let hidden = options.with_visibility(SubgroupVisibility::Hidden);
+```
+
+### LinkSubgroupOptions
+
+Options for linking a single existing group to a community via [`link_subgroups_with_options`](#link_subgroups_with_options).
+
+```rust
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct LinkSubgroupOptions {
+    pub jid: Jid,
+    pub visibility: SubgroupVisibility,
+}
+```
+
+**Fields:**
+- `jid` — JID of the existing group to link
+- `visibility` — Visibility applied to this group at link time
+
+**Constructor:**
+```rust
+let opt = LinkSubgroupOptions::new(group_jid, SubgroupVisibility::Hidden);
+```
 
 ### LinkSubgroupsResult
 

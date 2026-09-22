@@ -1,0 +1,41 @@
+---
+title: "September 22, 2026 — Hidden community subgroups"
+description: "Create or link community subgroups with an explicit visibility, and read the current visibility from CommunitySubgroup."
+---
+
+## Features
+
+**Hidden subgroup visibility ([#1522](https://github.com/oxidezap/whatsapp-rust/pull/1522))**
+
+Subgroup visibility is now part of the public community API. A hidden subgroup is omitted from the community's subgroup list for users who are not members; a visible subgroup appears for everyone. Visibility is fixed at creation or link time — WhatsApp does not support changing it later.
+
+New types in `whatsapp_rust::features::community`:
+
+- [`SubgroupVisibility`](/api/community#subgroupvisibility) — `Visible` (default) or `Hidden`.
+- [`CreateSubgroupOptions`](/api/community#createsubgroupoptions) — name, participants, parent JID, and visibility, with `new(...)` and `with_visibility(...)` builders.
+- [`LinkSubgroupOptions`](/api/community#linksubgroupoptions) — one `(jid, visibility)` pair per group.
+
+New methods on `Community`:
+
+- [`create_subgroup_with_options`](/api/community#create_subgroup_with_options) — create a subgroup with an explicit add-time visibility in one round-trip.
+- [`link_subgroups_with_options`](/api/community#link_subgroups_with_options) — link existing groups with a per-group visibility, mixing visible and hidden in a single IQ.
+
+The visible-only wrappers `create_subgroup` and `link_subgroups` still work and default to `SubgroupVisibility::Visible`, so existing call sites do not need to change.
+
+```rust
+use whatsapp_rust::features::community::{
+    CreateSubgroupOptions, LinkSubgroupOptions, SubgroupVisibility,
+};
+
+let options = CreateSubgroupOptions::new("Mods only", &participants, community_jid.clone())
+    .with_visibility(SubgroupVisibility::Hidden);
+client.community().create_subgroup_with_options(options).await?;
+
+let link = vec![
+    LinkSubgroupOptions::new(a_jid, SubgroupVisibility::Visible),
+    LinkSubgroupOptions::new(b_jid, SubgroupVisibility::Hidden),
+];
+client.community().link_subgroups_with_options(&community_jid, &link).await?;
+```
+
+[`CommunitySubgroup`](/api/community#communitysubgroup) gained an `is_hidden_group: bool` field, parsed from the `hidden_group` property in the MEX subgroup listing. It defaults to `false` when the server omits the field, so existing readers keep working. See the [community management guide](/guides/communities#hidden-subgroups) for a full walkthrough.
