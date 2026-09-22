@@ -684,46 +684,124 @@ pub struct NewsletterFollower {
 
 ### NewsletterMessage
 
-A message from a newsletter's history.
+A message from a newsletter's history. `#[non_exhaustive]` — construct it from parsed responses rather than by struct literal, so newly-added counters land as fields, not breaks.
 
 ```rust
+#[non_exhaustive]
 pub struct NewsletterMessage {
-    /// Server-assigned message ID (monotonic, used for pagination cursors).
+    pub message_id: String,
     pub server_id: u64,
-    /// Message timestamp (Unix seconds).
     pub timestamp: u64,
-    /// Message type (Text, Media, Reaction, etc.).
     pub message_type: NewsletterMessageType,
-    /// Whether the viewer is the sender.
+    pub edit: EditAttribute,
     pub is_sender: bool,
-    /// Decoded protobuf message (from plaintext bytes).
     pub message: Option<wa::Message>,
-    /// Reaction counts on this message.
+    pub media_type: Option<NewsletterMediaType>,
     pub reactions: Vec<NewsletterReactionCount>,
+    pub votes: Vec<NewsletterPollVote>,
+    pub forwards_count: Option<u64>,
+    pub views_count: Option<u64>,
+    pub responses_count: Option<u64>,
+    pub original_timestamp: Option<u64>,
+    pub last_edit_timestamp_ms: Option<u64>,
+    pub poll_type: Option<PollType>,
+    pub content_type: Option<String>,
+    pub question_type: Option<NewsletterQuestionType>,
+    pub message_association_type: Option<NewsletterMessageAssociationType>,
+    pub is_wamo_sub: bool,
+    pub admin_profile: Option<NewsletterAdminProfile>,
+    pub rcat: Option<Vec<u8>>,
 }
 ```
 
+- `message_id` — Wire stanza id. Pass this to [`edit_message`](#edit_message) and [`revoke_message`](#revoke_message); it is **not** the same as `server_id`, which reactions use. Empty when the server omitted it.
+- `server_id` — Server-assigned monotonic id. Use it as the pagination cursor in [`get_messages`](#get_messages) and as the target for [`send_reaction`](#send_reaction).
+- `timestamp` — Message timestamp (Unix seconds). Moves with an edit.
+- `message_type` — `Text`, `Media`, or `Poll` on the wire. An edit or revocation is not a message type; see `edit`. Reactions are counts on the reacted-to message, not a type.
+- `edit` — `AdminEdit` (`3`) for an edited message, `AdminRevoke` (`8`) for a revoked one, `Empty` otherwise. A revoked message keeps its envelope, drops its body, its forward counter, and `message` becomes `None`.
+- `message` — Decoded protobuf message from the `<plaintext>` bytes. `None` when the server sent no body (for example, after a revocation, or when the payload was empty).
+- `media_type` — Hint about the payload readable without decoding it. Unknown values are kept as [`NewsletterMediaType::Other`](#newslettermediatype).
+- `reactions` — Aggregated per-emoji counts.
+- `votes` — Per-option tallies when this is a poll message; empty otherwise. See [`NewsletterPollVote`](#newsletterpollvote).
+- `forwards_count` — How many times the message was forwarded. `None` means the server omitted the counter; treat it as distinct from `Some(0)`.
+- `views_count`, `responses_count` — View count and channel-question response count. Contract-derived; a follower-side capture never carried them, so expect `None` unless the viewer's role in the channel entitles them to those figures.
+- `original_timestamp` — `<meta original_msg_t>` in Unix seconds: when the message was first posted, as opposed to `timestamp`, which moves with an edit.
+- `last_edit_timestamp_ms` — `<meta msg_edit_t>` in Unix **milliseconds** (unlike every other timestamp on this struct): when the message was last edited.
+- `poll_type` — The poll's lifecycle stage (creation, quiz creation, result snapshot). Populated only when `message_type` is `Poll`, matching WhatsApp Web's scoping.
+- `content_type`, `question_type`, `message_association_type` — `<meta>` classifiers. `question_type` is `question` for a channel question or `reply` for an admin reply. `message_association_type` records how this media relates to another message (`media_poll`, `motion_photo`, `poll_add_option`, …).
+- `is_wamo_sub` — `<meta is_wamo_sub="true">`.
+- `admin_profile` — Publishing admin's public profile, on channels that enabled admin profiles.
+- `rcat` — `<rcat>` payload bytes. Opaque receiver-side token WhatsApp Web associates with `type="media"` + `mediatype="url"` link previews; carried verbatim and not interpreted.
+
 ### NewsletterMessageType
 
-The type of a newsletter message. Uses a `StringEnum` for type-safe wire-protocol mapping. Implements `PartialEq` and `Eq`.
+The `type` attribute of a newsletter history `<message>`. Uses a wire enum with an `Other(String)` fallback so a future value on the wire deserializes rather than fails.
 
 ```rust
 #[non_exhaustive]
 pub enum NewsletterMessageType {
     Text,          // "text"
     Media,         // "media"
-    Reaction,      // "reaction"
-    Revoke,        // "revoke"
-    PollCreation,  // "poll_creation"
-    PollVote,      // "poll_vote"
-    Edit,          // "edit"
-    Other(String), // Unknown/future types
+    Poll,          // "poll"
+    Reaction,      // (never emitted; see NewsletterMessage.reactions)
+    Revoke,        // (never emitted; a revocation is edit="8")
+    PollCreation,  // (never emitted; use Poll + poll_type)
+    PollVote,      // (never emitted; use NewsletterMessage.votes)
+    Edit,          // (never emitted; an edit is edit="3")
+    Other(String),
 }
 ```
 
+Only `Text`, `Media`, and `Poll` are produced by the wire; the other named variants are kept for source compatibility with earlier releases and will never match a parsed response. Read edits and revocations from `NewsletterMessage::edit`, poll stage from `NewsletterMessage::poll_type`, poll totals from `NewsletterMessage::votes`, and reaction totals from `NewsletterMessage::reactions`.
+
 **Methods:**
-- `as_str()` - Returns the wire-protocol string representation
-- `From<&str>` - Parse from wire string, unknown values become `Other(String)`
+- `as_str()` — Wire-protocol string representation.
+- `From<&str>` — Parse from a wire string; unknown values become `Other(String)`.
+
+### NewsletterMediaType
+
+The `mediatype` attribute of newsletter `<plaintext>`. Known values match the whatspec IR; anything else is kept as `Other(String)` for forward compatibility.
+
+```rust
+#[non_exhaustive]
+pub enum NewsletterMediaType {
+    OnePSticker, Audio, AvatarSticker, CatalogLink, Collection, Document,
+    GenAiSticker, Gif, Image, MotionPhoto, MotionVideo, ProductLink,
+    Ptt, Ptv, Sticker, StickerPack, Url, UserCreatedSticker, Vcard, Video,
+    Other(String),
+}
+```
+
+### NewsletterQuestionType
+
+The `questiontype` attribute in newsletter `<meta>`.
+
+```rust
+#[non_exhaustive]
+pub enum NewsletterQuestionType {
+    Question, // "question"
+    Reply,    // "reply"
+    Other(String),
+}
+```
+
+### NewsletterMessageAssociationType
+
+The `message_association_type` attribute in newsletter `<meta>`. Describes how a media message relates to another message.
+
+```rust
+#[non_exhaustive]
+pub enum NewsletterMessageAssociationType {
+    HdImageDualUpload,
+    HdVideoDualUpload,
+    HevcVideoDualUpload,
+    MediaPoll,
+    MotionPhoto,
+    PollAddOption,
+    StickerAnnotation,
+    Other(String),
+}
+```
 
 ### NewsletterReactionCount
 
@@ -735,6 +813,24 @@ pub struct NewsletterReactionCount {
     pub count: u64,
 }
 ```
+
+### NewsletterPollVote
+
+A poll option's vote tally on a newsletter message. Channel polls are counted server-side, so unlike a DM or group vote the totals arrive in plaintext — nothing to decrypt.
+
+```rust
+#[non_exhaustive]
+pub struct NewsletterPollVote {
+    /// SHA-256 of the option name (same digest as `wacore::poll::compute_option_hash`).
+    /// Match it against the options of the `pollCreationMessage` in
+    /// `NewsletterMessage::message` to recover which option was voted for.
+    pub option_hash: [u8; 32],
+    /// How many followers picked this option.
+    pub count: u64,
+}
+```
+
+Votes with malformed hashes or a missing or malformed required `count` are dropped during parsing; a valid `count="0"` is preserved and remains distinct from absence.
 
 ## Error handling
 
