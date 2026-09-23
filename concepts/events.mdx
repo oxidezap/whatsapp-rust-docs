@@ -187,6 +187,8 @@ pub enum Event {
     MessageLabelAssociationUpdate(MessageLabelAssociationUpdate),
     QuickReplyUpdate(QuickReplyUpdate),
     LockChatUpdate(LockChatUpdate),
+    FavoriteStickerUpdate(FavoriteStickerUpdate),
+    RemoveRecentStickerUpdate(RemoveRecentStickerUpdate),
 
     // History Sync
     HistorySync(Box<LazyHistorySync>),
@@ -2261,6 +2263,71 @@ Event::QuickReplyUpdate(update) => {
 <Note>
 Deletion is the same mutation with `action.deleted == Some(true)`, not a syncd `Remove` — check that flag rather than assume the event always describes a live quick reply. See [Quick Replies](/api/quick-replies) for the outbound API that emits this event on other devices.
 </Note>
+
+### FavoriteStickerUpdate
+
+**Emitted:** When a sticker is favorited or unfavorited on a linked device (`favoriteSticker` app state action).
+
+```rust
+#[derive(Debug, Clone, Serialize, bon::Builder)]
+#[non_exhaustive]
+pub struct FavoriteStickerUpdate {
+    pub filehash: String,
+    pub timestamp: DateTime<Utc>,
+    pub action: Box<wa::sync_action_value::StickerAction>,
+    pub from_full_sync: bool,
+}
+```
+
+**Fields:**
+- `filehash` — Base64 SHA-256 of the decrypted sticker file. Serves as the sticker's stable identity across devices.
+- `timestamp` — When the change occurred on the originating device.
+- `action.is_favorite` — `Some(true)` for a favorite, `Some(false)` for an unfavorite. Always present; the event is skipped as malformed when it is absent.
+- `action.direct_path`, `action.media_key`, `action.file_enc_sha256`, `action.mimetype`, `action.width`, `action.height` — Media handles for downloading a newly favorited sticker.
+- `from_full_sync` — `true` while replaying the initial app state full sync.
+
+**Example:**
+```rust
+Event::FavoriteStickerUpdate(update) => {
+    if update.action.is_favorite == Some(true) {
+        println!("Sticker {} favorited", update.filehash);
+    } else {
+        println!("Sticker {} unfavorited", update.filehash);
+    }
+}
+```
+
+<Note>
+Unfavoriting is the same `Set` mutation with `action.is_favorite == Some(false)`, not a syncd `Remove`. Check the flag to tell the two directions apart.
+</Note>
+
+### RemoveRecentStickerUpdate
+
+**Emitted:** When a sticker is removed from the recent-stickers list on a linked device (`removeRecentSticker` app state action).
+
+```rust
+#[derive(Debug, Clone, Serialize, bon::Builder)]
+#[non_exhaustive]
+pub struct RemoveRecentStickerUpdate {
+    pub filehash: String,
+    pub timestamp: DateTime<Utc>,
+    pub action: Box<wa::sync_action_value::RemoveRecentStickerAction>,
+    pub from_full_sync: bool,
+}
+```
+
+**Fields:**
+- `filehash` — Base64 SHA-256 of the decrypted sticker file (the recent entry's identity).
+- `timestamp` — When the change occurred on the originating device.
+- `action.last_sticker_sent_ts` — Optional guard timestamp. When present, WhatsApp Web drops its local recent entry only if that entry is not newer. When `None`, the recent entry is dropped unconditionally.
+- `from_full_sync` — `true` while replaying the initial app state full sync.
+
+**Example:**
+```rust
+Event::RemoveRecentStickerUpdate(update) => {
+    println!("Recent sticker {} removed", update.filehash);
+}
+```
 
 ## History sync events
 

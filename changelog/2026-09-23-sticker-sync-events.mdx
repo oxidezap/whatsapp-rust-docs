@@ -1,0 +1,40 @@
+---
+title: "September 23, 2026 — Sticker sync events"
+description: "Handle favoriteSticker and removeRecentSticker app state mutations through two new inbound events."
+---
+
+## Features
+
+**Sticker sync events ([#1538](https://github.com/oxidezap/whatsapp-rust/pull/1538))**
+
+The client now dispatches events when the `favoriteSticker` and `removeRecentSticker` mutations arrive from a linked device through app state sync. Before this change, both mutations were decoded and dropped, so favoriting a sticker or clearing a recent on the phone was invisible to your handler.
+
+Two new variants on `wacore::types::events::Event`:
+
+- [`FavoriteStickerUpdate`](/concepts/events#favoritestickerupdate) — a sticker was favorited or unfavorited. Read `action.is_favorite` to tell the two directions apart. The action also carries `direct_path`, `media_key`, `file_enc_sha256`, `mimetype`, `width`, and `height` so you can download a newly favorited sticker.
+- [`RemoveRecentStickerUpdate`](/concepts/events#removerecentstickerupdate) — a sticker was removed from the recent-stickers list. `action.last_sticker_sent_ts` is the optional guard timestamp WhatsApp Web uses to skip newer local entries; when it is `None`, the recent entry is dropped unconditionally.
+
+Both events carry the sticker's `filehash` (base64 SHA-256 of the decrypted file) as its stable identity, the mutation `timestamp`, and `from_full_sync` so you can suppress UI notifications during the initial app state bootstrap.
+
+```rust
+use wacore::types::events::Event;
+
+.on_event(|event, _client| async move {
+    match &*event {
+        Event::FavoriteStickerUpdate(update) => {
+            let verb = if update.action.is_favorite == Some(true) {
+                "favorited"
+            } else {
+                "unfavorited"
+            };
+            println!("Sticker {} {verb}", update.filehash);
+        }
+        Event::RemoveRecentStickerUpdate(update) => {
+            println!("Recent sticker {} removed", update.filehash);
+        }
+        _ => {}
+    }
+})
+```
+
+Validation matches WhatsApp Web's sync action handlers: both actions are `Set`-only, a missing filehash is skipped, a `stickerAction` without `is_favorite` is treated as malformed, and a `removeRecentSticker` without `last_sticker_sent_ts` still fires with `None`.
