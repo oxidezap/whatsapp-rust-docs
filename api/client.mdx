@@ -1611,28 +1611,62 @@ The cache exposes:
 |--------|---------|
 | `is_enabled(prop)` | Truthy check for bool flags, falling back to the registry default |
 | `get(prop)` | Raw `Option<CompactString>` value if the server sent it |
+| `get_bool(prop)` | Parsed `Option<bool>`, `None` when the value is not cached (no default substitution) |
 | `get_int(prop)` | Parsed `i64` for int flags, falling back to the registry default |
 | `is_seeded()` | `true` after the first full (non-delta) fetch has been applied |
 
 #### Watching additional flags
 
-Only flags in the cache's *interest set* are retained when props come in — every other server prop is discarded to avoid allocating for the ~2,000+ flags WhatsApp ships. The interest set is pre-seeded with the flags the library itself reads (see `wacore::iq::props::WATCHED`). If you need to gate your own code on a flag the library doesn't already watch, register it before the first `fetch_props()`:
+Only flags in the cache's *interest set* are retained when props come in. Every other server prop is discarded to avoid allocating for the ~2,000+ flags WhatsApp ships. The interest set is pre-seeded with the flags the library itself reads (see `wacore::iq::props::WATCHED`).
+
+To gate your own code on a flag the library doesn't already watch, register it on the builder before the first `fetch_props()`. `ClientBuilder::with_watched_ab_props` (and the matching [`BotBuilder::with_watched_ab_props`](/api/bot#with_watched_ab_props)) accumulate across calls and take any `IntoIterator<Item = AbProp>`, so you can register single flags or whole slices:
 
 ```rust
-use wacore::iq::abprops::web;
+use wacore::iq::abprops::web::AURA_PINNED_CHATS_BENEFIT_ACTIVE;
+use whatsapp_rust::client::ClientBuilder;
 
-client.ab_props().watch(web::ADMIN_REVOKE_RECEIVER).await;
-// or in bulk:
-client.ab_props().watch_many(&[
-    web::ADD_MEMBER_SYSTEM_MESSAGE,
-    web::ADMIN_ONLY_MENTION_EVERYONE_GROUP_SIZE,
-]).await;
+let client = ClientBuilder::new(persistence_manager)
+    .with_watched_ab_props([AURA_PINNED_CHATS_BENEFIT_ACTIVE])
+    .build()
+    .await?;
 ```
 
 Flags retain their `code`, `value_type`, and `default` straight from the WA Web bundle, so behavior tracks WhatsApp Web without hand-maintained config tables.
 
+### ab_prop_enabled
+
+```rust
+pub async fn ab_prop_enabled(&self, prop: AbProp) -> Option<bool>
+```
+
+Reads a watched boolean A/B prop as the server sent it. Use this to gate application behavior on the same server flags WhatsApp Web reads — for example `AURA_PINNED_CHATS_BENEFIT_ACTIVE`, the WhatsApp Plus pinned-chats-limit gate.
+
+Returns `None` when the client holds no value for `prop`:
+
+- The prop was not registered with [`ClientBuilder::with_watched_ab_props`](#watching-additional-flags), so the cache dropped it while the catalog streamed in.
+- The catalog has not been fetched yet on this connection. `fetch_props()` runs automatically on connect unless [`with_ab_props_fetch(false)`](/api/bot#with_ab_props_fetch) turned it off.
+- The server did not include `prop` in its response.
+
+Unlike [`AbPropsCache::is_enabled`](#ab-props-cache), `ab_prop_enabled` does not substitute the registry default, so a caller can tell "off" from "unknown". A cached value is truthy when it equals `"1"`, `"true"`, or `"enabled"` (case-insensitive).
+
+<ParamField path="prop" type="AbProp" required>
+  Typed flag from [`wacore::iq::abprops`](/api/wacore#a-b-props-registry).
+</ParamField>
+
+**Example:**
+
+```rust
+use wacore::iq::abprops::web::AURA_PINNED_CHATS_BENEFIT_ACTIVE;
+
+match client.ab_prop_enabled(AURA_PINNED_CHATS_BENEFIT_ACTIVE).await {
+    Some(true) => enable_extended_pinned_chats(),
+    Some(false) => enforce_default_pinned_chats_limit(),
+    None => wait_for_next_fetch(),
+}
+```
+
 <Note>
-The AB props cache is internal to the client. You don't need to interact with it directly — the library automatically checks relevant flags when performing group operations like `create_group` and `add_participants`.
+The AB props cache itself is internal — the library automatically checks relevant flags when performing group operations like `create_group` and `add_participants`. You only need `with_watched_ab_props` + `ab_prop_enabled` when your application needs to read a server gate the library doesn't already watch.
 </Note>
 
 #### Disabling the fetch
