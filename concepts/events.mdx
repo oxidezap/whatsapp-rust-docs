@@ -189,6 +189,7 @@ pub enum Event {
     LockChatUpdate(LockChatUpdate),
     FavoriteStickerUpdate(FavoriteStickerUpdate),
     RemoveRecentStickerUpdate(RemoveRecentStickerUpdate),
+    FavoritesUpdate(FavoritesUpdate),
 
     // History Sync
     HistorySync(Box<LazyHistorySync>),
@@ -2328,6 +2329,43 @@ Event::RemoveRecentStickerUpdate(update) => {
     println!("Recent sticker {} removed", update.filehash);
 }
 ```
+
+### FavoritesUpdate
+
+**Emitted:** When the favorite chats list changes on a linked device (`favorites` app state action).
+
+```rust
+#[derive(Debug, Clone, Serialize, bon::Builder)]
+#[non_exhaustive]
+pub struct FavoritesUpdate {
+    pub timestamp: DateTime<Utc>,
+    pub action: Box<wa::sync_action_value::FavoritesAction>,
+    pub from_full_sync: bool,
+}
+```
+
+**Fields:**
+- `timestamp` — When the change occurred on the originating device.
+- `action.favorites` — The full favorite chats list, in the order the phone shows it. Each entry's `id` is a chat JID string.
+- `from_full_sync` — `true` while replaying the initial app state full sync.
+
+**Example:**
+```rust
+Event::FavoritesUpdate(update) => {
+    let chats: Vec<&str> = update
+        .action
+        .favorites
+        .iter()
+        .filter_map(|f| f.id.as_deref())
+        .collect();
+    // Replace your stored list; each event carries the whole list
+    println!("Favorite chats: {chats:?}");
+}
+```
+
+<Note>
+Each event carries the whole list, not a delta. Replace the list you held before rather than merging. An empty `favorites` list is valid and means the account has no favorite chats. To write the list from your app, call [`send_app_state_action`](/api/chat-actions#send_app_state_action) with `schemas::FAVORITES`.
+</Note>
 
 ## History sync events
 
