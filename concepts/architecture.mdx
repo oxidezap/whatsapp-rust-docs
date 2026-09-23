@@ -443,7 +443,8 @@ const DEAD_SOCKET_TIME: Duration = Duration::from_secs(20);
 - Skips ping if data was received within the minimum interval (connection proven alive)
 - Sends ping *before* dead-socket check to prevent false-positive reconnects on idle-but-healthy connections
 - Waits up to 20s for response
-- Checks dead socket on **every** tick (not just after failures) — catches scenarios where pending IQs caused the ping to be skipped, or where the ping succeeded but the connection died immediately after
+- Checks dead socket on every tick that attempts a ping (not just after failures), which catches a ping that succeeded right before the connection died
+- Defers the routine ping while IQ responses are pending, but once inbound data has been silent for 30s (or the watchdog expires) it sends an explicit probe ping first. A pong preserves the connection, so an ignored IQ times out without forcing a reconnect; a silent peer still triggers teardown after that one probe ([whatsapp-rust#1543](https://github.com/oxidezap/whatsapp-rust/pull/1543))
 - Detects dead socket, triggering immediate reconnection, if no data has been received for 20s since the **first** send after the last receive (`first_send_since_recv`) — matching WA Web's `deadSocketTimer.onOrBefore`; subsequent sends do not push this deadline back out
 - Fatal errors (`Socket`, `Disconnected`, `NotConnected`, `InternalChannelClosed`) cause the keepalive loop to exit immediately
 - Three consecutive transient (`Timeout`/`ServerError`/`ParseError`) failures force `reconnect_immediately()` and exit the loop, rather than pinging forever against a socket that still receives but never answers ([whatsapp-rust#1410](https://github.com/oxidezap/whatsapp-rust/pull/1410))
