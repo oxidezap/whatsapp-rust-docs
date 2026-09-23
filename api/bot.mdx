@@ -665,6 +665,35 @@ The catalog is the largest frame of an ordinary login — a few thousand props, 
 Turned off, every flag reads as its registry default — the value WA Web itself uses before its first fetch. The server sees no `abt` request (whatsmeow never sends one) and accepts your client either way. The cost: an account the server has 1:1-LID-migrated is not recognized as such from the props (`lid_one_on_one_migration_enabled` defaults to off), and the privacy-token and trusted-contact-token gates run on their defaults.
 </Note>
 
+### with_watched_ab_props
+
+```rust
+pub fn with_watched_ab_props(
+    self,
+    props: impl IntoIterator<Item = AbProp>,
+) -> Self
+```
+
+Register extra A/B props for the [`AbPropsCache`](/api/client#ab-props-cache) to retain, on top of the flags the library reads itself. Use this to gate application behavior on a server prop with [`Client::ab_prop_enabled`](/api/client#ab_prop_enabled) — for example `AURA_PINNED_CHATS_BENEFIT_ACTIVE`, the WhatsApp Plus pinned-chats-limit gate.
+
+The client discards every prop it does not watch while the catalog streams in, so the set is fixed on the builder before the first fetch. Calls accumulate.
+
+<ParamField path="props" type="impl IntoIterator<Item = AbProp>" required>
+  Typed flags from [`wacore::iq::abprops`](/api/wacore#a-b-props-registry). Pass a single-element array, a slice, or any iterator.
+</ParamField>
+
+**Example:**
+
+```rust
+use wacore::iq::abprops::web::AURA_PINNED_CHATS_BENEFIT_ACTIVE;
+
+Bot::builder()
+    .with_watched_ab_props([AURA_PINNED_CHATS_BENEFIT_ACTIVE])
+    // ...
+```
+
+Has no effect when [`with_ab_props_fetch(false)`](#with_ab_props_fetch) turns the whole catalog fetch off — every flag then reads as its registry default and `ab_prop_enabled` returns `None` for anything the server would have sent.
+
 ---
 
 ## Authentication
