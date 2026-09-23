@@ -1,0 +1,39 @@
+---
+title: "September 23, 2026 — Read server A/B props from your app"
+description: "Register extra A/B props on the builder and read them back as Option<bool> to gate application behavior on WhatsApp server flags."
+---
+
+## Features
+
+**Public A/B props read API ([#1539](https://github.com/oxidezap/whatsapp-rust/pull/1539))**
+
+Applications can now watch and read boolean A/B props the library doesn't already consume, so a server gate like `AURA_PINNED_CHATS_BENEFIT_ACTIVE` (the WhatsApp Plus pinned-chats limit) is reachable from user code.
+
+Previously the props cache kept only flags in the library's internal `WATCHED` set and dropped everything else while the catalog streamed in, so an application had no way to learn a server gate it cared about.
+
+New builder methods and client accessor:
+
+- [`ClientBuilder::with_watched_ab_props`](/api/client#watching-additional-flags) and [`BotBuilder::with_watched_ab_props`](/api/bot#with_watched_ab_props) register extra `AbProp` flags before the first `fetch_props()`. Calls accumulate.
+- [`Client::ab_prop_enabled`](/api/client#ab_prop_enabled) reads a watched boolean prop back as `Option<bool>`. It returns `None` when the client holds no value — not watched, not fetched yet, or not sent by the server — instead of substituting the registry default, so callers can tell "off" from "unknown".
+
+```rust
+use wacore::iq::abprops::web::AURA_PINNED_CHATS_BENEFIT_ACTIVE;
+
+let bot = Bot::builder()
+    .with_watched_ab_props([AURA_PINNED_CHATS_BENEFIT_ACTIVE])
+    // ...
+    .build()
+    .await?;
+
+match bot
+    .client()
+    .ab_prop_enabled(AURA_PINNED_CHATS_BENEFIT_ACTIVE)
+    .await
+{
+    Some(true) => enable_extended_pinned_chats(),
+    Some(false) => enforce_default_pinned_chats_limit(),
+    None => wait_for_next_fetch(),
+}
+```
+
+The cache exposes the underlying truthy parsing as [`AbPropsCache::get_bool`](/api/client#ab-props-cache), which `is_enabled` now reuses so both paths agree on what counts as `"1"`, `"true"`, or `"enabled"`.
