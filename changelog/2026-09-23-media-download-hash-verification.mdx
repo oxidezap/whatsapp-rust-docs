@@ -1,0 +1,16 @@
+---
+title: "September 23, 2026 — Media downloads verify declared hashes"
+description: "Encrypted media downloads now check the message's declared file_enc_sha256 and file_sha256 after HMAC and fail over to the next CDN host on mismatch."
+---
+
+## Fixes
+
+**Media downloads verify declared hashes ([#1541](https://github.com/oxidezap/whatsapp-rust/pull/1541))**
+
+`Client::download`, `Client::download_to_writer`, and their `from_params` variants now verify the downloadable's declared `file_enc_sha256` against the ciphertext SHA-256 and its `file_sha256` against the decrypted plaintext SHA-256, in addition to the existing HMAC check. Both the buffered and streaming paths run this check without copying the file a second time. When a hash is absent on the downloadable, that hash is skipped rather than treated as a failure.
+
+Before this change, a CDN body that authenticated under HMAC but did not match the sender's declared hashes was accepted silently. The client would hand back plaintext that did not agree with the message metadata the sender signed.
+
+A mismatch now fails the attempt with `MediaDecryptionError::EncryptedSha256Mismatch` or `PlaintextSha256Mismatch`. That participates in the same host-failover loop as HMAC or transport failures — the client tries the next CDN host, and if every host fails the streaming writer is truncated to empty on a best-effort basis rather than left holding unverified bytes. See [Encrypted Media (E2EE)](/api/download#encrypted-media-e2ee) for the updated verification steps.
+
+Public constructors and helper signatures on `DownloadUtils`, `DownloadParams`, and the `Downloadable` trait are unchanged, so existing call sites keep compiling with no edits.

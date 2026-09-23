@@ -34,7 +34,7 @@ pub async fn download(
 </ParamField>
 
 <ResponseField name="bytes" type="Vec<u8>">
-  Decrypted media bytes. For encrypted media (E2EE), automatically decrypts using AES-256-CBC and verifies HMAC-SHA256. For plaintext media (newsletters/channels), validates SHA-256 hash.
+  Decrypted media bytes. For encrypted media (E2EE), automatically decrypts using AES-256-CBC, verifies HMAC-SHA256, and checks the downloadable's declared `file_enc_sha256` and `file_sha256` against the ciphertext and plaintext (any mismatch fails the attempt and triggers host failover). For plaintext media (newsletters/channels), validates SHA-256 hash.
 </ResponseField>
 
 ### Example: download image
@@ -677,7 +677,8 @@ WhatsApp uses different handling for encrypted (E2EE) and plaintext media:
 1. **Download** encrypted bytes from CDN
 2. **Verify** HMAC-SHA256 (last 10 bytes)
 3. **Decrypt** using AES-256-CBC with keys derived from `media_key` via HKDF
-4. **Return** decrypted plaintext
+4. **Verify** the declared `file_enc_sha256` matches the ciphertext SHA-256 (when the downloadable carries one), then **verify** the declared `file_sha256` matches the decrypted plaintext SHA-256. A mismatch fails the attempt with `MediaDecryptionError::EncryptedSha256Mismatch` or `PlaintextSha256Mismatch` and the client tries the next CDN host.
+5. **Return** decrypted plaintext
 
 The `media_key` is expanded using HKDF-SHA256 to derive:
 - 16-byte IV
