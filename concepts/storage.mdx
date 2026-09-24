@@ -428,13 +428,15 @@ pub struct HashState {
     pub hash: [u8; 128],
     pub index_value_map: HashMap<String, Vec<u8>>,
     pub mac_mismatch_fatal: bool,
-    // Set only when a sync run reaches its terminal page — a bootstrap
-    // deferred mid-run leaves this false even though version already moved.
+    // Set when a sync run reaches its terminal page. A bootstrap deferred
+    // mid-run leaves this false even though version already moved. Also set
+    // (version and hash untouched) when a sync of a collection with a real
+    // version comes back empty and final, i.e. already at its head.
     // `#[serde(default)]`, so rows written before this field existed decode
     // it as `false`. That only forces a re-bootstrap for a legacy row still
     // sitting at version 0 — the ambiguous case this field exists to settle.
     // A legacy row with a real version already has `has_baseline()` true and
-    // asks for patches as before.
+    // asks for patches as before, and gains the flag on its first sync.
     pub bootstrapped: bool,
 }
 ```
