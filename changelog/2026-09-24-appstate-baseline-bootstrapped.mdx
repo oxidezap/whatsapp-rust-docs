@@ -1,0 +1,16 @@
+---
+title: "September 24, 2026 — App-state writes recover on synced collections"
+description: "A collection with a stored version but no bootstrapped flag now gains the flag after one sync at its head, so mark-as-read, pin, archive, mute, and star stop failing."
+---
+
+## Fixes
+
+**App-state writes no longer fail forever on unflagged collections ([#1545](https://github.com/oxidezap/whatsapp-rust/pull/1545))**
+
+Every app-state write (`mark_chat_as_read`, pin, archive, mute, star) checks the collection's `HashState::bootstrapped` flag first. If the flag is missing, the client syncs the collection and refuses the patch with `its bootstrap has not completed` when the flag is still missing afterwards.
+
+A collection with a real version but no flag could never get it. That happens for rows written before the field existed, or rows a store migration reset. If the collection was already at its head, the sync returned no patches and nothing set the flag, so every write to it failed on every attempt.
+
+The client now sets `bootstrapped` when a sync of a collection that already has a version comes back with no patches, no snapshot, and no more pages. The stored version and ltHash stay unchanged. A collection that is already flagged writes nothing on such a sync. A paged answer, an undownloaded snapshot, or a collection error still leaves the flag unset.
+
+No code changes are needed. Affected collections recover on the next write, which syncs first. See [`HashState`](/api/store#version-tracking) for the flag's full semantics.
