@@ -1,0 +1,30 @@
+---
+title: "September 23, 2026 — Favorite chats sync event"
+description: "Receive the favorite chats list from the phone through the new FavoritesUpdate event, emitted when the favorites app state mutation syncs."
+---
+
+## Features
+
+**Favorite chats sync event ([#1544](https://github.com/oxidezap/whatsapp-rust/pull/1544))**
+
+The client now dispatches [`FavoritesUpdate`](/concepts/events#favoritesupdate) when the `favorites` mutation arrives through app state sync. Before this change, you could write the favorite chats list with [`send_app_state_action`](/api/chat-actions#send_app_state_action) and `schemas::FAVORITES`, but the phone's list was decoded and dropped.
+
+The event carries `action.favorites` (the full list in the phone's order, each entry's `id` a chat JID string), the mutation `timestamp`, and `from_full_sync`.
+
+```rust
+use wacore::types::events::Event;
+
+.on_event(|event, _client| async move {
+    if let Event::FavoritesUpdate(update) = &*event {
+        let chats: Vec<&str> = update
+            .action
+            .favorites
+            .iter()
+            .filter_map(|f| f.id.as_deref())
+            .collect();
+        println!("Favorite chats: {chats:?}");
+    }
+})
+```
+
+Each event replaces the previous list rather than describing a delta. An empty list is the valid "no favorites" state and still fires the event.
