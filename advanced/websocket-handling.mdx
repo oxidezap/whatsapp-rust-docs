@@ -1234,7 +1234,12 @@ The loop runs every 15-30 seconds (randomized, matching WA Web's `15 * (1 + rand
 1. **Skip if recently active** — if data was received within `KEEP_ALIVE_INTERVAL_MIN` (15s), the connection is proven alive; skip the ping and reset the error counter
 2. **Send keepalive ping** — sends the ping *before* the dead-socket check so that a successful pong updates `last_data_received` and prevents false-positive dead-socket detection on idle-but-healthy connections
 3. **RTT-adjusted clock skew** — on pong, calculates server time offset using the midpoint formula: `(startTime + rtt/2) / 1000 - serverTime`, matching WA Web's `onClockSkewUpdate`
-4. **Skip ping when IQ pending** — if there are already pending IQ responses, the connection is implicitly being tested; skip the explicit ping
+4. **Defer routine ping when IQs are pending** — if IQ responses are outstanding, the routine ping is skipped. A skipped ping is not treated as liveness evidence, so the tick does not reset the error counter or run the dead-socket check
+5. **Probe before reconnecting** — if IQs are pending but no data has arrived for `KEEP_ALIVE_INTERVAL_MAX` (30s), or the dead-socket watchdog has expired, the loop sends an explicit `w:p` ping with the usual 20s deadline. A pong keeps the connection alive. A silent peer still triggers the dead-socket reconnect after that one bounded probe ([whatsapp-rust#1543](https://github.com/oxidezap/whatsapp-rust/pull/1543))
+
+<Note>
+**An ignored IQ no longer tears down a healthy connection ([whatsapp-rust#1543](https://github.com/oxidezap/whatsapp-rust/pull/1543)).** Previously, a single request the server never answered suppressed every ping, so the watchdog could force a reconnect on a connection that would still have answered a keepalive. Now the request simply times out with `IqError::Timeout`, and other requests on the same connection keep working. This explicit pre-reconnect probe is a library policy choice. WhatsApp Web was not observed doing it.
+</Note>
 
 ### Dead socket detection
 
@@ -1246,7 +1251,7 @@ Dead socket detection mirrors WA Web's `deadSocketTimer.onOrBefore` pattern, whi
 
 The watchdog is anchored to `SessionStats::first_send_since_recv` — the **first** send since the last receive, not the most recent send. `record_frame_sent` only stores a new anchor when the current one is unset or stale (`<=` the last-received timestamp); once armed, further sends leave it in place. Every receive clears the anchor (`None`), and the next send re-arms it. Anchoring on the most recent send instead (the pre-fix behavior) let continued outgoing traffic — messages, receipts, presence — keep pushing the deadline forward, hiding a half-open socket (a peer that silently disappeared while writes still buffer and reads hang) for as long as the app kept emitting frames.
 
-The dead-socket check runs on **every** keepalive tick — not just after a failed ping. This catches scenarios where pending IQs caused the ping to be skipped, or where the ping "succeeded" but the connection died immediately after. When a dead socket is detected, the client calls `reconnect_immediately()` and exits the keepalive loop.
+The dead-socket check runs on **every** keepalive tick — not just after a failed ping. This catches scenarios where the ping "succeeded" but the connection died immediately after. The one exception is a tick whose routine ping was deferred by pending IQs: it neither restores health nor authorizes a teardown, so the next tick sends the bounded probe first. When a dead socket is detected, the client calls `reconnect_immediately()` and exits the keepalive loop.
 
 WA Web's `deadSocketTimer.onOrBefore` (`WA/Shift/Timer.js`) arms on the first `callStanza` after a receive and is cancelled by `parseAndHandleStanza`; subsequent sends never push the deadline back out. The keepalive loop approximates this by checking `is_dead_socket_at(first_send_since_recv, last_recv, now)` unconditionally each iteration, where `first_send_since_recv` is the armed-anchor value described above. The tick reads the clock once into `now` and evaluates both the dead-socket check and the elapsed-time log message against that single instant, rather than re-reading the clock for each. There is no `last_data_sent_ms` field — nothing reads a "most recent send" timestamp, only the armed anchor.
 
