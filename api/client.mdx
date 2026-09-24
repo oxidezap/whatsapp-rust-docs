@@ -2040,7 +2040,7 @@ pub async fn send_iq(&self, query: InfoQuery<'_>) -> Result<Arc<OwnedNodeRef>, I
 Sends a custom IQ (Info/Query) stanza to the WhatsApp server.
 
 <ParamField path="query" type="InfoQuery" required>
-  IQ query containing stanza type, namespace, content, and optional timeout
+  IQ query containing stanza type, namespace, content, and optional timeout. The timeout (75s when `None`) covers writing the stanza to the socket and waiting for the response together, so a write that never completes still returns `IqError::Timeout`.
 </ParamField>
 
 **Example:**
