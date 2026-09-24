@@ -442,7 +442,11 @@ async fn sender_task(
         // plaintext into `observed` first when `sent_frames` is enabled. Stop
         // at the MAX_BATCH_FRAMES / MAX_BATCH_WIRE_BYTES ceiling, or when
         // try_recv finds nothing more waiting.
-        // ... encrypt_frame_into loop, then a single transport.send(out_buf) ...
+        // ... encrypt_frame_into loop ...
+
+        // Before the write starts: stats.arm_dead_socket_deadline(), so a
+        // write that never completes still arms the watchdog. Then a single
+        // transport.send(out_buf).
 
         // After the write succeeds: stats.record_frame_sent for each wire
         // frame, then — re-checking sent_frames.enabled() rather than trusting
@@ -1238,6 +1242,10 @@ The loop runs every 15-30 seconds (randomized, matching WA Web's `15 * (1 + rand
 5. **Probe before reconnecting** — if IQs are pending but no data has arrived for `KEEP_ALIVE_INTERVAL_MAX` (30s), or the dead-socket watchdog has expired, the loop sends an explicit `w:p` ping with the usual 20s deadline. A pong keeps the connection alive. A silent peer still triggers the dead-socket reconnect after that one bounded probe ([whatsapp-rust#1543](https://github.com/oxidezap/whatsapp-rust/pull/1543))
 
 <Note>
+**A socket that stops draining no longer hangs the connection ([whatsapp-rust#1547](https://github.com/oxidezap/whatsapp-rust/pull/1547)).** A socket can stay established but stop accepting writes, for example after a laptop resumes from suspend or the network changes underneath it. The socket buffers a few frames, then blocks the next write forever without an error. Previously, an IQ's deadline started only after its write returned, so the keepalive ping waited on that write forever and the connection stayed "up" until the process restarted. Now the IQ deadline covers the write and the wait together, and the watchdog arms before the write starts. A wedged ping times out after 20s, and the watchdog reconnects on the next tick.
+</Note>
+
+<Note>
 **An ignored IQ no longer tears down a healthy connection ([whatsapp-rust#1543](https://github.com/oxidezap/whatsapp-rust/pull/1543)).** Previously, a single request the server never answered suppressed every ping, so the watchdog could force a reconnect on a connection that would still have answered a keepalive. Now the request simply times out with `IqError::Timeout`, and other requests on the same connection keep working. This explicit pre-reconnect probe is a library policy choice. WhatsApp Web was not observed doing it.
 </Note>
 
@@ -1249,7 +1257,7 @@ Dead socket detection mirrors WA Web's `deadSocketTimer.onOrBefore` pattern, whi
 - **Cancelled** if data was received after the anchor was armed
 - **Fires** if `DEAD_SOCKET_TIME` (20s) has elapsed since the anchor with no receive since
 
-The watchdog is anchored to `SessionStats::first_send_since_recv` — the **first** send since the last receive, not the most recent send. `record_frame_sent` only stores a new anchor when the current one is unset or stale (`<=` the last-received timestamp); once armed, further sends leave it in place. Every receive clears the anchor (`None`), and the next send re-arms it. Anchoring on the most recent send instead (the pre-fix behavior) let continued outgoing traffic — messages, receipts, presence — keep pushing the deadline forward, hiding a half-open socket (a peer that silently disappeared while writes still buffer and reads hang) for as long as the app kept emitting frames.
+The watchdog is anchored to `SessionStats::first_send_since_recv` — the **first** send since the last receive, not the most recent send. `SessionStats::arm_dead_socket_deadline()` only stores a new anchor when the current one is unset or stale (`<=` the last-received timestamp); once armed, further sends leave it in place. The noise sender calls it when a batch enters the transport, *before* the write completes, matching WA Web, which arms the deadline at the send call. `record_frame_sent` calls it again after a successful write, which is a no-op once the anchor is set. Every receive clears the anchor (`None`), and the next send re-arms it. Anchoring on the most recent send instead (the pre-fix behavior) let continued outgoing traffic — messages, receipts, presence — keep pushing the deadline forward, hiding a half-open socket (a peer that silently disappeared while writes still buffer and reads hang) for as long as the app kept emitting frames.
 
 The dead-socket check runs on **every** keepalive tick — not just after a failed ping. This catches scenarios where the ping "succeeded" but the connection died immediately after. The one exception is a tick whose routine ping was deferred by pending IQs: it neither restores health nor authorizes a teardown, so the next tick sends the bounded probe first. When a dead socket is detected, the client calls `reconnect_immediately()` and exits the keepalive loop.
 
