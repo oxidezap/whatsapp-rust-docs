@@ -2892,7 +2892,7 @@ pub enum BusinessUpdateType {
 
 ### NewsletterLiveUpdate
 
-**Emitted:** When reaction counts change or messages are updated on a newsletter you're subscribed to (via `subscribe_live_updates`).
+**Emitted:** When reaction counts, forward counts, or poll tallies change on a newsletter you're subscribed to (via `subscribe_live_updates`).
 
 ```rust
 #[derive(Debug, Clone, Serialize, bon::Builder)]
@@ -2907,6 +2907,8 @@ pub struct NewsletterLiveUpdate {
 pub struct NewsletterLiveUpdateMessage {
     pub server_id: u64,
     pub reactions: Vec<NewsletterLiveUpdateReaction>,
+    pub votes: Vec<NewsletterLiveUpdatePollVote>,
+    pub forwards_count: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, bon::Builder)]
@@ -2915,13 +2917,26 @@ pub struct NewsletterLiveUpdateReaction {
     pub code: String,
     pub count: u64,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, bon::Builder)]
+#[non_exhaustive]
+pub struct NewsletterLiveUpdatePollVote {
+    pub option_hash: [u8; 32],
+    pub count: u64,
+}
 ```
 
 **Fields:**
 - `newsletter_jid` — The newsletter channel this update is for
-- `messages` — List of messages with updated reaction counts
+- `messages` — Messages whose counters changed. A message missing from an update has not changed since the previous one.
 - `server_id` — Server-assigned message ID
 - `reactions` — Current reaction counts (emoji code and count)
+- `votes` — Current per-option poll tallies. Empty when the message is not a poll.
+- `option_hash` — SHA-256 of the poll option name, the same digest as `wacore::poll::compute_option_hash`. Match it against the poll's options to find which option the tally belongs to.
+- `count` — Current number of votes for that option
+- `forwards_count` — How many times the message was forwarded. `None` means the server omitted the counter, which is not the same as `Some(0)`.
+
+Live updates don't carry view or response counts. Use [`get_messages`](/api/newsletter#get_messages) to read those.
 
 **Example:**
 ```rust
@@ -2930,6 +2945,13 @@ Event::NewsletterLiveUpdate(update) => {
     for msg in &update.messages {
         for r in &msg.reactions {
             println!("  Message {}: {} x{}", msg.server_id, r.code, r.count);
+        }
+        for vote in &msg.votes {
+            println!("  Message {}: option {} has {} votes",
+                msg.server_id, hex::encode(vote.option_hash), vote.count);
+        }
+        if let Some(forwards) = msg.forwards_count {
+            println!("  Message {}: forwarded {} times", msg.server_id, forwards);
         }
     }
 }

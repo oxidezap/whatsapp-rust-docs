@@ -251,7 +251,7 @@ See [Newsletter API reference](/api/newsletter#get_messages) for details.
 
 ## Live updates
 
-Subscribe to real-time updates for a newsletter to receive reaction count changes:
+Subscribe to real-time updates for a newsletter to receive changes to reaction counts, forward counts, and poll tallies:
 
 ```rust
 let duration = client.newsletter()
@@ -261,7 +261,7 @@ let duration = client.newsletter()
 println!("Subscribed for {}s", duration);
 ```
 
-The server sends `NewsletterLiveUpdate` events with updated reaction counts. Handle them in your event handler:
+The server sends `NewsletterLiveUpdate` events with the current counters of each changed message. Handle them in your event handler:
 
 ```rust
 use wacore::types::events::Event;
@@ -274,9 +274,17 @@ Event::NewsletterLiveUpdate(update) => {
                 .map(|r| format!("{} x{}", r.code, r.count))
                 .collect::<Vec<_>>()
         );
+        for vote in &msg.votes {
+            println!("    poll option {}: {}", hex::encode(vote.option_hash), vote.count);
+        }
+        if let Some(forwards) = msg.forwards_count {
+            println!("    forwards: {}", forwards);
+        }
     }
 }
 ```
+
+Each update only includes messages whose counters changed. `votes` is empty for messages that aren't polls. Each tally is keyed by the same `option_hash` as the history tallies from `get_messages`. `forwards_count` is `None` when the server omits the counter. Live updates don't include `views_count` or `responses_count`.
 
 <Note>
 The subscription duration (typically 300 seconds) is returned by the server. You need to re-subscribe periodically to continue receiving live updates.
