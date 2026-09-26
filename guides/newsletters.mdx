@@ -178,6 +178,23 @@ client.newsletter()
 
 Hash option names exactly as they appear in the poll. You can also reuse the `option_hash` values from fetched [poll tallies](#fetching-message-history). See [`send_poll_vote`](/api/newsletter#send_poll_vote) for details.
 
+Poll tallies count every follower, so they can't confirm your own vote. To read back your current reaction and vote on recent messages, use `get_my_addons`:
+
+```rust
+let addons = client.newsletter()
+    .get_my_addons(&newsletter_jid, 20)
+    .await?;
+
+if let Some(mine) = addons.iter().find(|a| a.server_id == poll_server_id) {
+    if let Some(vote) = &mine.poll_vote {
+        // Empty after you remove your vote
+        println!("You selected {} option(s)", vote.option_hashes.len());
+    }
+}
+```
+
+See [`get_my_addons`](/api/newsletter#get_my_addons) for details.
+
 ### Editing and revoking messages
 
 Channels use a plaintext edit/revoke flow that's separate from DM and group messages. Call the helpers on `client.newsletter()` and pass the original message's `message_id` (the wire stanza id returned by `send_message`, **not** the `server_id` used for reactions):

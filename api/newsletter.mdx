@@ -580,6 +580,53 @@ if let Some(oldest) = messages.last() {
 }
 ```
 
+### get_my_addons
+
+Read your own reaction and poll vote on a newsletter's recent messages.
+
+```rust
+pub async fn get_my_addons(
+    &self,
+    jid: &Jid,
+    limit: u32,
+) -> Result<Vec<NewsletterMyAddOns>, NewsletterError>
+```
+
+**Parameters:**
+- `jid` — Newsletter JID
+- `limit` — How many recent messages the server checks for your add-ons
+
+**Returns:**
+- `Vec<NewsletterMyAddOns>` — One entry per message you reacted to or voted on. Messages without any of your add-ons are not returned.
+
+Poll tallies on [`NewsletterMessage::votes`](#newslettermessage) and in live updates count every follower's votes. They can't tell you whether your vote landed or what your current selection is. Use `get_my_addons` to read that back, for example after calling [`send_poll_vote`](#send_poll_vote).
+
+A removed vote is still returned. Its `poll_vote` is `Some` with an empty `option_hashes` list. `poll_vote` is `None` only if you never voted on that message.
+
+**Errors:** Returns `NewsletterError::InvalidRequest` without sending anything if `jid` is not a newsletter JID. A malformed server response also returns `NewsletterError::InvalidRequest`.
+
+**Example:**
+```rust
+let addons = client.newsletter()
+    .get_my_addons(&newsletter_jid, 20)
+    .await?;
+
+for addon in &addons {
+    if let Some(reaction) = &addon.reaction {
+        println!("{}: reacted {}", addon.server_id, reaction.code);
+    }
+    match &addon.poll_vote {
+        Some(vote) if vote.option_hashes.is_empty() => {
+            println!("{}: vote removed", addon.server_id);
+        }
+        Some(vote) => {
+            println!("{}: voted for {} option(s)", addon.server_id, vote.option_hashes.len());
+        }
+        None => {}
+    }
+}
+```
+
 ### subscribe_live_updates
 
 Subscribe to live updates for a newsletter (reaction counts, forward counts, poll tallies).
@@ -886,6 +933,50 @@ pub struct NewsletterPollVote {
 ```
 
 Votes with malformed hashes or a missing or malformed required `count` are dropped during parsing; a valid `count="0"` is preserved and remains distinct from absence.
+
+### NewsletterMyAddOns
+
+Your own add-ons on one newsletter message, as returned by [`get_my_addons`](#get_my_addons).
+
+```rust
+#[non_exhaustive]
+pub struct NewsletterMyAddOns {
+    pub server_id: u64,
+    pub reaction: Option<NewsletterMyReaction>,
+    pub poll_vote: Option<NewsletterMyPollVote>,
+}
+```
+
+- `server_id` — The message's server-assigned ID
+- `reaction` — Your reaction, or `None` if you haven't reacted to this message
+- `poll_vote` — Your poll vote, or `None` if you never voted on this message. A removed vote is `Some` with no option hashes.
+
+### NewsletterMyReaction
+
+Your own reaction on a newsletter message.
+
+```rust
+#[non_exhaustive]
+pub struct NewsletterMyReaction {
+    pub code: String,    // Reaction emoji
+    pub timestamp: u64,  // When it was set (Unix seconds)
+}
+```
+
+### NewsletterMyPollVote
+
+Your own vote on a newsletter poll.
+
+```rust
+#[non_exhaustive]
+pub struct NewsletterMyPollVote {
+    pub timestamp: u64,
+    pub option_hashes: Vec<[u8; 32]>,
+}
+```
+
+- `timestamp` — When the selection was last sent (Unix seconds). It matches the `t` of the server's acknowledgement for that vote.
+- `option_hashes` — The selected options, each a [`compute_option_hash`](/api/polls) of an option name. These are the same keys as [`NewsletterPollVote::option_hash`](#newsletterpollvote). Empty after you remove your vote.
 
 ## Error handling
 
