@@ -535,7 +535,7 @@ if let Some(oldest) = messages.last() {
 
 ### subscribe_live_updates
 
-Subscribe to live updates for a newsletter (reaction counts, message changes).
+Subscribe to live updates for a newsletter (reaction counts, forward counts, poll tallies).
 
 ```rust
 pub async fn subscribe_live_updates(
@@ -550,7 +550,7 @@ pub async fn subscribe_live_updates(
 **Returns:**
 - `u64` — Subscription duration in seconds (typically 300)
 
-The server sends `Event::NewsletterLiveUpdate` events with updated reaction counts. You need to re-subscribe periodically when the duration expires.
+The server sends `Event::NewsletterLiveUpdate` events with updated reaction counts, forward counts, and poll tallies. See [NewsletterLiveUpdate](/concepts/events#newsletterliveupdate) for the event fields. You need to re-subscribe periodically when the duration expires.
 
 **Example:**
 ```rust
