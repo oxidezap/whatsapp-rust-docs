@@ -438,6 +438,53 @@ client.newsletter()
     .await?;
 ```
 
+### send_poll_vote
+
+Vote in a newsletter (channel) poll. Returns the stanza ID of the vote.
+
+```rust
+pub async fn send_poll_vote(
+    &self,
+    jid: &Jid,
+    server_id: u64,
+    option_hashes: &[[u8; 32]],
+) -> Result<String, NewsletterError>
+```
+
+**Parameters:**
+- `jid` — Newsletter JID
+- `server_id` — Server-assigned ID of the poll message (not a new ID)
+- `option_hashes` — The full selection, one [`compute_option_hash`](/api/polls) per chosen option. This is the same key that [`NewsletterPollVote::option_hash`](#newsletterpollvote) tallies use.
+
+Every call replaces your previous selection on the server. To change a vote, send the new list. To remove your vote, pass an empty slice.
+
+Hash each option name exactly as the poll payload carries it. Option names can contain variation selectors and ZWJ sequences, so a retyped or normalized name produces a hash the server does not recognize.
+
+The returned ID matches the `id` of the server's acknowledgement, which arrives as `Event::ServerAck`.
+
+**Errors:** Returns `NewsletterError::InvalidRequest` without sending anything if `jid` is not a newsletter JID, `option_hashes` has more than 1000 entries, or the same hash appears twice.
+
+**Example:**
+```rust
+use wacore::poll::compute_option_hash;
+
+// Vote for one option
+let vote_id = client.newsletter()
+    .send_poll_vote(&newsletter_jid, poll_server_id, &[compute_option_hash("Rust")])
+    .await?;
+
+// Reuse hashes from fetched tallies
+let hashes: Vec<[u8; 32]> = message.votes.iter().take(1).map(|v| v.option_hash).collect();
+client.newsletter()
+    .send_poll_vote(&newsletter_jid, message.server_id, &hashes)
+    .await?;
+
+// Remove your vote
+client.newsletter()
+    .send_poll_vote(&newsletter_jid, poll_server_id, &[])
+    .await?;
+```
+
 ### edit_message
 
 Edit a previously-sent newsletter message. Channel messages are plaintext, so the edit is sent as a `<message edit="1">` stanza with the new protobuf body — not through the E2E send path.
