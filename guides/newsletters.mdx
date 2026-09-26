@@ -154,6 +154,30 @@ client.newsletter()
 
 See [Send API reference](/api/send#send_message) for details.
 
+### Poll votes
+
+Vote in a channel poll with its `server_id` and the SHA-256 hashes of the chosen option names. Each call replaces your previous selection, and an empty list removes your vote:
+
+```rust
+use wacore::poll::compute_option_hash;
+
+// Vote for two options
+let vote_id = client.newsletter()
+    .send_poll_vote(
+        &newsletter_jid,
+        poll_server_id,
+        &[compute_option_hash("Rust"), compute_option_hash("Go")],
+    )
+    .await?;
+
+// Remove your vote
+client.newsletter()
+    .send_poll_vote(&newsletter_jid, poll_server_id, &[])
+    .await?;
+```
+
+Hash option names exactly as they appear in the poll. You can also reuse the `option_hash` values from fetched [poll tallies](#fetching-message-history). See [`send_poll_vote`](/api/newsletter#send_poll_vote) for details.
+
 ### Editing and revoking messages
 
 Channels use a plaintext edit/revoke flow that's separate from DM and group messages. Call the helpers on `client.newsletter()` and pass the original message's `message_id` (the wire stanza id returned by `send_message`, **not** the `server_id` used for reactions):
