@@ -694,8 +694,12 @@ Both fields are populated from `viewer_metadata.settings` on `list_subscribed` a
 pub enum NewsletterVerification {
     Verified,
     Unverified,
+    /// A value this library does not model, as the server spelled it.
+    Other(String),
 }
 ```
+
+The server's `verification` value is matched ignoring case, so `VERIFIED` reads as `Verified`. An absent field reads as `Unverified`. Any other value is kept verbatim in `Other`.
 
 ### NewsletterState
 
@@ -706,6 +710,19 @@ pub enum NewsletterState {
     Active,
     Suspended,
     Geosuspended,
+    /// A state this library does not model, as the server spelled it.
+    Other(String),
+}
+```
+
+The server's `state.type` value is matched ignoring case, so `ACTIVE`, `SUSPENDED`, and `GEOSUSPENDED` map to their variants. An absent state reads as `Active`. Any other value is kept verbatim in `Other`. For example, a deleted channel reads as `Other("DELETED")`.
+
+```rust
+match metadata.state {
+    NewsletterState::Active => println!("Channel is active"),
+    NewsletterState::Suspended | NewsletterState::Geosuspended => println!("Channel is suspended"),
+    NewsletterState::Other(ref s) if s.eq_ignore_ascii_case("DELETED") => println!("Channel was deleted"),
+    _ => println!("Unknown state"),
 }
 ```
 
