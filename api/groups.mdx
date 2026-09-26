@@ -426,6 +426,153 @@ for result in results {
 }
 ```
 
+### add_participants_with_history
+
+Add participants to a group and share recent group messages with the new members who opted in. This covers direct additions only. It does not apply to invite links, QR joins, or sharing after someone joins.
+
+```rust
+pub async fn add_participants_with_history(
+    &self,
+    jid: impl Into<Jid>,
+    participants: &[Jid],
+    opted_in_receivers: &[Jid],
+    history_messages: &[wa::WebMessageInfo],
+) -> Result<GroupHistoryAddResult, GroupError>
+```
+
+**Parameters:**
+- `jid` - Group JID
+- `participants` - Members to add
+- `opted_in_receivers` - The subset of `participants` who consented to receive history. An empty list performs only the add.
+- `history_messages` - Messages from your own storage. The library doesn't read or persist history itself.
+
+**Returns:**
+- `GroupHistoryAddResult` with two independent fields:
+  - `participants` - Per-participant results, the same as [`add_participants`](#add_participants)
+  - `history_share` - A `GroupHistoryShareOutcome` describing what happened to the history share
+
+**Message eligibility:**
+
+The library filters `history_messages` before sharing. A message is included only if it:
+- Has a nonempty ID and belongs to this group
+- Is an acknowledged plain-text message
+- Has a timestamp within the effective time window from account and group AB props
+- Has no ephemeral (disappearing message) metadata
+
+Media, pinned messages, and older history bundles are omitted. The newest eligible messages are kept up to the AB-prop message-count limit. Account-local metadata such as stars, labels, and receipts is stripped.
+
+**Sharing rules:**
+- You must be a group admin or superadmin, or the group must use `MemberShareHistoryMode::AllMemberShare`. See [`set_member_share_history_mode`](#set_member_share_history_mode).
+- Community parent groups and CAPI-backed groups are not supported.
+- The history bundle is encrypted pairwise to the opted-in, successfully added members and your own devices only.
+- A group-wide notice is sent only after the server acknowledges the bundle and every addressed device was encrypted.
+- If sharing is skipped or fails, the member add still stands.
+
+**Example:**
+```rust
+use whatsapp_rust::GroupHistoryShareOutcome;
+
+let group_jid: Jid = "123456789@g.us".parse()?;
+let alice: Jid = "15551234567@s.whatsapp.net".parse()?;
+let bob: Jid = "15559876543@s.whatsapp.net".parse()?;
+
+// Load recent messages for this group from your own storage
+let recent: Vec<waproto::whatsapp::WebMessageInfo> = load_recent_group_messages(&group_jid);
+
+let result = client
+    .groups()
+    .add_participants_with_history(
+        group_jid.clone(),
+        &[alice.clone(), bob],
+        &[alice], // only Alice opted in to receive history
+        &recent,
+    )
+    .await?;
+
+for p in &result.participants {
+    println!("{}: {:?}", p.jid, p.status);
+}
+
+match result.history_share {
+    GroupHistoryShareOutcome::Shared { message_count, .. } => {
+        println!("Shared {message_count} messages");
+    }
+    GroupHistoryShareOutcome::Skipped(reason) => {
+        println!("History not shared: {reason:?}");
+    }
+    GroupHistoryShareOutcome::UploadFailed { retry, .. }
+    | GroupHistoryShareOutcome::BundleIndeterminate { retry, .. }
+    | GroupHistoryShareOutcome::NoticeIndeterminate { retry, .. } => {
+        // Retry without adding members again
+        let outcome = client.groups().retry_group_history(&retry).await;
+        println!("Retry outcome: {outcome:?}");
+    }
+    other => println!("History share outcome: {other:?}"),
+}
+```
+
+<Note>
+`Shared` confirms server acceptance of the bundle and notice. It does not confirm delivery to or reading by each recipient.
+</Note>
+
+#### Cancellation-safe flow
+
+If your task can be cancelled mid-operation, split the call into two steps. `prepare_group_history_share` adds members, selects messages, and uploads the bundle. It returns `HistorySharePreparation::Ready(PreparedGroupHistoryShare)` or `HistorySharePreparation::Settled(GroupHistoryAddResult)` for skips and failures. `deliver_prepared_history_share` takes the prepared share by reference, so you can call it again if a delivery future is dropped.
+
+```rust
+use whatsapp_rust::HistorySharePreparation;
+
+match client
+    .groups()
+    .prepare_group_history_share(group_jid.clone(), &members, &opted_in, &recent)
+    .await?
+{
+    HistorySharePreparation::Ready(prepared) => {
+        // Keep `prepared` until delivery completes
+        let outcome = client.groups().deliver_prepared_history_share(&prepared).await;
+        println!("{outcome:?}");
+    }
+    HistorySharePreparation::Settled(result) => {
+        println!("{:?}", result.history_share);
+    }
+    _ => {}
+}
+```
+
+Delivery rechecks current policy, your permission, and recipient membership before publishing.
+
+#### retry_group_history
+
+```rust
+pub async fn retry_group_history(
+    &self,
+    retry: &GroupHistoryRetryToken,
+) -> GroupHistoryShareOutcome
+```
+
+Resume a failed or indeterminate share using the token from a `GroupHistoryShareOutcome`. The retry reuses the same message IDs and audience and never re-adds members. It rechecks current policy and limits first. `GroupHistoryRetryToken` is an opaque in-memory value, not a persistence format. Treat it as sensitive.
+
+#### GroupHistoryShareOutcome
+
+| Variant | Meaning | Retry token |
+|---------|---------|-------------|
+| `NotRequested` | `opted_in_receivers` was empty | No |
+| `Skipped(GroupHistorySkipReason)` | Sharing was withheld by policy or eligibility | No |
+| `PreparationFailed` | Selecting or packaging messages failed | No |
+| `UploadFailed` | Bundle upload failed | Yes |
+| `BundleNotSent` | A local error occurred before the bundle was sent | Yes |
+| `BundleRejected` | The server rejected the bundle | No |
+| `BundleRetryableRejection` | The server rejected the bundle with a retryable code | Yes |
+| `BundleIndeterminate` | No matching server ACK was observed for the bundle | Yes |
+| `BundlePartialFanout` | The server ACKed the bundle but some devices weren't encrypted | Yes |
+| `NoticeNotSent` | The bundle was ACKed but the notice couldn't be sent | Yes |
+| `NoticeRejected` | The server rejected the notice | No |
+| `NoticeRetryableRejection` | The server rejected the notice with a retryable code | Yes |
+| `NoticeIndeterminate` | No matching server ACK was observed for the notice | Yes |
+| `Shared` | The server accepted both the bundle and the notice | No |
+
+`GroupHistorySkipReason` values: `NoOptedInSuccessfulRecipients`, `SenderNotAuthorized`, `UnsupportedGroup`, `AccountPropsUnavailable`, `GroupMetadataUnavailable`, `GroupPropsUnavailable`, `InvalidProperties`, `SharingDisabled`, and `NoEligibleMessages`.
+
 ### remove_participants
 
 Remove participants from a group.

@@ -259,6 +259,24 @@ for response in responses {
 
 See [Groups API reference](/api/groups#add_participants) for response codes.
 
+### Add participants with message history
+
+To share recent plain-text messages with new members who opted in, use `add_participants_with_history`. You supply the messages from your own storage. The library filters them by group, time window, and count limits before sending.
+
+```rust
+let result = client.groups().add_participants_with_history(
+    group_jid.clone(),
+    &new_members,
+    &opted_in_members, // subset of new_members who consented
+    &recent_messages,  // Vec<WebMessageInfo> from your storage
+).await?;
+
+println!("Add results: {:?}", result.participants);
+println!("History share: {:?}", result.history_share);
+```
+
+The member add and the history share report separately. If sharing is skipped, the add still stands. See [add_participants_with_history](/api/groups#add_participants_with_history) for eligibility rules, outcomes, and retries.
+
 ### Remove participants
 
 ```rust
