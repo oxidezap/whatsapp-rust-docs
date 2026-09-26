@@ -694,8 +694,12 @@ Both fields are populated from `viewer_metadata.settings` on `list_subscribed` a
 pub enum NewsletterVerification {
     Verified,
     Unverified,
+    /// A value this library does not model, as the server spelled it.
+    Other(String),
 }
 ```
+
+The server's `verification` value is matched ignoring case, so `VERIFIED` reads as `Verified`. An absent field reads as `Unverified`. Any other value is kept verbatim in `Other`.
 
 ### NewsletterState
 
@@ -706,6 +710,19 @@ pub enum NewsletterState {
     Active,
     Suspended,
     Geosuspended,
+    /// A state this library does not model, as the server spelled it.
+    Other(String),
+}
+```
+
+The server's `state.type` value is matched ignoring case, so `ACTIVE`, `SUSPENDED`, and `GEOSUSPENDED` map to their variants. An absent state reads as `Active`. Any other value is kept verbatim in `Other`. For example, a deleted channel reads as `Other("DELETED")`.
+
+```rust
+match metadata.state {
+    NewsletterState::Active => println!("Channel is active"),
+    NewsletterState::Suspended | NewsletterState::Geosuspended => println!("Channel is suspended"),
+    NewsletterState::Other(ref s) if s.eq_ignore_ascii_case("DELETED") => println!("Channel was deleted"),
+    _ => println!("Unknown state"),
 }
 ```
 
@@ -795,6 +812,7 @@ pub struct NewsletterMessage {
     pub server_id: u64,
     pub timestamp: u64,
     pub message_type: NewsletterMessageType,
+    pub message_type_raw: Option<String>,
     pub edit: EditAttribute,
     pub is_sender: bool,
     pub message: Option<wa::Message>,
@@ -807,6 +825,7 @@ pub struct NewsletterMessage {
     pub original_timestamp: Option<u64>,
     pub last_edit_timestamp_ms: Option<u64>,
     pub poll_type: Option<PollType>,
+    pub poll_type_raw: Option<String>,
     pub content_type: Option<String>,
     pub question_type: Option<NewsletterQuestionType>,
     pub message_association_type: Option<NewsletterMessageAssociationType>,
@@ -819,7 +838,8 @@ pub struct NewsletterMessage {
 - `message_id` — Wire stanza id. Pass this to [`edit_message`](#edit_message) and [`revoke_message`](#revoke_message); it is **not** the same as `server_id`, which reactions use. Empty when the server omitted it.
 - `server_id` — Server-assigned monotonic id. Use it as the pagination cursor in [`get_messages`](#get_messages) and as the target for [`send_reaction`](#send_reaction).
 - `timestamp` — Message timestamp (Unix seconds). Moves with an edit.
-- `message_type` — `Text`, `Media`, or `Poll` on the wire. An edit or revocation is not a message type; see `edit`. Reactions are counts on the reacted-to message, not a type.
+- `message_type` — `Text`, `Media`, or `Poll` on the wire. An edit or revocation is not a message type; see `edit`. Reactions are counts on the reacted-to message, not a type. A message without a `type` attribute reads as `Text`.
+- `message_type_raw` — The `type` attribute exactly as the server sent it. `None` when the attribute was absent. Use it to tell an absent type from an explicit `text`, or to relay the server's token verbatim.
 - `edit` — `AdminEdit` (`3`) for an edited message, `AdminRevoke` (`8`) for a revoked one, `Empty` otherwise. A revoked message keeps its envelope, drops its body, its forward counter, and `message` becomes `None`.
 - `message` — Decoded protobuf message from the `<plaintext>` bytes. `None` when the server sent no body (for example, after a revocation, or when the payload was empty).
 - `media_type` — Hint about the payload readable without decoding it. Unknown values are kept as [`NewsletterMediaType::Other`](#newslettermediatype).
@@ -829,7 +849,8 @@ pub struct NewsletterMessage {
 - `views_count`, `responses_count` — View count and channel-question response count. Contract-derived; a follower-side capture never carried them, so expect `None` unless the viewer's role in the channel entitles them to those figures.
 - `original_timestamp` — `<meta original_msg_t>` in Unix seconds: when the message was first posted, as opposed to `timestamp`, which moves with an edit.
 - `last_edit_timestamp_ms` — `<meta msg_edit_t>` in Unix **milliseconds** (unlike every other timestamp on this struct): when the message was last edited.
-- `poll_type` — The poll's lifecycle stage (creation, quiz creation, result snapshot). Populated only when `message_type` is `Poll`, matching WhatsApp Web's scoping.
+- `poll_type` — The poll's lifecycle stage (creation, quiz creation, result snapshot). Populated only when `message_type` is `Poll`, matching WhatsApp Web's scoping. A stage `PollType` has no variant for reads as `None`.
+- `poll_type_raw` — `<meta polltype>` exactly as the server sent it. It is set whatever the message type, and whether or not `PollType` models the value. `None` when the server sent no `polltype`.
 - `content_type`, `question_type`, `message_association_type` — `<meta>` classifiers. `question_type` is `question` for a channel question or `reply` for an admin reply. `message_association_type` records how this media relates to another message (`media_poll`, `motion_photo`, `poll_add_option`, …).
 - `is_wamo_sub` — `<meta is_wamo_sub="true">`.
 - `admin_profile` — Publishing admin's public profile, on channels that enabled admin profiles.
