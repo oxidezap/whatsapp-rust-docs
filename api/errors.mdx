@@ -413,10 +413,14 @@ pub enum NewsletterError {
     Client(#[from] ClientError),
     #[error("invalid newsletter request: {0}")]
     InvalidRequest(String),
+    #[error("newsletter not found: {0}")]
+    NotFound(Jid),
     #[error("{0}")]
     Internal(#[from] anyhow::Error),
 }
 ```
+
+`NotFound` is returned by [`Newsletter::get_metadata`](/api/newsletter#get_metadata) when no channel exists behind a well-formed newsletter JID. A malformed server response still returns `InvalidRequest`.
 
 ### PollError
 

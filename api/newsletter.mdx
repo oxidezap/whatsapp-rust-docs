@@ -32,6 +32,8 @@ pub async fn list_subscribed(&self) -> Result<Vec<NewsletterMetadata>, Newslette
 **Returns:**
 - `Vec<NewsletterMetadata>` — List of subscribed newsletters
 
+If the server returns an entry that is `null` or has no `id`, the client skips it and logs a warning. The rest of the list is still returned. An entry whose `id` doesn't parse as a JID still fails the whole call with `NewsletterError::InvalidRequest`.
+
 **Example:**
 ```rust
 let newsletters = client.newsletter().list_subscribed().await?;
@@ -62,6 +64,18 @@ let metadata = client.newsletter().get_metadata(&newsletter_jid).await?;
 println!("Name: {}", metadata.name);
 println!("Subscribers: {}", metadata.subscriber_count);
 println!("Verified: {:?}", metadata.verification);
+```
+
+**Errors:** Returns `NewsletterError::NotFound(jid)` when no channel exists behind the JID. A malformed server response returns `NewsletterError::InvalidRequest`.
+
+```rust
+use whatsapp_rust::NewsletterError;
+
+match client.newsletter().get_metadata(&newsletter_jid).await {
+    Ok(metadata) => println!("Found: {}", metadata.name),
+    Err(NewsletterError::NotFound(jid)) => eprintln!("No channel at {}", jid),
+    Err(e) => eprintln!("Error: {}", e),
+}
 ```
 
 ### get_metadata_by_invite
@@ -1014,6 +1028,8 @@ pub enum NewsletterError {
     Client(#[from] ClientError),
     #[error("invalid newsletter request: {0}")]
     InvalidRequest(String),
+    #[error("newsletter not found: {0}")]
+    NotFound(Jid),
     #[error("{0}")]
     Internal(#[from] anyhow::Error),
 }
