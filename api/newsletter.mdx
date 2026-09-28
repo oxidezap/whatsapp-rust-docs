@@ -409,7 +409,7 @@ The library detects newsletter recipients automatically and sends messages as pl
 
 ### send_reaction
 
-Send a reaction to a newsletter message.
+Send a reaction to a newsletter message. Returns the stanza ID of the reaction.
 
 ```rust
 pub async fn send_reaction(
@@ -417,7 +417,7 @@ pub async fn send_reaction(
     jid: &Jid,
     server_id: u64,
     reaction: &str,
-) -> Result<(), NewsletterError>
+) -> Result<String, NewsletterError>
 ```
 
 **Parameters:**
@@ -425,10 +425,12 @@ pub async fn send_reaction(
 - `server_id` — Server-assigned ID of the message to react to
 - `reaction` — Emoji code (e.g., `"👍"`, `"❤️"`), or empty string to remove
 
+The returned ID matches the `id` of the server's acknowledgement, which arrives as `Event::ServerAck`. Use it to match an ack to the reaction that triggered it.
+
 **Example:**
 ```rust
-// Add a reaction
-client.newsletter()
+// Add a reaction and keep its stanza ID
+let reaction_id = client.newsletter()
     .send_reaction(&newsletter_jid, server_id, "👍")
     .await?;
 
