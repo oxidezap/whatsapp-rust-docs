@@ -335,19 +335,20 @@ See [Events reference](/concepts/events#newsletterliveupdate) for the full event
 
 ## Error handling
 
-Newsletter operations return `MexError` for metadata/management operations and `anyhow::Error` for message operations:
+Newsletter methods return `NewsletterError`. Match `NotFound` to detect a channel that doesn't exist:
 
 ```rust
-use whatsapp_rust::features::mex::MexError;
+use whatsapp_rust::NewsletterError;
 
 match client.newsletter().get_metadata(&jid).await {
     Ok(metadata) => println!("Found: {}", metadata.name),
-    Err(MexError::PayloadParsing(msg)) => {
-        eprintln!("Parse error: {}", msg);
-    }
+    Err(NewsletterError::NotFound(jid)) => eprintln!("No channel at {}", jid),
+    Err(NewsletterError::InvalidRequest(msg)) => eprintln!("Invalid request: {}", msg),
     Err(e) => eprintln!("Error: {}", e),
 }
 ```
+
+See [`NewsletterError`](/api/newsletter#error-handling) for all variants.
 
 ## Key differences from groups
 
