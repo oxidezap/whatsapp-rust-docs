@@ -82,7 +82,7 @@ For an encrypted edit, use `EditRequest::with_secret(original_creator, original_
 
 ## revoke_message
 
-`revoke_message(&MessageRef)` selects sender scope for your own content and admin scope for another group author's content. A reference grants no server permissions. Revoke another author's DM content with this API is unsupported.
+`revoke_message(&MessageRef)` selects sender scope for your own content and admin scope for another group author's content. A reference grants no server permissions. You cannot revoke another author's DM content with this API.
 
 ## pin_message
 

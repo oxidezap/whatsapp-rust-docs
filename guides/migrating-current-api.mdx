@@ -4,7 +4,7 @@ description: Migrate older consumers to typed requests, references, constructors
 ---
 
 <Note>
-Examples on this page target [source snapshot `ff7acad`](https://github.com/oxidezap/whatsapp-rust/tree/ff7acaddf80169013b0fd06df65296db7e4a8ca3), not a crates.io release. Use the [current API migration guide](/guides/migrating-current-api) to select the matching dependency.
+Examples on this page target [source snapshot `ff7acad`](https://github.com/oxidezap/whatsapp-rust/tree/ff7acaddf80169013b0fd06df65296db7e4a8ca3), not a crates.io release. Select the matching dependency in [Select a matching source](#select-a-matching-source).
 </Note>
 
 
@@ -22,6 +22,10 @@ tokio = { version = "1.53", features = ["macros", "rt-multi-thread"] }
 ```
 
 For a crates.io release, select that exact version in [Rustdoc](https://docs.rs/whatsapp-rust). Source links on these task pages use an immutable commit. Rustdoc and source own exact signatures; these pages explain the task and its decisions.
+
+## Bot setup and lifecycle
+
+Pass an owned backend to `with_backend`; use `with_backend_arc` for an already-shared `Arc<dyn Backend>`. `bot.run().await` now runs in the foreground and returns `RunCompletionReason`. For background ownership, use `bot.spawn()` and retain its `BotHandle`. Its awaited `BotRunOutcome` distinguishes completion, an abort request and an unobserved exit. Prefer `handle.shutdown().await` for a graceful stop; dropping the handle aborts instead. See [bot lifecycle](/api/bot#run).
 
 ## Sends and edits
 
@@ -89,10 +93,6 @@ A custom `Backend` must implement all five storage traits. The three required `M
 Use `StoredMessageSecret::from_stored_bytes` to map malformed persisted bytes to `StoreError::InvalidMessageSecret`; never pad/truncate them or silently invent a timestamp. Preserve expiry and timestamp merge rules on writes. See [storage](/api/store#msgsecretstore) and [custom backends](/guides/custom-backends).
 
 The durability hook must commit idempotently by `(chat, sender, message_id)` before returning success. PDO placeholder recovery is event-only, but a later encrypted retry still crosses the durability gate even if its equivalent event was already published. See [inbound durability](/advanced/inbound-durability).
-
-## Maintain one reference
-
-Put new public construction and host-trait proofs in the existing consolidated consumer, not another crate. Consumer task examples belong here; exact signatures and low-level invariants belong in source Rustdoc. When changing the source pin, compile the examples against that revision and verify native, published MSRV and WASM feature profiles before updating claims.
 
 ## SQLite database and account scope
 

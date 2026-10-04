@@ -84,4 +84,4 @@ See [media handling](/guides/media-handling) and the pinned core helper for exac
 
 ## Quoted replies
 
-Use `MessageContext::reply` to construct quote context from the incoming message. For manual protobuf assembly, its `build_quote_context()` exposes the quoted association. Sending, editing or forwarding content does not implicitly quote an arbitrary previous message.
+Use `MessageContext::reply_quoting` for a text reply that quotes the incoming message. `reply` sends ordinary unquoted text. For manual protobuf assembly, its `build_quote_context()` exposes the quoted association. Sending, editing or forwarding content does not implicitly quote an arbitrary previous message.

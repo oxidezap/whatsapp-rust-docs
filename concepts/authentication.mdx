@@ -78,23 +78,15 @@ pub fn make_qr_data_with_client_type(
 ### Implementation
 
 ```rust
-use std::sync::Arc;
-use whatsapp_rust::bot::Bot;
-use whatsapp_rust::TokioRuntime;
-use whatsapp_rust::store::SqliteStore;
-use whatsapp_rust_tokio_transport::TokioWebSocketTransportFactory;
-use whatsapp_rust_ureq_http_client::UreqHttpClient;
-use wacore::types::events::{Event, PairingQrCode};
+use whatsapp_rust::prelude::*;
+use whatsapp_rust::wacore::types::events::{Event, PairingQrCode};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let backend = Arc::new(SqliteStore::open("whatsapp.db").await?);
+    let backend = SqliteStore::open("whatsapp.db").await?;
 
-    let mut bot = Bot::builder()
+    let bot = Bot::builder()
         .with_backend(backend)
-        .with_transport_factory(TokioWebSocketTransportFactory::new())
-        .with_http_client(UreqHttpClient::new())
-        .with_runtime(TokioRuntime)
         .on_event(|event, _client| async move {
             match &*event {
                 Event::PairingQrCode(PairingQrCode { code, timeout, .. }) => {
@@ -110,7 +102,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .build()
         .await?;
 
-    bot.run().await?.await?;
+    bot.run().await;
     Ok(())
 }
 ```
@@ -1017,7 +1009,7 @@ Both methods can run simultaneously:
 
 ```rust
 // Start QR code (automatic on connection)
-bot.run().await?;
+bot.run().await;
 
 // Also start pair code in parallel
 let code = client.pair_with_code(options).await?;
@@ -1209,7 +1201,7 @@ let bot = Bot::builder()
     .build()
     .await?;
 
-bot.run().await?; // Uses saved session
+bot.run().await; // Uses saved session
 ```
 
 ### Logout
@@ -1292,7 +1284,7 @@ tokio::spawn(async move {
 });
 
 // QR codes automatically generated and rotated
-bot.run().await?;
+bot.run().await;
 ```
 
 ## Related Sections

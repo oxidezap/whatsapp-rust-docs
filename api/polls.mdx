@@ -48,7 +48,7 @@ async fn decrypt(
 
 The client tries known creator and voter PN/LID aliases independently. The stored crypto creator is not interchangeable with a later visible sender alias. Preserve it when saving a creation.
 
-## Raw interoperability
+## Raw poll interoperability
 
 `vote_raw` and `decrypt_vote_raw` accept the explicit secret, creation ID and creator metadata needed by external storage integrations. `decrypt_vote_raw` has the same alias resolution as the typed entry point. Prefer `MessageSecret::try_from` and `PollRef::new` when you can validate stored data once at the boundary.
 

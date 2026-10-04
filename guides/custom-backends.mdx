@@ -44,7 +44,7 @@ Signal sessions and sender keys must become durable before publishing messages t
 
 For crash replay, implement the pending-inbound methods on `ProtocolStore`. Store the pending payload before acknowledgement, and clear it only at the documented commit boundary. The consumer hook still needs idempotent commits by `(chat, sender, id)` because a crash can occur after the application's commit and before the server receives its ACK. See [inbound durability](/advanced/inbound-durability).
 
-Device-scoped operations must isolate one account from another. `DeviceStore::resource_report` describes account-scoped storage; database-wide readers and adapters have a separate scope. Register an owned adapter with `with_backend` or an `Arc<dyn Backend>` with `with_backend_arc`.
+Device-scoped operations must isolate one account from another. `DeviceStore::resource_report` is a legacy report whose scope depends on the backend; SQLite reports the whole shared pool. For multi-account SQLite accounting, read `SqliteDatabase::resource_report()` once per database and `SqliteStore::scoped_resource_report()` for each account. Do not sum shared-pool figures once per account. Register an owned adapter with `with_backend` or an `Arc<dyn Backend>` with `with_backend_arc`.
 
 [Storage trait reference](https://github.com/oxidezap/whatsapp-rust/blob/ff7acaddf80169013b0fd06df65296db7e4a8ca3/wacore/src/store/traits.rs) · [SQLite reference implementation](https://github.com/oxidezap/whatsapp-rust/blob/ff7acaddf80169013b0fd06df65296db7e4a8ca3/storages/sqlite-storage/src/lib.rs)
 
@@ -474,7 +474,7 @@ See [Store API reference](/api/store#sqlitestore-implementation) for the SQLite 
 ```rust
 use whatsapp_rust::store::SqliteStore;
 
-let backend = Arc::new(SqliteStore::open("whatsapp.db").await?);
+let backend = SqliteStore::open("whatsapp.db").await?;
 ```
 
 <Note>

@@ -59,8 +59,7 @@ let mut bot = Bot::builder()
     .build()
     .await?;
 
-let bot_handle = bot.run().await?;
-bot_handle.await?;
+bot.run().await;
 ```
 
 ---
@@ -77,33 +76,19 @@ Creates a new bot builder.
 
 ### with_backend
 
+Pass an owned implementation of `Backend` to `with_backend`. The builder wraps it in an `Arc` internally. Use `with_backend_arc` for an existing `Arc<dyn Backend>`.
+
 ```rust
-pub fn with_backend(self, backend: Arc<dyn Backend>) -> Self
+use whatsapp_rust::prelude::*;
+
+async fn new_bot() -> whatsapp_rust::anyhow::Result<Bot> {
+    Ok(Bot::builder()
+        .with_backend(SqliteStore::open("whatsapp.db").await?)
+        .build().await?)
+}
 ```
 
-Sets the storage backend (required).
-
-<ParamField path="backend" type="Arc<dyn Backend>" required>
-  Backend implementation providing storage operations
-</ParamField>
-
-**Example:**
-```rust
-use whatsapp_rust::store::SqliteStore;
-
-let backend = Arc::new(SqliteStore::open("whatsapp.db").await?);
-let bot = Bot::builder()
-    .with_backend(backend)
-    // ...
-```
-
-<Tip>
-For multi-account scenarios, open `SqliteDatabase` and select or provision an account; see [account lifecycle](/api/store#account-lifecycle).
-</Tip>
-
-<Tip>
-A bot that pairs once and stays connected for weeks is the single-long-lived-session profile, and `SqliteStore`'s defaults are tuned for the opposite one (many small per-session stores in a process). See [Memory and Thread Tuning](/concepts/storage#tune-database-resources) for the cache size, reader count, and mmap setting that profile wants, and pass them with `SqliteStore::with_config` ([whatsapp-rust#1411](https://github.com/oxidezap/whatsapp-rust/pull/1411)).
-</Tip>
+For multiple accounts or database tuning, open `SqliteDatabase` with `SqliteDatabaseConfig`, then provision or select an account. Selection does not provision a missing account. See [account lifecycle](/api/store#account-lifecycle) and [database resources](/concepts/storage#tune-database-resources).
 
 ### with_transport_factory
 
@@ -466,7 +451,7 @@ let client = bot.client();
 let (event_handler, event_rx) = ChannelEventHandler::new();
 client.register_handler(event_handler);
 
-let handle = bot.run().await?;
+let _bot_handle = bot.spawn();
 
 // Process events in your own async loop
 while let Ok(event) = event_rx.recv().await {
@@ -1060,34 +1045,29 @@ let jid = client.pn();
 
 ### run
 
+Use `bot.run().await` to drive the bot on the current task until it finishes. It consumes the bot and returns `RunCompletionReason`. Save `bot.client()` before starting if another task needs to request shutdown.
+
+Use `bot.spawn()` for a background task. It returns `BotHandle` immediately; awaiting the handle returns `BotRunOutcome`. Prefer `handle.shutdown().await` for a graceful stop and inspect its shutdown and run reports.
+
 ```rust
-pub async fn run(&mut self) -> Result<BotHandle>
-```
+use whatsapp_rust::{bot::{Bot, BotShutdownReport}, RunCompletionReason};
 
-Starts the bot's connection loop and background workers.
+async fn foreground(bot: Bot) -> RunCompletionReason {
+    bot.run().await
+}
 
-Returns a `BotHandle` that implements `Future`. You can also call `.abort()` on it to cancel the bot.
-
-**Example:**
-```rust
-let mut bot = Bot::builder()
-    // ... configuration
-    .build()
-    .await?;
-
-let handle = bot.run().await?;
-
-// Wait for bot to finish (runs until disconnect)
-handle.await?;
+async fn background_until_requested(bot: Bot, stop: impl std::future::Future<Output = ()>) -> BotShutdownReport {
+    let handle = bot.spawn();
+    stop.await;
+    handle.shutdown().await
+}
 ```
 
 <Warning>
-`BotHandle` is `#[must_use]`: dropping it aborts the bot task instead of leaving it running in the background. Bind it and either `.await` it or call `.shutdown()`/`.abort()` explicitly — do not let it fall out of scope while you expect the bot to keep running.
+Keep `BotHandle` alive while the bot should run. Dropping it or calling `abort()` cancels the bot and callback delivery without graceful flushing or draining. Graceful shutdown does not itself prove detached owners have released storage; use the client's store-release observation for that separate boundary.
 </Warning>
 
-<Note>
-If a [`with_task_instrument`](#with_task_instrument) hook is configured, `run()` meters the client's main run loop (the read loop, including frame decryption) itself, in addition to the tasks the instrumented runtime already covers. This closes the gap where `bot.run().await` polls that future on the caller's task rather than through `Runtime::spawn`.
-</Note>
+Task instrumentation meters the foreground run loop through `run`; the background loop uses the instrumented runtime's `spawn` path. See the [pinned bot lifecycle source](https://github.com/oxidezap/whatsapp-rust/blob/ff7acaddf80169013b0fd06df65296db7e4a8ca3/src/bot.rs#L364) for completion and ownership contracts.
 
 ---
 
@@ -1226,60 +1206,25 @@ Newsletter (channel) messages don't flow through `MessageContext::react`. Use [`
 ## Complete Example
 
 ```rust
-use whatsapp_rust::bot::Bot;
-use whatsapp_rust::TokioRuntime;
-use whatsapp_rust::store::SqliteStore;
-use wacore::types::events::{Event, InboundMessage, PairingQrCode};
-use whatsapp_rust_tokio_transport::TokioWebSocketTransportFactory;
-use whatsapp_rust_ureq_http_client::UreqHttpClient;
-use waproto::whatsapp as wa;
-use std::sync::Arc;
+use whatsapp_rust::prelude::*;
 
 #[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    // Set up storage
-    let backend = Arc::new(SqliteStore::open("bot.db").await?);
-
-    // Build bot
-    let mut bot = Bot::builder()
-        .with_backend(backend)
-        .with_transport_factory(TokioWebSocketTransportFactory::new())
-        .with_http_client(UreqHttpClient::new())
-        .with_runtime(TokioRuntime)
-        .skip_history_sync() // Bot only needs new messages
-        .on_event(|event, client| async move {
-            match &*event {
-                Event::Messages(batch) => {
-                    // Echo messages back
-                    for InboundMessage { message: msg, info, .. } in batch.iter() {
-                        if let Some(text) = &msg.conversation {
-                            let reply = wa::Message {
-                                conversation: Some(format!("You said: {}", text)),
-                                ..Default::default()
-                            };
-                            let _ = client.send_message(info.source.chat.clone(), reply).await;
-                        }
-                    }
+async fn main() -> whatsapp_rust::anyhow::Result<()> {
+    let bot = Bot::builder()
+        .with_backend(SqliteStore::open("bot.db").await?)
+        .skip_history_sync()
+        .on_qr_code(|code, _timeout| async move {
+            println!("Scan this QR code: {code}");
+        })
+        .on_message(|ctx| async move {
+            if let Some(text) = ctx.message.text_content() {
+                if let Err(error) = ctx.reply(format!("You said: {text}")).await {
+                    eprintln!("Reply failed: {error}");
                 }
-                Event::Connected(_) => {
-                    println!("Bot is now online!");
-                    // Set status
-                    let _ = client.presence().set_available().await;
-                }
-                Event::PairingQrCode(PairingQrCode { code, .. }) => {
-                    println!("Scan this QR code:");
-                    println!("{}", code);
-                }
-                _ => {}
             }
         })
-        .build()
-        .await?;
-
-    // Run bot
-    let handle = bot.run().await?;
-    handle.await?;
-
+        .build().await?;
+    bot.run().await;
     Ok(())
 }
 ```

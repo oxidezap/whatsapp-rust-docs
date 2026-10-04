@@ -13,4 +13,4 @@ A collection with a real version but no flag could never get it. That happens fo
 
 The client now sets `bootstrapped` when a sync of a collection that already has a version comes back with no patches, no snapshot, and no more pages. The stored version and ltHash stay unchanged. A collection that is already flagged writes nothing on such a sync. A paged answer, an undownloaded snapshot, or a collection error still leaves the flag unset.
 
-No code changes are needed. Affected collections recover on the next write, which syncs first. See [`HashState`](/api/store#backend) for the flag's full semantics.
+No code changes are needed. Affected collections recover on the next write, which syncs first. See [`HashState::bootstrapped` in source](https://github.com/oxidezap/whatsapp-rust/blob/ff7acaddf80169013b0fd06df65296db7e4a8ca3/wacore/appstate/src/hash.rs#L34) for the flag's full semantics.

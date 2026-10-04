@@ -37,7 +37,7 @@ client
 ## Updates
 
 **`query_info` returns `Arc<GroupInfo>`**
-`client.groups().query_info()` now returns `Result<Arc<GroupInfo>, anyhow::Error>` instead of `Result<GroupInfo, anyhow::Error>`. Repeated lookups for the same group share the same cached snapshot, so warm sends to groups no longer deep-clone the participants list or LID-to-phone map. This is a breaking change for direct callers — bind the result as `Arc<GroupInfo>` and reach through `info.participants` / `info.lid_to_pn_map()` as before. See [`query_info`](/api/groups#fetch_metadata) and the [Group management guide](/guides/group-management).
+`client.groups().query_info()` now returns `Result<Arc<GroupInfo>, anyhow::Error>` instead of `Result<GroupInfo, anyhow::Error>`. Repeated lookups for the same group share the same cached snapshot, so warm sends to groups no longer deep-clone the participants list or LID-to-phone map. This is a breaking change for direct callers — bind the result as `Arc<GroupInfo>` and reach through `info.participants` / `info.lid_to_pn_map()` as before. See [`query_info`](/api/groups#routing_info) and the [Group management guide](/guides/group-management).
 
 ## Fixes
 

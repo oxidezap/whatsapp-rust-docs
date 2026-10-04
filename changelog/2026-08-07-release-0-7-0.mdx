@@ -36,7 +36,7 @@ These landed on `main` after 0.6.0 and are now in the published crate — drop a
 
 **Minimum versions moved.** The workspace declares an MSRV for the first time, at **1.94** (0.6.0 declared none), and the crate requires **tokio 1.53.1** or newer. Edition 2024 needs no nightly; only the default `simd` feature does, because it uses the unstable `portable_simd` API.
 
-**`whatsapp-rust-chat-store` is not published.** Its schema and query surface are still moving, so it is held back from crates.io (`publish = false`) and stays reachable only through the git source — as does `whatsapp-rust-plugin-metrics`. When you use the chat store, put `whatsapp-rust` and `whatsapp-rust-sqlite-storage` on that same revision: a registry copy and a git copy of `whatsapp-rust-sqlite-storage` are two distinct crates to Cargo, and `ChatStore::new` only accepts the `SqliteStore` from the copy it was compiled against. See [Chat Store](/concepts/storage).
+**`whatsapp-rust-chat-store` is not published.** Its schema and query surface are still moving, so it is held back from crates.io (`publish = false`) and stays reachable only through the git source — as does `whatsapp-rust-plugin-metrics`. When you use the chat store, put `whatsapp-rust` and `whatsapp-rust-sqlite-storage` on that same revision: a registry copy and a git copy of `whatsapp-rust-sqlite-storage` are two distinct crates to Cargo, and `ChatStore::new` only accepts the `SqliteStore` from the copy it was compiled against. See [current chat-store status](/installation#chat-history-storage).
 
 ## Release pipeline
 

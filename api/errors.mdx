@@ -615,7 +615,7 @@ pub enum SignalMaintenanceError {
 
 ### MessageEditError
 
-Returned by `EncryptedEdit::original_sender_jid`, `SecretEncrypted::original_sender_jid`, and `SecretEncrypted::original_sender_for_dispatch` — the target-key sender resolvers used when decrypting `secret_encrypted_message` envelopes (message edits, poll edits/add-option, event edits). Added in PR #1090, replacing bare `anyhow::Error`. See [Decrypting secret-encrypted envelopes](/api/polls#raw-interoperability) for how these methods are used.
+Returned by `EncryptedEdit::original_sender_jid`, `SecretEncrypted::original_sender_jid`, and `SecretEncrypted::original_sender_for_dispatch` — the target-key sender resolvers used when decrypting `secret_encrypted_message` envelopes (message edits, poll edits/add-option, event edits). Added in PR #1090, replacing bare `anyhow::Error`. See [target-key sender resolution](https://github.com/oxidezap/whatsapp-rust/blob/ff7acaddf80169013b0fd06df65296db7e4a8ca3/src/features/message_edit.rs#L301) and [core envelope decryption](https://github.com/oxidezap/whatsapp-rust/blob/ff7acaddf80169013b0fd06df65296db7e4a8ca3/wacore/src/message_edit.rs#L81) for the resolver and decryption contracts.
 
 ```rust
 #[non_exhaustive]
@@ -1043,4 +1043,4 @@ Both new variants are additive at the type level: `SendError` and `SendResult` a
 
 ### Operation results and typed targets
 
-Edit, revoke, pin and unpin return the new operation's `SendResult`; its ID does not replace the target content ID. Current edits use `EditRequest` and chat actions use `MessageRef`. Follow the [current API migration guide](/guides/migrating-current-api#sends-and-edits) rather than adapting an older positional overload example.
+On the main client send API, edit, revoke, pin and unpin return the new operation's `SendResult`; its ID does not replace the target content ID. Current client edits use `EditRequest` and chat actions use `MessageRef`. Newsletter edits and revokes use their separate facade and still return `()` on success. Follow the [current API migration guide](/guides/migrating-current-api#sends-and-edits) rather than adapting an older positional overload example.

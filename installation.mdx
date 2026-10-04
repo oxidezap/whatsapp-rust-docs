@@ -187,9 +187,10 @@ If you depend on `whatsapp-rust-sqlite-storage` directly, the same rule applies 
 whatsapp-rust-sqlite-storage = { version = "0.7", default-features = false }
 ```
 
-<Note>
-  whatsapp-rust previously shipped an optional chat/message history store, `whatsapp-rust-chat-store`. We extracted it into its own repository, since materializing an event stream into chats, previews, and unread counts is an application decision rather than a protocol one. It no longer ships from `whatsapp-rust` — link to be added here once the replacement repository is published.
-</Note>
+## Chat history storage
+
+whatsapp-rust previously shipped an optional chat/message history store, `whatsapp-rust-chat-store`. We extracted it into its own repository, since materializing an event stream into chats, previews, and unread counts is an application decision rather than a protocol one. It no longer ships from `whatsapp-rust` — link to be added here once the replacement repository is published.
+
 
 <Note>
   The default features provide everything needed for most use cases. Only customize features if you have specific requirements.

@@ -38,4 +38,4 @@ let link = vec![
 client.community().link_subgroups_with_options(&community_jid, &link).await?;
 ```
 
-[`CommunitySubgroup`](/api/community#query-and-manage) gained an `is_hidden_group: bool` field, parsed from the `hidden_group` property in the MEX subgroup listing. It defaults to `false` when the server omits the field, so existing readers keep working. See the [community management guide](/api/community#create_subgroup_with_options) for a full walkthrough.
+[`CommunitySubgroup`](/api/community#query-and-manage) gained an `is_hidden_group: bool` field, parsed from the `hidden_group` property in the MEX subgroup listing. It defaults to `false` when the server omits the field, so existing readers keep working. See the [community management guide](/guides/communities#link-groups-and-inspect-every-result) for a full walkthrough.

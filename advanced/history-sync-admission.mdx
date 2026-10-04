@@ -116,8 +116,7 @@ let bot = Bot::builder()
     .build()
     .await?;
 
-let handle = bot.run().await?;
-handle.await?;
+bot.run().await;
 ```
 
 If you already hold the policy behind an `Arc`, use `with_history_sync_admission_arc` to avoid re-boxing:

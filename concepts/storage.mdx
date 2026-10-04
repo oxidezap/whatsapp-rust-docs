@@ -79,4 +79,4 @@ Tune `SqliteDatabaseConfig` at database scope. Reader connections can increase r
 
 ## Migrate persisted data
 
-Back up the database before an incompatible format migration. Follow the [storage migration reference](/api/store) for supported migrations and legacy session interoperability. Changing a library feature does not retroactively validate arbitrary stored bytes. Do not hand-rewrite Signal sessions or drop account-scoped state to bypass an invalid-data error.
+Back up the database before an incompatible format migration. Follow the [storage migration reference](/api/store#migrations-and-errors) for supported migrations and legacy session interoperability. Changing a library feature does not retroactively validate arbitrary stored bytes. Do not hand-rewrite Signal sessions or drop account-scoped state to bypass an invalid-data error.

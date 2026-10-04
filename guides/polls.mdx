@@ -14,20 +14,20 @@ Examples on this page target [source snapshot `ff7acad`](https://github.com/oxid
 Use `polls().create` for single or multiple selections. Use `create_quiz` with a correct option index for a quiz. Both return `CreatedPoll` and carry the secret and creator needed by later votes.
 
 ```rust
-use whatsapp_rust::{Client, Jid};
+use whatsapp_rust::{Client, Jid, CreatedPoll};
 
-async fn quiz(client: &Client, chat: &Jid) -> whatsapp_rust::anyhow::Result<()> {
+async fn quiz(client: &Client, chat: &Jid) -> whatsapp_rust::anyhow::Result<CreatedPoll> {
     let options = vec!["A".to_owned(), "B".to_owned()];
     let created = client.polls().create_quiz(chat, "Choose A", &options, 0).await?;
     let target = created.poll_ref()?;
     client.polls().vote(&target, &["A".to_owned()]).await?;
-    Ok(())
+    Ok(created)
 }
 ```
 
 ## Keep the parent association
 
-Save the creation message ID, destination, actual crypto creator and secret together. To rebuild a reference for an incoming poll, use its `InboundMessage::message_ref()`, the original creator and a validated `MessageSecret`. A message reference by itself does not include the crypto secret.
+Return and retain `CreatedPoll`, or save the creation message ID, destination, actual crypto creator and secret together. Protect the secret as sensitive data: it enables decryption of votes. Do not log or expose it. To rebuild a reference for an incoming poll, use its `InboundMessage::message_ref()`, the original creator and a validated `MessageSecret`. A message reference by itself does not include the crypto secret.
 
 When processing updates, `decrypt_vote(ciphertext, &target, voter).await` returns selected option hashes. Map hashes to the creation's option names or use `aggregate_votes` for a tally. Preserve voter identity and update order when building a custom aggregate.
 

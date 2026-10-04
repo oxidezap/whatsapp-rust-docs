@@ -101,7 +101,7 @@ Runs indefinitely until:
 - Client receives a fatal stream error (401 unauthorized, 409 conflict, or 516 device removed)
 
 <Note>
-If you call `disconnect()`, `logout()`, or `signal_shutdown_sync()` while `run()` is waiting out its reconnect backoff, the client interrupts the wait immediately. The backoff can otherwise run up to the 900s cap (see [Auto-Reconnection](#auto-reconnection)). So without this, awaiting `run()` right after requesting a stop could look like a 15-minute hang. For example, [`bot.run().await?`](/api/bot#run) returns a `BotHandle` immediately — awaiting that handle waits on this same `run()`. A per-connection shutdown does not cut the backoff short; that's the kind `run()` itself reconnects from. Only the three terminal calls above interrupt the wait.
+If you call `disconnect()`, `logout()`, or `signal_shutdown_sync()` while `run()` is waiting out its reconnect backoff, the client interrupts the wait immediately. The backoff can otherwise run up to the 900s cap (see [Auto-Reconnection](#auto-reconnection)). So without this, awaiting `run()` right after requesting a stop could look like a 15-minute hang. For example, [`bot.spawn()`](/api/bot#run) returns a `BotHandle` immediately; awaiting that handle waits for this same run loop. `bot.run().await` drives it on the current task. A per-connection shutdown does not cut the backoff short; that's the kind `run()` itself reconnects from. Only the three terminal calls above interrupt the wait.
 </Note>
 
 **Example:**
@@ -821,8 +821,6 @@ Access contact operations.
 **Methods:**
 - `is_on_whatsapp(jids: &[Jid])` - Check if JIDs are registered on WhatsApp (supports PN and LID JIDs)
 - `get_user_info(jids: &[Jid])` - Get profile info for users by JID
-- Profile picture lookup: [`client.pictures()`](/api/pictures).
-- Single picture lookups use [`client.pictures()`](/api/pictures) with an explicit route.
 - Single picture lookups use [`client.pictures()`](/api/pictures) with an explicit route.
 
 ### tc_token
@@ -956,7 +954,7 @@ Access newsletter (channel) operations.
 - `subscribe_live_updates(jid: &Jid)` - Subscribe to real-time updates
 
 <Note>
-Newsletter message sending is handled by the unified [`client.send_message()`](/api/send#send) method — pass a newsletter JID and the message is sent as plaintext automatically. See the [Send API](/api/send#send) for details.
+Newsletter message sending is handled by the unified [`client.send_message()`](/api/send#send) method — pass a newsletter JID and the message is sent as plaintext automatically.
 </Note>
 
 **Example:**

@@ -579,7 +579,7 @@ pub(crate) struct PendingDeviceSync {
 
 The `PendingDeviceSync` state is cleared on reconnect to prevent stale entries from leaking across connections.
 
-The `<devices><update hash="…"/></notification>` hash-only path described in [Storage → Granular cache patching](/concepts/storage#cache-coherence) resolves its target contact and joins this same `schedule_unknown_device_sync()` batching — offline resumes queue it here instead of firing an immediate usync mid-drain.
+The `<devices><update hash="…"/></notification>` hash-only path described in [device cache patching](/advanced/state-management#cache-patching-strategy) resolves its target contact and joins this same `schedule_unknown_device_sync()` batching — offline resumes queue it here instead of firing an immediate usync mid-drain.
 
 Location: `src/pending_device_sync.rs`, `src/handlers/ib.rs`, `src/usync.rs`
 

@@ -613,7 +613,7 @@ The `get` → mutate → `insert` sequence is **not atomic**. A concurrent notif
 | Group metadata | Participant add/remove notifications and API calls | No (cache-only) | `leave()` and cache eviction trigger server re-fetch |
 | LID-PN mappings | Directed sources overwrite; observational bulk sources only seed new LIDs (see [`LearningSource`](/api/client#learningsource)) | Yes (backend store) | Conflict: source-aware write policy gates overwrites; observational mismatches queue a live re-resolve. The server can also flag a mapping stale directly, via `<ack refresh_lid="true">` on a send — the client re-resolves it the same way (see [Client — refresh on `refresh_lid` acks](/api/client#refresh-on-refresh_lid-acks)) |
 
-For full details including the write-policy gate, the live-query reconcile path, and data flow, see [Granular cache patching](/concepts/storage#cache-coherence).
+Read [`LearningSource`](https://github.com/oxidezap/whatsapp-rust/blob/ff7acaddf80169013b0fd06df65296db7e4a8ca3/wacore/src/types/lid_pn.rs#L16), the [client write-policy gate](https://github.com/oxidezap/whatsapp-rust/blob/ff7acaddf80169013b0fd06df65296db7e4a8ca3/src/client/lid_pn.rs#L56) and [live-query reconciliation](https://github.com/oxidezap/whatsapp-rust/blob/ff7acaddf80169013b0fd06df65296db7e4a8ca3/src/client/lid_pn.rs#L355) for source-specific writes and conflict recovery.
 
 ## Related Components
 

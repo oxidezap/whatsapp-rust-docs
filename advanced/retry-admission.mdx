@@ -93,8 +93,7 @@ let bot = Bot::builder()
 // default behavior: every retry receipt admitted, matching WhatsApp Web.
 bot.client().set_retry_admission(Arc::new(AlwaysAdmit));
 
-let handle = bot.run().await?;
-handle.await?;
+bot.run().await;
 ```
 
 `Client::set_retry_admission` returns `false` (and keeps the previously-registered policy) if called more than once — set it once, before connecting. Live tuning belongs inside the policy itself (e.g. atomics), not in re-registration.

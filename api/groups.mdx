@@ -113,9 +113,28 @@ Use typed modes and the source reference for exact arguments:
 
 ## get_profile_pictures
 
-`get_profile_pictures(group_jids, PictureType)` is a network batch with per-entry outcomes and a maximum of 1,000 groups. It remains distinct from a single-picture request. Inspect each `GroupProfilePictureResult`, including rejection metadata.
+`get_profile_pictures(group_jids, PictureType)` is a network batch with per-entry outcomes and a maximum of 1,000 groups. It remains distinct from a single-picture request. Inspect each returned entry, including rejection metadata.
 
 Use the [pictures facade](/api/pictures) for a single normal group or community parent. Group picture mutations remain `set_profile_picture` and `remove_profile_picture`.
+
+## Set or remove the group picture
+
+Use `set_profile_picture(group, jpeg_bytes)` for a prepared JPEG. Empty bytes are rejected; the library does not crop, resize or validate the JPEG. Use `remove_profile_picture(group)` for explicit removal. These are admin mutations, separate from lookup.
+
+```rust
+use whatsapp_rust::{Client, Jid};
+
+async fn replace_picture(client: &Client, group: &Jid, jpeg: Vec<u8>) -> whatsapp_rust::anyhow::Result<()> {
+    let result = client.groups().set_profile_picture(group, jpeg).await?;
+    println!("Picture ID: {:?}", result.id);
+    Ok(())
+}
+
+async fn remove_picture(client: &Client, group: &Jid) -> whatsapp_rust::anyhow::Result<()> {
+    client.groups().remove_profile_picture(group).await?;
+    Ok(())
+}
+```
 
 ## Source reference
 [Facade, projections, history outcomes and DTO constructors](https://github.com/oxidezap/whatsapp-rust/blob/ff7acaddf80169013b0fd06df65296db7e4a8ca3/src/features/groups.rs) · [Core group inputs, typed modes and IQ contracts](https://github.com/oxidezap/whatsapp-rust/blob/ff7acaddf80169013b0fd06df65296db7e4a8ca3/wacore/src/iq/groups.rs)
