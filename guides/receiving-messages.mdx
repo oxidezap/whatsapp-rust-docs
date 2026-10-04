@@ -956,4 +956,4 @@ Use `InboundMessage::message_ref()` for chat actions and `newsletter_ref()` for 
 
 PDO placeholder recovery remains event-only. A later encrypted retry still must complete its durability hook even when the equivalent user event was already dispatched. The retry can promote that recovery to committed state without publishing the same event again. Distinct user payloads in an SKDM-bearing retry retain separate dispatch claims; adding an SKDM envelope does not make their user content identical. Hooks and event consumers still need idempotent `(chat, sender, id)` handling.
 
-[PDO retry and durability regression scenarios](https://github.com/oxidezap/whatsapp-rust/blob/54ce6cd9007f4361a07dbad50718973bbf56e2e9/src/message/tests.rs)
+[PDO retry and durability regression scenarios](https://github.com/oxidezap/whatsapp-rust/blob/86b1b315af3be1a48e1961c0a72f3e42152f1a33/src/message/tests.rs)

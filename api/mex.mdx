@@ -168,7 +168,7 @@ match client.mex().execute(request).await {
 
 ### MexFatalError
 
-`whatsapp_rust::wacore::iq::mex::MexFatalError` retains the operation's `query: &'static str`, numeric `code: i32`, and `message: String`. Use typed matching or source-chain inspection rather than parse its display text. Read the [pinned MEX response parser](https://github.com/oxidezap/whatsapp-rust/blob/54ce6cd9007f4361a07dbad50718973bbf56e2e9/wacore/src/iq/mex.rs) for fatal selection and parsing.
+`whatsapp_rust::wacore::iq::mex::MexFatalError` retains the operation's `query: &'static str`, numeric `code: i32`, and `message: String`. Use typed matching or source-chain inspection rather than parse its display text. Read the [pinned MEX response parser](https://github.com/oxidezap/whatsapp-rust/blob/86b1b315af3be1a48e1961c0a72f3e42152f1a33/wacore/src/iq/mex.rs) for fatal selection and parsing.
 
 ## Response handling
 

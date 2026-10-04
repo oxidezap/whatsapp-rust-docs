@@ -674,7 +674,8 @@ Access group management operations.
 - `acknowledge(jid: &Jid)` - Acknowledge a group
 - `fetch_metadata_batch(jids: &[Jid])` - Batch fetch full group metadata for multiple groups
 - `get_profile_pictures(group_jids: Vec<Jid>, picture_type: PictureType)` - Batch fetch group profile pictures
-- `lookup_community_profile_picture(community_jid: &Jid, preview: bool, existing_id: Option<&str>)` - Fetch a community parent group's picture over the community protocol
+
+For contact, group and community picture lookup, use [`client.pictures().lookup(ProfilePictureRequest)`](/api/pictures).
 
 **Example:**
 ```rust
@@ -876,7 +877,7 @@ Access newsletter (channel) operations.
 - `join(jid: &Jid)` - Join a newsletter
 - `leave(jid: &Jid)` - Leave a newsletter
 - `update(jid, options)` - Update newsletter settings
-- `send_reaction(jid, msg_server_id, reaction)` - React to a newsletter message
+- `send_reaction(&NewsletterMessageRef, reaction)` - React using a channel server-message reference
 - `get_messages(jid, count, before)` - Fetch newsletter messages
 - `subscribe_live_updates(jid: &Jid)` - Subscribe to real-time updates
 
@@ -927,10 +928,11 @@ pub fn polls(&self) -> Polls<'_>
 Access poll operations.
 
 **Methods:**
-- `create(to: &Jid, name: &str, options: &[String], selectable_count: u32)` - Create a poll (returns message ID and secret)
-- `vote(chat_jid, poll_msg_id, poll_creator_jid, message_secret, option_names)` - Cast a vote on a poll
-- `decrypt_vote(enc_payload, enc_iv, message_secret, poll_msg_id, poll_creator_jid, voter_jid)` - Decrypt a vote (static method)
-- `aggregate_votes(poll_options, votes, message_secret, poll_msg_id, poll_creator_jid)` - Tally all votes (static method)
+- `create(to, name, options, selectable_count)` - Return `CreatedPoll`, retaining its send result, crypto creator and validated secret
+- `vote(&PollRef, selected_options)` - Cast a vote using the creation reference
+- `decrypt_vote(ciphertext, &PollRef, voter)` - Decrypt option hashes using that same reference
+- `vote_raw` and `decrypt_vote_raw` - Accept explicit creation metadata at an interoperability boundary
+- `aggregate_votes(poll_options, votes, message_secret, poll_msg_id, poll_creator_jid)` - Tally updates through the client, including known PN/LID aliases
 
 **Example:**
 ```rust
@@ -1404,9 +1406,13 @@ use whatsapp_rust::Client;
 
 let client = Client::builder()
     .with_persistence_manager(persistence_manager)
+    .with_runtime(runtime)
+    .with_transport_factory(transport_factory)
+    .with_http_client(http_client)
     .with_watched_ab_props([AURA_PINNED_CHATS_BENEFIT_ACTIVE])
     .build()
-    .await?;
+    .await?
+    .into_client();
 ```
 
 Flags retain their `code`, `value_type`, and `default` straight from the WA Web bundle, so behavior tracks WhatsApp Web without hand-maintained config tables.

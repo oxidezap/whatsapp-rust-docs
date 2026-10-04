@@ -4,7 +4,7 @@ description: Learn how to implement custom storage, transport, and HTTP backends
 ---
 
 <Note>
-Examples on this page target [source snapshot `54ce6cd`](https://github.com/oxidezap/whatsapp-rust/tree/54ce6cd9007f4361a07dbad50718973bbf56e2e9), not a crates.io release. Use the [current API guide](/guides/current-api) to select the matching dependency.
+Examples on this page target [source snapshot `86b1b31`](https://github.com/oxidezap/whatsapp-rust/tree/86b1b315af3be1a48e1961c0a72f3e42152f1a33), not a crates.io release. Use the [current API guide](/guides/current-api) to select the matching dependency.
 </Note>
 
 
@@ -40,9 +40,9 @@ Signal sessions and sender keys must become durable before publishing messages t
 
 For crash replay, implement the pending-inbound methods on `ProtocolStore`. Store the pending payload before acknowledgement, and clear it only at the documented commit boundary. The consumer hook still needs idempotent commits by `(chat, sender, id)` because a crash can occur after the application's commit and before the server receives its ACK. See [inbound durability](/advanced/inbound-durability).
 
-Device-scoped operations must isolate one account from another. `DeviceStore::resource_report` describes account-scoped storage; database-wide readers and adapters have a separate scope. Register an owned adapter with `with_backend` or an `Arc<dyn Backend>` with `with_backend_arc`.
+Device-scoped operations must isolate one account from another. The scope of `DeviceStore::resource_report` depends on the adapter. SQLite reports the shared database pool through this legacy trait method; count it once per database. Use `SqliteStore::scoped_resource_report()` for an account and `SqliteDatabase::resource_report()` for the database-wide report. Register an owned adapter with `with_backend` or an `Arc<dyn Backend>` with `with_backend_arc`.
 
-[Storage trait reference](https://github.com/oxidezap/whatsapp-rust/blob/54ce6cd9007f4361a07dbad50718973bbf56e2e9/wacore/src/store/traits.rs) · [SQLite reference implementation](https://github.com/oxidezap/whatsapp-rust/blob/54ce6cd9007f4361a07dbad50718973bbf56e2e9/storages/sqlite-storage/src/lib.rs)
+[Storage trait reference](https://github.com/oxidezap/whatsapp-rust/blob/86b1b315af3be1a48e1961c0a72f3e42152f1a33/wacore/src/store/traits.rs) · [SQLite reference implementation](https://github.com/oxidezap/whatsapp-rust/blob/86b1b315af3be1a48e1961c0a72f3e42152f1a33/storages/sqlite-storage/src/lib.rs)
 
 ## Custom Runtime
 

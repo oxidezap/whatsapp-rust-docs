@@ -4,7 +4,7 @@ description: Create polls and quizzes, vote and decrypt with a borrowed creation
 ---
 
 <Note>
-Examples on this page target [source snapshot `54ce6cd`](https://github.com/oxidezap/whatsapp-rust/tree/54ce6cd9007f4361a07dbad50718973bbf56e2e9), not a crates.io release. Use the [current API guide](/guides/current-api) to select the matching dependency.
+Examples on this page target [source snapshot `86b1b31`](https://github.com/oxidezap/whatsapp-rust/tree/86b1b315af3be1a48e1961c0a72f3e42152f1a33), not a crates.io release. Use the [current API guide](/guides/current-api) to select the matching dependency.
 </Note>
 
 ## Create and vote
@@ -40,7 +40,7 @@ async fn decrypt(
     poll: &PollRef<'_>,
     voter: &Jid,
 ) -> Result<Vec<Vec<u8>>, PollError> {
-    client.polls().decrypt_vote_ref(ciphertext, poll, voter).await
+    client.polls().decrypt_vote(ciphertext, poll, voter).await
 }
 ```
 
@@ -48,9 +48,9 @@ The client tries known creator and voter PN/LID aliases independently. The store
 
 ## Raw interoperability
 
-`vote_raw` and `decrypt_vote` accept the explicit secret, creation ID and creator metadata needed by external storage integrations. `decrypt_vote` has the same alias resolution as the typed entry point. Prefer `MessageSecret::try_from` and `PollRef::new` when you can validate stored data once at the boundary.
+`vote_raw` and `decrypt_vote_raw` accept the explicit secret, creation ID and creator metadata needed by external storage integrations. `decrypt_vote_raw` has the same alias resolution as the typed entry point. Prefer `MessageSecret::try_from` and `PollRef::new` when you can validate stored data once at the boundary.
 
-`decrypt_vote_ref(ciphertext, &PollRef, voter)` is the typed entry point. `decrypt_vote` accepts the explicit bytes, original ID and identities.
+`decrypt_vote(ciphertext, &PollRef, voter)` is the typed entry point. `decrypt_vote_raw` accepts the explicit bytes, original ID and identities.
 
 ## Persist creation metadata
 
@@ -59,4 +59,4 @@ Read `send_result()`, `creator()` and `secret()` or move them with `into_parts()
 `aggregate_votes` hashes the named options, decrypts incoming updates and counts the latest selection per voter. Check its source signature when adapting a custom history pipeline. Missing or malformed parent secrets must not be silently padded or truncated; see [MsgSecretStore](/api/store#msgsecretstore).
 
 ## Source reference
-[Poll facade, errors and aggregation](https://github.com/oxidezap/whatsapp-rust/blob/54ce6cd9007f4361a07dbad50718973bbf56e2e9/src/features/polls.rs) · [Creation results and borrowed references](https://github.com/oxidezap/whatsapp-rust/blob/54ce6cd9007f4361a07dbad50718973bbf56e2e9/src/features/creation.rs) · [Core encryption primitives](https://github.com/oxidezap/whatsapp-rust/blob/54ce6cd9007f4361a07dbad50718973bbf56e2e9/wacore/src/poll.rs)
+[Poll facade, errors and aggregation](https://github.com/oxidezap/whatsapp-rust/blob/86b1b315af3be1a48e1961c0a72f3e42152f1a33/src/features/polls.rs) · [Creation results and borrowed references](https://github.com/oxidezap/whatsapp-rust/blob/86b1b315af3be1a48e1961c0a72f3e42152f1a33/src/features/creation.rs) · [Core encryption primitives](https://github.com/oxidezap/whatsapp-rust/blob/86b1b315af3be1a48e1961c0a72f3e42152f1a33/wacore/src/poll.rs)
