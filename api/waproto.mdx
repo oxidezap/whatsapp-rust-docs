@@ -7,9 +7,11 @@ description: "Protocol Buffers definitions for WhatsApp messages"
 
 `waproto` contains the Protocol Buffers definitions for all WhatsApp message types. It's auto-generated from `whatsapp.proto` using [buffa](https://github.com/anthropics/buffa) and provides strongly-typed Rust structs for working with WhatsApp's binary protocol.
 
+Examples use `waproto` through the main crate's re-export. Declare `whatsapp-rust` as shown; a standalone `waproto` dependency instead requires direct `waproto::` imports.
+
 ```toml
 [dependencies]
-waproto = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "54ce6cd9007f4361a07dbad50718973bbf56e2e9" }
+whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "54ce6cd9007f4361a07dbad50718973bbf56e2e9" }
 ```
 
 ## Structure
@@ -660,7 +662,7 @@ Enable them in your `Cargo.toml`:
 
 ```toml
 [dependencies]
-waproto = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "54ce6cd9007f4361a07dbad50718973bbf56e2e9", features = ["serde-snake-case"] }
+whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "54ce6cd9007f4361a07dbad50718973bbf56e2e9", features = ["serde-snake-case"] }
 ```
 
 ### Default behavior (no feature flags)

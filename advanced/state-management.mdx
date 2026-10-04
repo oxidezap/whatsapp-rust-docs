@@ -458,7 +458,7 @@ For more details on async patterns, see the [Architecture](/concepts/architectur
 
 ### Backend Trait
 
-The `Backend` trait is a combination of four domain-specific traits:
+The `Backend` trait is a combination of five domain-specific traits:
 
 ```rust
 pub trait Backend: SignalStore + AppSyncStore + ProtocolStore + MsgSecretStore + DeviceStore + Send + Sync {}

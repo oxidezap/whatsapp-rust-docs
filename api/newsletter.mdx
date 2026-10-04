@@ -434,7 +434,7 @@ Requires the reference's `ServerMessageId` and returns a fresh `StanzaId` for AC
 ### send_poll_vote
 
 ```rust
-let hashes = [wacore::poll::compute_option_hash("Option A")];
+let hashes = [whatsapp_rust::wacore::poll::compute_option_hash("Option A")];
 let operation_id = client.newsletter().send_poll_vote(&target, &hashes).await?;
 ```
 
@@ -610,7 +610,6 @@ Both fields are populated from `viewer_metadata.settings` on `list_subscribed` a
 ```rust
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[non_exhaustive]
 pub enum NewsletterVerification {
     Verified,
     Unverified,
@@ -626,7 +625,6 @@ The server's `verification` value is matched ignoring case, so `VERIFIED` reads 
 ```rust
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[non_exhaustive]
 pub enum NewsletterState {
     Active,
     Suspended,
@@ -654,7 +652,6 @@ The viewer's role in a newsletter.
 ```rust
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[non_exhaustive]
 pub enum NewsletterRole {
     Owner,
     Admin,
@@ -760,7 +757,7 @@ pub struct NewsletterMessage {
 }
 ```
 
-- `message_id` — Wire stanza id. Pass this to [`edit_message`](#edit_message) and [`revoke_message`](#revoke_message); it is **not** the same as `server_id`, which reactions use. Empty when the server omitted it.
+- `message_id` — Optional client content `MessageId`: `None` when omitted. Obtain `message_ref(&newsletter_jid)?` for [`edit_message`](#edit_message) or [`revoke_message`](#revoke_message); those operations require this ID. Reactions require the independently observed server ID.
 - `server_id` — Server-assigned monotonic id. Use it as the pagination cursor in [`get_messages`](#get_messages) and as the target for [`send_reaction`](#send_reaction).
 - `timestamp` — Message timestamp (Unix seconds). Moves with an edit.
 - `message_type` — `Text`, `Media`, or `Poll` on the wire. An edit or revocation is not a message type; see `edit`. Reactions are counts on the reacted-to message, not a type. A message without a `type` attribute reads as `Text`.

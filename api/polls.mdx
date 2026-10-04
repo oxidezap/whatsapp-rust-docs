@@ -32,7 +32,7 @@ Returns `Result<CreatedPoll, PollError>`. A poll accepts 2 to 12 distinct option
 let created = client.polls().create_quiz(&chat, "Choose the correct answer", &options, 0).await?;
 ```
 
-Returns `CreatedPoll`. The correct index is zero-based and must be in range. A quiz is single-select.
+Returns `Result<CreatedPoll, PollError>`. The correct index is zero-based and must be in range. A quiz is single-select.
 
 ### vote
 
@@ -72,12 +72,9 @@ pub async fn decrypt_vote(
 The instance methods consult known PN/LID mappings and try creator and voter aliases independently. Preserve the original crypto creator when persisting a poll reference.
 </Note>
 
-<ParamField path="enc_payload" type="&[u8]" required>
-  Encrypted vote payload (from the `PollUpdateMessage`).
-</ParamField>
-
-<ParamField path="enc_iv" type="&[u8]" required>
-  12-byte initialization vector from the encrypted vote.
+<ParamField path="ciphertext" type="PollVoteCiphertext<'_>" required>
+  Borrowed encrypted vote data: `enc_payload: &[u8]` holds the payload from
+  `PollUpdateMessage`, and `enc_iv: &[u8]` holds its 12-byte initialization vector.
 </ParamField>
 
 <ParamField path="message_secret" type="&[u8]" required>

@@ -18,6 +18,8 @@ graph TB
     D --> F[AppSyncStore]
     D --> G[ProtocolStore]
     D --> H[DeviceStore]
+    D --> K[MsgSecretStore]
+    K --> I
     E --> I[SqliteStore]
     F --> I
     G --> I
@@ -968,7 +970,7 @@ Stop a session before resetting or removing its account. Existing handles are no
 
 `SqliteDatabaseConfig` configures the database once. Defaults are one writer, one eligible WAL reader, and 512 KiB cache per connection. Idle readers retire without replenishment until a read needs one. Memory/shared-cache databases use the writer path instead of independent WAL readers.
 
-Adjust `read_pool_size` for read concurrency. `pool_size` controls writes and should reflect the backend's transaction workload. Use `with_mmap_size` for main-file reads when appropriate; WAL writes still use the WAL. `with_connection_init`, `with_commit_barrier`, and `with_incremental_vacuum` configure host-specific initialization, durability barriers, and maintenance.
+Adjust `read_pool_size` for read concurrency. Keep `pool_size` at 1 for writes. Concurrent deferred transactions that read and then write can deadlock on the lock upgrade; `busy_timeout` cannot resolve that deadlock. Use `with_mmap_size` for main-file reads when appropriate; WAL writes still use the WAL. `with_connection_init`, `with_commit_barrier`, and `with_incremental_vacuum` configure host-specific initialization, durability barriers, and maintenance.
 
 See [SQLite configuration](/api/store#database-configuration) for opening examples and account operations. Count whole-pool `database.resource_report()` once per database. Store-scoped reports exclude shared pool resources.
 
@@ -1081,60 +1083,13 @@ persistence_manager
 
 ## Custom backend implementation
 
-### Example: PostgreSQL backend
+### Custom adapter requirements
 
-```rust
-use async_trait::async_trait;
-use whatsapp_rust::wacore::store::traits::*;
+Implement all five traits: `SignalStore`, `AppSyncStore`, `ProtocolStore`, `MsgSecretStore`, and `DeviceStore`. Only then does the blanket `Backend` implementation apply. A PostgreSQL adapter must provide device-scoped tables and transactions for each domain; there is no bundled PostgreSQL backend.
 
-pub struct PostgresStore {
-    pool: sqlx::PgPool,
-    device_id: i32,
-}
+For `MsgSecretStore`, implement `put_msg_secrets`, `get_stored_msg_secret`, and `delete_expired_msg_secrets`. Batch upserts must merge expiry and parent timestamps with `merge_msg_secret_expiry` and `merge_msg_secret_message_ts`. Read through `StoredMessageSecret::from_stored_bytes`; malformed retained bytes must return `StoreError::InvalidMessageSecret`. Preserve known parent timestamps, and return `None` explicitly when your schema cannot provide them. The byte-only `get_msg_secret` and single-row `put_msg_secret` methods have defaults built on these required operations.
 
-#[async_trait]
-impl SignalStore for PostgresStore {
-    async fn put_identity(&self, address: &str, key: [u8; 32]) -> Result<()> {
-        sqlx::query(
-            "INSERT INTO identities (device_id, address, key) 
-             VALUES ($1, $2, $3) 
-             ON CONFLICT (device_id, address) DO UPDATE SET key = $3"
-        )
-        .bind(self.device_id)
-        .bind(address)
-        .bind(&key[..])
-        .execute(&self.pool)
-        .await?;
-        Ok(())
-    }
-
-    // ... implement other methods
-}
-
-#[async_trait]
-impl AppSyncStore for PostgresStore {
-    // ... implement methods
-}
-
-#[async_trait]
-impl ProtocolStore for PostgresStore {
-    // ... implement methods
-}
-
-#[async_trait]
-impl DeviceStore for PostgresStore {
-    // ... implement methods
-}
-
-// Backend trait automatically implemented
-```
-
-### Usage
-
-```rust
-let backend = Arc::new(PostgresStore::new(pool, device_id));
-let pm = PersistenceManager::new(backend).await?;
-```
+See [storage traits](/api/store) for method signatures and [message-secret reads](/api/store#msgsecretstore) for validated values. Use the bundled SQLite backend until your adapter satisfies these contracts; placeholder implementations do not constitute a usable `Backend`.
 
 ## Migration & Debugging
 

@@ -1353,6 +1353,7 @@ for result in results {
         }
         GroupMetadataResult::Forbidden(id) => println!("Forbidden: {id}"),
         GroupMetadataResult::NotFound(id) => println!("Not found: {id}"),
+        _ => eprintln!("Unrecognized group lookup result"),
     }
 }
 ```
@@ -1397,6 +1398,7 @@ for outcome in client.groups().fetch_overviews(&jids).await? {
         }
         GroupOverviewResult::Forbidden(id) => println!("Forbidden: {id}"),
         GroupOverviewResult::NotFound(id) => println!("Not found: {id}"),
+        _ => eprintln!("Unrecognized group lookup result"),
     }
 }
 ```

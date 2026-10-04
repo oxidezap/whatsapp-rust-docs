@@ -202,12 +202,12 @@ if !pair_code_outstanding {
 }
 ```
 
-A [pair code](#pair-code-phone-number-linking) flow has an unrelated lifetime — a code sits on a phone screen for up to its ~180s validity window (and longer still while a `companion_finish` is pending), which outlasts the 160s the six QR refs buy. Disconnecting unconditionally would revoke a code the client had just told the user was still good, and any `primary_hello` for it would then arrive at a session the server had already dropped. So the client now disconnects **only when no pair-code flow is outstanding** — a QR-only consumer keeps the reconnect-for-fresh-refs behavior it relies on, while a phone-number flow in progress keeps its socket up.
+A [pair code](#pair-code-phone-number-linking) flow has an unrelated lifetime — a code sits on a phone screen for up to its ~180s validity window (and longer still while a `companion_finish` is pending), which outlasts the 160s the six QR refs buy. Disconnecting unconditionally would revoke a code the client had just told the user was still good, and any `primary_hello` for it would then arrive at a session the server had already dropped. So the client now disconnects **only when no pair-code flow is outstanding** — a QR-only consumer must construct a fresh client to request new refs, while a phone-number flow in progress keeps its socket up.
 
 <Note>
-`disconnected: true` means the client is about to tear down its own socket, not that it already has: as the snippet above shows, the event dispatches *before* `disconnect().await` is called. A handler registered as a plain `EventHandler` runs inline during `dispatch`, ahead of the disconnect; a `Bot`/`on_event` closure runs off a channel on its own task and can race it either way.
+`disconnected: true` means the client is about to tear down its own socket, not that it already has: as the snippet above shows, the event dispatches *before* `shutdown().await` is called. A handler registered as a plain `EventHandler` runs inline during `dispatch`, ahead of the disconnect; a `Bot`/`on_event` closure runs off a channel on its own task and can race it either way.
 
-Note that no [`Event::Disconnected`](/concepts/events#disconnected) follows this particular teardown: `Client::disconnect()` sets the `expected_disconnect` flag, and `Disconnected` is scoped to disconnects the client did *not* intend — so waiting on it here would hang forever. `disconnect()` also disables auto-reconnect and, as of PR #1258, is final for this `Client` instance: it fires the same sticky shutdown signal that [`connect()`](/api/client#connect) now checks on entry, so every later `connect()` call on *this* client returns `ConnectError::Shutdown`, not `AlreadyConnected` — retrying with backoff never succeeds. To resume, construct a fresh [`Client`](/api/client#creating-a-client) against the same `persistence_manager` (the not-yet-paired device state lives there) and call `connect()` on that new instance instead.
+Note that no [`Event::Disconnected`](/concepts/events#disconnected) follows this particular teardown: `Client::shutdown()` sets the `expected_disconnect` flag, and `Disconnected` is scoped to disconnects the client did *not* intend — so waiting on it here would hang forever. `shutdown()` also disables auto-reconnect and, as of PR #1258, is final for this `Client` instance: it fires the same sticky shutdown signal that [`connect()`](/api/client#connect) now checks on entry, so every later `connect()` call on *this* client returns `ConnectError::Shutdown`, not `AlreadyConnected` — retrying with backoff never succeeds. To resume, construct a fresh [`Client`](/api/client#creating-a-client) against the same `persistence_manager` (the not-yet-paired device state lives there) and call `connect()` on that new instance instead.
 </Note>
 
 <Note>
@@ -1009,11 +1009,15 @@ Once set, the flag never reverts for the same account (like the WA Web pref) —
 Both methods can run simultaneously:
 
 ```rust
-// Start QR code (automatic on connection)
-bot.run().await;
+// Keep the client before moving the bot into its background task.
+let client = bot.client().clone();
+let handle = bot.spawn();
 
-// Also start pair code in parallel
+// QR rotation runs on the connection while the pair code is requested.
 let code = client.pair_with_code(options).await?;
+println!("Pair code: {code}");
+let outcome = handle.await;
+println!("Bot stopped: {outcome:?}");
 ```
 
 **State Management:**
@@ -1235,7 +1239,7 @@ let options = PairCodeOptions {
 };
 ```
 
-The client's private device lock is not a mutation API. Use the persistence manager you supplied at construction.
+Use international country-code-plus-number form. Do not supply a national-only number; formatting punctuation is stripped automatically.
 </CodeGroup>
 
 ### Event Handling

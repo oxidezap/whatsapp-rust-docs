@@ -38,7 +38,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await?;
 
     // Runs until logout or client.shutdown() from another task.
-    bot.run().await;
+    let reason = bot.run().await;
+    println!("Session ended: {reason:?}");
     Ok(())
 }
 ```
@@ -405,7 +406,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await?;
 
     info!("Starting bot...");
-    bot.run().await;
+    let reason = bot.run().await;
+    println!("Session ended: {reason:?}");
     Ok(())
 }
 

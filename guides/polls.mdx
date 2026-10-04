@@ -11,6 +11,9 @@ This guide covers creating polls in WhatsApp chats, casting votes on existing po
 ## Creating a poll
 
 ```rust
+use whatsapp_rust::Jid;
+
+let chat_jid: Jid = "120363012345678@g.us".parse()?;
 let options = vec!["Option A".to_string(), "Option B".to_string()];
 let created = client.polls().create(&chat_jid, "What do you prefer?", &options, 1).await?;
 println!("Poll sent: {}", created.send_result().message_id);

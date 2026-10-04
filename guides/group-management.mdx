@@ -507,6 +507,7 @@ for result in results {
         }
         GroupMetadataResult::Forbidden(id) => println!("Access denied: {id}"),
         GroupMetadataResult::NotFound(id) => println!("Not found: {id}"),
+        _ => eprintln!("Unrecognized group lookup result"),
     }
 }
 ```

@@ -23,7 +23,7 @@ use whatsapp_rust::wacore::sync_marker::MaybeSendSync;
 #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 pub trait Transport: MaybeSendSync {
     /// Sends raw data to the server
-    async fn send(&self, data: bytes::Bytes) -> Result<(), anyhow::Error>;
+    async fn send(&self, data: whatsapp_rust::bytes::Bytes) -> Result<(), anyhow::Error>;
 
     /// Closes the connection
     async fn disconnect(&self);
@@ -41,7 +41,7 @@ pub trait Transport: MaybeSendSync {
 Sends raw bytes through the transport. The caller is responsible for any protocol framing.
 
 ```rust
-async fn send(&self, data: bytes::Bytes) -> Result<(), anyhow::Error>;
+async fn send(&self, data: whatsapp_rust::bytes::Bytes) -> Result<(), anyhow::Error>;
 ```
 
 **Parameters:**
@@ -587,7 +587,7 @@ pub struct MockTransport;
 
 #[async_trait]
 impl Transport for MockTransport {
-    async fn send(&self, _data: bytes::Bytes) -> Result<(), anyhow::Error> {
+    async fn send(&self, _data: whatsapp_rust::bytes::Bytes) -> Result<(), anyhow::Error> {
         // Silently succeed
         Ok(())
     }
@@ -633,7 +633,7 @@ pub struct TcpTransport {
 
 #[async_trait]
 impl Transport for TcpTransport {
-    async fn send(&self, data: bytes::Bytes) -> Result<(), anyhow::Error> {
+    async fn send(&self, data: whatsapp_rust::bytes::Bytes) -> Result<(), anyhow::Error> {
         let mut writer = self.writer.lock().await;
         writer.write_all(&data).await?;
         Ok(())
@@ -682,7 +682,7 @@ impl TransportFactory for TcpTransportFactory {
                 match reader.read(&mut buf).await {
                     Ok(0) => break,
                     Ok(n) => {
-                        let data = bytes::Bytes::copy_from_slice(&buf[..n]);
+                        let data = whatsapp_rust::bytes::Bytes::copy_from_slice(&buf[..n]);
                         if event_tx.send(TransportEvent::DataReceived(data)).await.is_err() {
                             break;
                         }
@@ -723,7 +723,7 @@ mod tests {
         let (transport, events) = factory.create_transport().await.unwrap();
         
         // Should succeed without error
-        transport.send(vec![1, 2, 3]).await.unwrap();
+        transport.send(vec![1, 2, 3].into()).await.unwrap();
         
         // Disconnect should be no-op
         transport.disconnect().await;

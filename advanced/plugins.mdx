@@ -17,14 +17,14 @@ The plugin host is intentionally native-only today: it is trusted in-process Rus
 
 Native plugins live behind the opt-in `plugins` feature, which also enables the lower-level `client-lifecycle` feature.
 
-`plugins` ships in the published crate as of **0.7.0** — no git source needed:
+Enable `plugins` on the same source and revision used by your host application:
 
 ```toml Cargo.toml
 [dependencies]
 whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "54ce6cd9007f4361a07dbad50718973bbf56e2e9", features = ["plugins"] }
 ```
 
-A default build has neither plugin fields nor their runtime branches. If you're implementing a plugin directly in your application, enable `plugins` there. If you're publishing a reusable plugin crate, enable `plugins` on its own `whatsapp-rust` dependency instead — Cargo's [feature unification](https://doc.rust-lang.org/cargo/reference/features.html#feature-unification) then activates the host for any application that depends on your crate, so its `Cargo.toml` doesn't need to enable `plugins` itself.
+A default build has neither plugin fields nor their runtime branches. If you're implementing a plugin directly in your application, enable `plugins` there. If you're publishing a reusable plugin crate, enable `plugins` on its own `whatsapp-rust` dependency. Cargo's [feature unification](https://doc.rust-lang.org/cargo/reference/features.html#feature-unification) activates the host only when both dependencies resolve to the same package identity: source, version, and git revision must match. A crates.io dependency and a git dependency are distinct packages even when their versions match; mixing them also produces incompatible plugin trait types.
 
 See [Installation — feature flags](/installation#feature-flags) for where `plugins` and `client-lifecycle` sit relative to the rest of the feature matrix.
 

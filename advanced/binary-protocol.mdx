@@ -1199,8 +1199,8 @@ Use `evcxr` REPL for interactive exploration:
 :dep wacore-binary = { path = "wacore/binary" }
 :dep hex = "0.4"
 
-use whatsapp_rust::wacore_binary::marshal::unmarshal_ref;
-use whatsapp_rust::wacore_binary::builder::NodeBuilder;
+use wacore_binary::marshal::{marshal, unmarshal_ref};
+use wacore_binary::builder::NodeBuilder;
 
 // Decode binary data
 {

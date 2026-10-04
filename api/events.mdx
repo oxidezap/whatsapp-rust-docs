@@ -31,6 +31,8 @@ For received or stored events, construct `EventRef::new(message_ref, &creator, &
 
 ## Secrets and inbound responses
 
+Before dropping `CreatedEvent`, persist `secret()` together with the original event ID, chat, original author/direction, and `creator()`. Keep the exact crypto creator even if a PN/LID alias changes later. Incoming RSVP decryption needs that association after the creation result is gone; retaining only `SendResult` is insufficient. Store secrets securely and validate retained bytes as `MessageSecret` when reading them.
+
 `MessageSecret` accepts exactly 32 bytes, redacts `Debug`, and zeroizes owned bytes on drop. `CreatedEvent` and `EventRef` redact their debug output too. Explicitly exposing `SendResult` or its protobuf can expose the embedded secret; do not log those values as if redaction still applied.
 
-Use `wacore::event::decrypt_event_response_with_secret` for inbound encrypted RSVP data, with the stored original ID, creator, and responder identities. The library's receive path materializes supported encrypted add-ons. See [message references](/api/send#message-references-and-ids) and [poll secrets](/api/polls#creation-references).
+Use `whatsapp_rust::wacore::event::decrypt_event_response_with_secret` for inbound encrypted RSVP data, with the stored original ID, creator, and responder identities. The library's receive path materializes supported encrypted add-ons. See [message references](/api/send#message-references-and-ids) and [poll secrets](/api/polls#creation-references).

@@ -331,14 +331,14 @@ Fetch participant counts per subgroup via MEX (GraphQL).
 pub async fn get_subgroup_participant_counts(
     &self,
     community_jid: &Jid,
-) -> Result<Vec<SubgroupFailure>, CommunityError>
+) -> Result<Vec<(Jid, u32)>, CommunityError>
 ```
 
 **Parameters:**
 - `community_jid` — JID of the community
 
 **Returns:**
-- `Vec<SubgroupFailure>` — Pairs of subgroup JID and participant count
+- `Vec<(Jid, u32)>` — Pairs of subgroup JID and participant count
 
 **Example:**
 ```rust
@@ -494,7 +494,7 @@ pub struct CreateCommunityResult {
 }
 ```
 
-The `metadata` field carries the full community parent metadata from the server, with the inline `description: Option<String>` already populated. See [`GroupMetadata`](/api/groups#groupmetadata) for the full field list.
+The `metadata` field carries the full community parent metadata from the server, with `description: Option<String>` populated locally after the optional follow-up description IQ succeeds. See [`GroupMetadata`](/api/groups#groupmetadata) for the full field list.
 
 `CreateCommunityResult` is `#[non_exhaustive]`: struct-literal construction and exhaustive struct destructuring from outside the crate are both disallowed. Field reads are unaffected; add `..` to any exhaustive destructuring patterns.
 
@@ -658,6 +658,15 @@ pub enum CommunityError {
     Group(#[from] GroupError),
     #[error("invalid community request: {0}")]
     InvalidRequest(String),
+    #[error("subgroup join requires membership approval: {0}")]
+    MembershipApprovalRequired(Jid),
+    #[error("community {created_jid} created, but {step:?} failed: {source}")]
+    ConfigurationFailed {
+        created_jid: Jid,
+        step: CommunityConfigurationStep,
+        #[source]
+        source: Box<GroupError>,
+    },
 }
 ```
 

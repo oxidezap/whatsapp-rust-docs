@@ -7,9 +7,11 @@ description: "Platform-agnostic WhatsApp protocol implementation"
 
 `wacore` is the core WhatsApp protocol implementation for whatsapp-rust. It's designed to be **platform-agnostic** with no runtime dependencies on Tokio or specific databases, making it portable across different async runtimes and storage backends.
 
+Examples use `wacore` through the main crate's re-export. Declare `whatsapp-rust` as shown; a standalone `wacore` dependency instead requires direct `wacore::` imports.
+
 ```toml
 [dependencies]
-wacore = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "54ce6cd9007f4361a07dbad50718973bbf56e2e9" }
+whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "54ce6cd9007f4361a07dbad50718973bbf56e2e9" }
 ```
 
 ## Philosophy

@@ -532,7 +532,7 @@ let store = db.store(1);
 
 Configure the database once. `SqliteDatabase` owns shared writer/read pools and administration; `SqliteStore` is a fixed-device handle implementing the backend traits. Selecting a store opens no connections and checks neither existence nor provisioning.
 
-Defaults are one writer and one idle-retirable WAL reader where native/private-cache WAL support permits it, with 512 KiB page cache per connection and Normal synchronization. Memory databases and shared-cache URIs decline independent readers. `pool_size` controls the write path; `read_pool_size` widens reads that tolerate an independent snapshot. Consistency-sensitive reads remain on the writer path. Idle readers retire without immediate replacement and reopen when work arrives.
+Defaults are one writer and one idle-retirable WAL reader where native/private-cache WAL support permits it, with 512 KiB page cache per connection and Normal synchronization. Memory databases and shared-cache URIs decline independent readers. `pool_size` controls the write path; keep it at 1 because concurrent deferred read-to-write upgrades can deadlock beyond what `busy_timeout` can resolve; `read_pool_size` widens reads that tolerate an independent snapshot. Consistency-sensitive reads remain on the writer path. Idle readers retire without immediate replacement and reopen when work arrives.
 
 `with_mmap_size` affects main-file reads, not WAL writes. Page-cache reporting is an estimate and may overstate heap residency when mmap serves reads.
 
@@ -562,6 +562,20 @@ Every store shares the same pools, write permits, reader state, and commit barri
 | `remove_device(id).await` | Purge and delete one account; allocated IDs are not reissued |
 
 Stop that account's background work and release crate-owned backend holds before reset/removal. Old store handles are not revoked: they can write to the reset account or recreate rows after removal. Missing IDs return `DeviceNotFound` for reset/removal. No other account is stopped.
+
+### StoredDeviceSummary
+
+`list_devices()` returns summaries with these fields:
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `id` | `i32` | Stored account ID |
+| `pn` | `Option<Jid>` | Paired phone-number identity, when present |
+| `lid` | `Option<Jid>` | Linked identity, when present |
+| `push_name` | `String` | Stored display name |
+| `linked` | `bool` | Registration state, following `Device::is_registered()` |
+
+A provisioned row can exist before pairing, so existence alone does not imply `linked`. These summaries contain account identities; redact them in diagnostic logs.
 
 ### Resource reports
 

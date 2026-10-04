@@ -185,13 +185,19 @@ let result = client.status()
 ### revoke
 
 ```rust
-use whatsapp_rust::{StanzaId, StatusSendOptions};
+use whatsapp_rust::{Client, Jid, MessageId, SendResult, StanzaId, StatusSendOptions};
 
-let revoked = client.status().revoke(
-    sent.message_id.clone(),
-    &validated_recipients,
-    StatusSendOptions::default().with_stanza_id(StanzaId::new("REVOKE-OPERATION")?),
-).await?;
+async fn revoke_own_status(
+    client: &Client,
+    original_id: MessageId,
+    original_recipients: &[Jid],
+) -> Result<SendResult, whatsapp_rust::SendError> {
+    client.status().revoke(
+        original_id,
+        original_recipients,
+        StatusSendOptions::default().with_stanza_id(StanzaId::new("REVOKE-OPERATION")?),
+    ).await
+}
 ```
 
 The target is a `MessageId`; the new revoke envelope has its own operation ID. Use the same recipients as the original post. A revoke override must differ from the target ID.

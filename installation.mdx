@@ -130,12 +130,12 @@ wacore = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "54ce6cd9007
 <Note>
   `wacore` is not the only crate that builds for `wasm32` — as of [PR #1364](https://github.com/oxidezap/whatsapp-rust/pull/1364), `whatsapp-rust` itself does too, with `voip-mlow`, `voip-libopus`, or `voip-encoded` (never `voip-relay-native`, which needs a UDP socket the target doesn't have; also disable `whatsapp-rust`'s own defaults with `default-features = false` — see [VoIP Calls — Architecture](/guides/voip-calls#architecture-callengine)). Still enable `js` for random number generation, and install your own [`RelayTransportProvider`](/guides/voip-calls#custom-relay-transport) — an `RTCPeerConnection` in a browser — since none of those features link a way onto the media wire on their own.
 
-  While PR #1364 is unreleased, reaching it means depending on `whatsapp-rust` via `git`, as shown above — and `js` then has to be enabled on the *same* git-sourced `wacore`, not the crates.io one in the snippet above: Cargo treats a registry copy and a git copy of the same crate as different packages entirely and won't unify features across them, so `js` on the crates.io `wacore` never reaches the `wacore` your git-sourced `whatsapp-rust` actually links.
+  Enable `js` on the same git-sourced `wacore` revision used by `whatsapp-rust`, as in both snippets here. Cargo treats a registry copy and a git copy as different packages and does not unify features across them.
 
   ```toml Cargo.toml
   [dependencies]
   whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "54ce6cd9007f4361a07dbad50718973bbf56e2e9", default-features = false, features = ["voip-mlow"] }
-  wacore = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "<same commit>", default-features = false, features = ["js"] }
+  wacore = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "54ce6cd9007f4361a07dbad50718973bbf56e2e9", default-features = false, features = ["js"] }
   ```
 </Note>
 

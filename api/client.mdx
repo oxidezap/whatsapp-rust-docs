@@ -141,7 +141,7 @@ The sticky `StoreRelease` signal observes release of crate-owned backend holds, 
 pub fn signal_shutdown_sync(&self)
 ```
 
-Synchronous, flag-only variant of `disconnect()` for places where you can't `await`. It flips `expected_disconnect`, clears `is_running`, fires the terminal `shutdown_notifier`, and notifies the per-connection shutdown so spawned tasks exit on their next poll. It does **not** flush, close the transport, or touch persistence — prefer `disconnect()` whenever you can await. Intended for `Drop` impls on FFI wrappers (e.g. the WASM client) that need to release the runtime without blocking.
+Synchronous, flag-only variant of `shutdown()` for places where you can't `await`. It flips `expected_disconnect`, clears `is_running`, fires the terminal `shutdown_notifier`, and notifies the per-connection shutdown so spawned tasks exit on their next poll. It does **not** flush, close the transport, or touch persistence — prefer `shutdown()` whenever you can await. Intended for `Drop` impls on FFI wrappers (e.g. the WASM client) that need to release the runtime without blocking.
 
 ### reconnect
 
@@ -185,9 +185,9 @@ client.reconnect_immediately().await;
 pub async fn pause(self: &Arc<Self>)
 ```
 
-Added in PR #1265. Drops the current connection and keeps it down until [`resume()`](#resume). It is the middle of the range between [`reconnect()`](#reconnect), which comes back on the library's schedule, and [`disconnect()`](#disconnect), which does not come back at all. The [`run()`](#run) supervision loop stays alive and parked, so the future a caller is awaiting keeps running. The client is **not** terminal; it is between connections, on purpose — provided `enable_auto_reconnect` is still set, see the warning below.
+Added in PR #1265. Drops the current connection and keeps it down until [`resume()`](#resume). It is the middle of the range between [`reconnect()`](#reconnect), which comes back on the library's schedule, and [`shutdown()`](#shutdown), which does not come back at all. The [`run()`](#run) supervision loop stays alive and parked, so the future a caller is awaiting keeps running. The client is **not** terminal; it is between connections, on purpose — provided `enable_auto_reconnect` is still set, see the warning below.
 
-Once `pause()` returns, the socket is closed and pending receipts and Signal state are flushed on the same terms as `disconnect()`. **No connection will be opened by anyone** until `resume()`: `connect()` rechecks the pause at every step of the connect graph — version fetch, transport open, handshake, and the final publish — and refuses with `ConnectError::Paused` for as long as it holds. An attempt already in flight when `pause()` lands is retracted rather than published, not merely refused as of the next attempt. `pause()` is idempotent — pausing an already-paused client just tears down again.
+Once `pause()` returns, the socket is closed and pending receipts and Signal state are flushed on the same terms as `shutdown()`. **No connection will be opened by anyone** until `resume()`: `connect()` rechecks the pause at every step of the connect graph — version fetch, transport open, handshake, and the final publish — and refuses with `ConnectError::Paused` for as long as it holds. An attempt already in flight when `pause()` lands is retracted rather than published, not merely refused as of the next attempt. `pause()` is idempotent — pausing an already-paused client just tears down again.
 
 <Note>
 `pause()` dispatches no `Event::Disconnected` (the application ended this connection, so the teardown is not news — the same reasoning `reconnect()` applies), and it is not a protocol-level presence change (the account stays registered, other devices see nothing).
@@ -213,7 +213,7 @@ client.wait_for_session_ready(Duration::from_secs(30)).await?;
 pub fn resume(&self)
 ```
 
-Added in PR #1265. Releases a [`pause()`](#pause): the run loop reconnects at once, with no backoff owed for the offline window the application chose — provided `run()` is still driving the client with `enable_auto_reconnect` set (see the warning under [`pause()`](#pause); a pause that landed while auto-reconnect was disabled has already ended the loop, and `resume()` has no loop left to restart). Returns once the loop has been told, not once it is connected — wait for that with [`wait_for_session_ready()`](#wait_for_session_ready). A true no-op — no state change, no log, no notification — only on a client that was not paused to begin with. Calling it on a client that has since been [`disconnect()`](#disconnect)ed still clears the pause (`is_paused()` becomes `false`) and fires the session-state notifier, but that is all it does: it does not undo the shutdown or bring back a connection. `is_terminal()` stays `true`, and the next `connect()` still refuses with `ConnectError::Shutdown`. Safe to call while a `pause()` is still tearing down; it does not wait for the teardown to finish, since that teardown ends in an untimed socket close.
+Added in PR #1265. Releases a [`pause()`](#pause): the run loop reconnects at once, with no backoff owed for the offline window the application chose — provided `run()` is still driving the client with `enable_auto_reconnect` set (see the warning under [`pause()`](#pause); a pause that landed while auto-reconnect was disabled has already ended the loop, and `resume()` has no loop left to restart). Returns once the loop has been told, not once it is connected — wait for that with [`wait_for_session_ready()`](#wait_for_session_ready). A true no-op — no state change, no log, no notification — only on a client that was not paused to begin with. Calling it on a client that has since been [`shutdown()`](#shutdown)ed still clears the pause (`is_paused()` becomes `false`) and fires the session-state notifier, but that is all it does: it does not undo the shutdown or bring back a connection. `is_terminal()` stays `true`, and the next `connect()` still refuses with `ConnectError::Shutdown`. Safe to call while a `pause()` is still tearing down; it does not wait for the teardown to finish, since that teardown ends in an untimed socket close.
 
 ### is_paused
 
@@ -576,10 +576,10 @@ As of [#1263](https://github.com/oxidezap/whatsapp-rust/pull/1263), the client a
 | Unexpected disconnect | Reconnect with Fibonacci backoff |
 | 515 stream error (after pairing) | Immediate reconnect |
 | Keepalive dead socket (20s) | Force disconnect and reconnect |
-| `disconnect()` called | No reconnect attempt |
+| `shutdown()` called | No reconnect attempt |
 | `logout()` called | No reconnect attempt, device deregistered |
 | Auto-reconnect disabled | No reconnect attempt |
-| You call `disconnect()` / `logout()` / `signal_shutdown_sync()` during a backoff wait | The client interrupts the wait immediately; `run()` returns without waiting out the remaining delay |
+| You call `shutdown()` / `logout()` / `signal_shutdown_sync()` during a backoff wait | The client interrupts the wait immediately; `run()` returns without waiting out the remaining delay |
 | `pause()` called, `enable_auto_reconnect` set | No reconnect attempt; `run()` parks instead of connecting, no backoff owed |
 | `pause()` called, `enable_auto_reconnect` disabled | Run loop exits entirely — same as an ordinary auto-reconnect-disabled disconnect, not a park |
 | `resume()` called (loop parked from a pause) | Reconnects immediately, no backoff owed for the paused window |
@@ -881,7 +881,7 @@ Access newsletter (channel) operations.
 - `subscribe_live_updates(jid: &Jid)` - Subscribe to real-time updates
 
 <Note>
-Newsletter message sending is handled by the unified [`client.send_message()`](#send_message) method — pass a newsletter JID and the message is sent as plaintext automatically. See the [Send API](/api/send#send_message) for details.
+Newsletter message sending is handled by the unified [`client.send_message()`](/api/send#send_message) method — pass a newsletter JID and the message is sent as plaintext automatically. See the [Send API](/api/send#send_message) for details.
 </Note>
 
 **Example:**
@@ -995,7 +995,7 @@ let (enc_type, ciphertext) = client.signal().encrypt_message(&jid, plaintext).aw
 ```
 
 <Warning>
-These are low-level APIs that bypass the high-level message sending pipeline. Most users should use [`send_message()`](#send_message) which handles encryption automatically.
+These are low-level APIs that bypass the high-level message sending pipeline. Most users should use [`send_message()`](/api/send#send_message) which handles encryption automatically.
 </Warning>
 
 See [Signal API](/api/signal) for full documentation.

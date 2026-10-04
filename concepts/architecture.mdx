@@ -777,7 +777,7 @@ let result = tokio::task::spawn_blocking(move || {
 }).await?;
 ```
 
-The client's private device lock is not a mutation API. Use the persistence manager you supplied at construction.
+Do not run blocking I/O or long CPU work directly inside async callbacks: it blocks the executor thread. Move that work to `spawn_blocking` or a host worker pool.
 </CodeGroup>
 
 ### Error Handling

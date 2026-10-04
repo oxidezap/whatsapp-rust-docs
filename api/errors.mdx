@@ -3,23 +3,11 @@ title: Error Types
 description: Typed error reference for all whatsapp-rust public APIs
 ---
 
-As of PR #893, all feature-domain APIs return a typed, domain-specific error instead of `anyhow::Error`. Use `?` to propagate errors into any `anyhow` context — all types implement `std::error::Error` and are `#[non_exhaustive]`, so your existing error-handling code compiles unchanged. Lower-level APIs such as media upload/download are not covered by this page and may still surface `anyhow::Error` directly.
+Public operations expose typed errors with their source chains. Match extensible errors with a fallback arm. Use `?` to propagate into an erased `anyhow` return boundary when needed.
 
-As of PR #1090, the connect/lifecycle surface (`Client::connect`, `wait_for_socket_ready`, `wait_for_session_ready`), the background Signal maintenance surface (`Client::rotate_signed_pre_key`, `Client::flush_pending_signal_state`), and the message-edit target-key resolvers (`EncryptedEdit::original_sender_jid`, `SecretEncrypted::original_sender_jid`/`original_sender_for_dispatch`) also return typed errors — see [`ConnectError`](#connecterror), [`SignalMaintenanceError`](#signalmaintenanceerror), and [`MessageEditError`](#messageediterror) below. `Client::logout()` is now infallible (`()`, not `Result<(), _>`): the deregistration IQ it sends is best-effort, so there was nothing for a caller to branch on.
+`Client::download` and `download_to_writer` return `ClientDownloadError`; upload currently returns `anyhow::Error`. `logout()` returns `LogoutReport` with separate deregistration and shutdown outcomes. See [lifecycle reports](/api/client#logout) and [download outcomes](/api/download#clientdownloaderror).
 
-As of PR #1100, every wrapping variant that used to be `#[error(transparent)]` is `#[error("{0}")]` instead — same `Display` output, but the wrapped error is now reachable via `std::error::Error::source()` instead of being erased. [`ErrorChainExt`](#error-chain-recovery) is a new extension trait, implemented for every `std::error::Error`, that walks that chain for you: `server_rejection()`, `is_timeout()`, `is_transport_unavailable()`, and `store_failure()` answer type-agnostically across every error on this page, without downcasting or string-matching. See [Error chain recovery](#error-chain-recovery) below.
-
-As of PR #1195, `ErrorChainExt` also answers `http_status()` — the HTTP status code behind a refused download, upload, sticker-pack fetch, or app-version fetch, recovered from a [`HttpStatusError`](#httpstatuserror) node the same way `server_rejection()` recovers an IQ rejection. This is the one place the "lower-level APIs … may still surface `anyhow::Error` directly" caveat above gets a typed escape hatch: `download`/`upload` still return `anyhow::Error`, but the status inside that error is now recoverable by type instead of by parsing `Display` text. See [Error chain recovery](#error-chain-recovery) below.
-
-As of PR #1257, `IqError::ServerError` also carries `response: RejectionStanza` — the `type="error"` stanza itself, handed over whole the same way a `type="result"` response already was, alongside the four fields this crate parses off it (`code`, `text`, `error_type`, `backoff`). See [`RejectionStanza`](#rejectionstanza) below.
-
-As of PR #1261, `wacore::bot_message::decrypt_bot_message` (and its private decryption helper) return `Result<T, BotMessageError>` instead of `anyhow::Result<T>`. Unlike the entries above, this is **a breaking change to `wacore`'s public API**, not an additive one — a caller matching on the previous `anyhow::Error` needs to switch to the typed enum. See [`BotMessageError`](#botmessageerror) below.
-
-As of PR #1299, a DM send that reaches no device of its recipient now fails instead of silently succeeding. A DM's recipient devices and the sender's own companion devices used to share one participant list, and the old guard only checked whether that list was empty. That missed one shape: every recipient device fails to encrypt (no session, a refused pre-key bundle), but a sender's own companion still succeeds. The stanza then went out carrying only the sender's own devices. The server acked it, and `send_message` returned `Ok` even though the recipient received nothing. Two conditions now surface as `SendError::NoRecipientDevice(wacore::send::NoRecipientDeviceError)` instead of `Ok` or the `Internal` catch-all: every resolved recipient device failing to encrypt, and the fan-out resolving no recipient device at all for a destination that isn't one of the sender's own identities. See [`NoRecipientDeviceError`](#norecipientdeviceerror) below.
-
-As of PR #1360, `ConnectError::Version` no longer follows from every version-source failure on the `wasm32` target. That target fetches the version from the Facebook JS SDK bundle at `connect.facebook.net`, which sits on common tracker blocklists. A client blocked from reaching it now connects anyway, on the version the device already holds, and reports the fallback on [`Event::Connected`](/concepts/events#connected) via `app_version_fallback` instead of failing `connect()`. The native target's source (`sw.js`) is unchanged — a client that can't reach it still fails with `ConnectError::Version`, since that host serves WhatsApp Web itself and an unreachable `sw.js` is a real break. See [Connected](/concepts/events#connected) for the fallback payload.
-
-This is also **a breaking change** for a direct caller of `whatsapp_rust::version::resolve_and_update_version` (most callers only go through `Client::connect`, which absorbs it): its return type changed from `Result<()>` to `Result<Option<wacore::types::events::AppVersionFallback>>`. A caller discarding the result (`resolve_and_update_version(...).await?;`) keeps compiling unchanged; one that named the `Ok` type as `()` needs to switch to `Option<AppVersionFallback>`.
+`ErrorChainExt` recovers `server_rejection()`, `http_status()`, `is_timeout()`, `is_transport_unavailable()`, and `store_failure()` from typed source chains without parsing display strings. See [error chain recovery](#error-chain-recovery).
 
 ## Error hierarchy
 
@@ -129,7 +117,7 @@ let cause: &(dyn std::error::Error + 'static) = err.as_ref();
 if cause.is_timeout() { /* ... */ }
 ```
 
-`http_status()` follows the same pattern — useful for `download`/`upload`, which still return bare `anyhow::Error`:
+Call `http_status()` directly on typed download errors. An upload error returned as `anyhow::Error` uses the annotated `as_ref()` projection above:
 
 ```rust
 use whatsapp_rust::ErrorChainExt;
@@ -137,8 +125,7 @@ use whatsapp_rust::ErrorChainExt;
 match client.download(downloadable).await {
     Ok(bytes) => { /* ... */ }
     Err(e) => {
-        let cause: &(dyn std::error::Error + 'static) = e.as_ref();
-        match cause.http_status() {
+        match e.http_status() {
             // 500/502/503/504 are the CDN statuses normally worth a retry;
             // 501/505 mean the request itself is unsupported and won't
             // succeed on a resend. Apply your own policy per status.
@@ -205,7 +192,7 @@ pub struct HttpStatusError {
 }
 ```
 
-The download and upload paths attach this as the `source` of the `anyhow::Error` they return — `anyhow::Error::new(HttpStatusError { status }).context("Download failed with status: 403")` — so the message a caller logs is unchanged while the status becomes reachable by type via `http_status()` instead of only by parsing that message. Re-exported as `whatsapp_rust::http::HttpStatusError`.
+The download and upload paths retain `HttpStatusError` in their error source chains. Typed `ClientDownloadError` and erased upload errors both expose that status through `ErrorChainExt::http_status()`. Re-exported as `whatsapp_rust::http::HttpStatusError`.
 
 <Note>
 Rendering changed alongside the `source()` fix: a wrapping variant's `Display` still prints exactly what it wraps, so code that concatenates every node in a chain (a logging layer, a `display_chain` helper) now sees the same sentence repeated once per wrapping variant — e.g. `CommunityError::Group(GroupError::Iq(..))` is three nodes rendering one sentence three times. That repetition is the cost of keeping the wrapped error downcastable. Print the innermost cause, or collapse equal neighbours, rather than joining every node in the chain.
@@ -544,7 +531,7 @@ pub enum ConnectError {
 **Variants:**
 - `AlreadyConnected` — a connection is already up, or another `connect()` attempt is already in flight. This is the old `ClientError::AlreadyConnected` case, moved here.
 - `NotActivated` — construction never completed (only reachable with the `client-lifecycle` feature), so the attempt was rejected before any I/O.
-- `Shutdown` — added in PR #1258. The client was already shut down (`disconnect()`, `logout()`, or `signal_shutdown_sync()`) before or during this `connect()` attempt. Shutdown is final and non-reversible, so this is refused rather than reviving a client the application was already told is gone — build a new client instead of reconnecting this one.
+- `Shutdown` — added in PR #1258. The client was already shut down (`shutdown()`, `logout()`, or `signal_shutdown_sync()`) before or during this `connect()` attempt. Shutdown is final and non-reversible, so this is refused rather than reviving a client the application was already told is gone — build a new client instead of reconnecting this one.
 - `Paused` — added in PR #1265. [`Client::pause`](/api/client#pause) is in effect. Unlike `Shutdown` this is not final: [`Client::resume`](/api/client#resume) lifts it and `connect()` works again. Re-checked at every step of the connect graph (version fetch, transport open, handshake, publish), so an attempt already in flight when `pause()` lands is retracted rather than published, not just refused for attempts that start after.
 - `Timeout` — a step of the connect flow ran out of time. `stage` says which one (see [`ConnectStage`](#connectstage) below); `wait_for_socket_ready`/`wait_for_session_ready` always report `Socket`/`Ready` respectively.
 - `Version` / `Transport` — the app-version resolution or transport factory failed outright (not a timeout). As of PR #1195, if `Version` was caused by a non-2xx response fetching the app version (`sw.js`, or the Facebook JS SDK bundle on `wasm32`), the status is recoverable via `err.http_status()` ([`ErrorChainExt`](#error-chain-recovery)) instead of only appearing in the message. As of PR #1360, `Version` is no longer necessarily the outcome of a failed fetch on the `wasm32` target: that target's source is survivable, so a client blocked from reaching it connects on a fallback version instead — see [Connected](/concepts/events#connected). The native target's source stays fatal, so `Version` there is unchanged.
@@ -736,7 +723,7 @@ pub enum IqError {
 
 Added in PR #1100: `wacore::request::IqError` gained public `is_timeout()` (`true` only for `Timeout`) and `is_transport_unavailable()` (`true` for `NotConnected`, `Disconnected`, and `InternalChannelClosed`) methods, each an exhaustive match so a future variant has to be classified rather than silently defaulting to `false`. `whatsapp_rust::request::IqError` (the crate-level type shown above, with the extra `Socket`/`EncryptSend`/`ClientState`/`EncodeError`/`ParseError` variants) makes the same judgement internally but does not expose it publicly — go through [`ErrorChainExt`](#error-chain-recovery) instead, which handles both types.
 
-Added in PR #1257: `ServerError` carries `response: RejectionStanza` — see [`RejectionStanza`](#rejectionstanza) above and the [migration note](#from-pr-1257-servererror-carries-the-rejection-stanza) below. Matching with `..` is unaffected by this field. A match that already names all four former fields without `..` needs `..` added (or `response` bound too) — Rust rejects a struct pattern missing a field with `E0027`. Constructing the variant by hand (mainly test fixtures) needs updating the same way.
+Added in PR #1257: `ServerError` carries `response: RejectionStanza` — see [`RejectionStanza`](#rejectionstanza) above for the preserved node. Matching with `..` is unaffected by this field. A match that already names all four former fields without `..` needs `..` added (or `response` bound too) — Rust rejects a struct pattern missing a field with `E0027`. Constructing the variant by hand (mainly test fixtures) needs updating the same way.
 
 ## Handling current errors
 

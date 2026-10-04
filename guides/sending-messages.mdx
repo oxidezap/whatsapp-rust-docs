@@ -76,7 +76,7 @@ println!("Message sent with ID: {}", result.message_id);
 
 `send_message` returns a `SendResult` containing the `message_id` and recipient `to` JID. Use `result.message_key()` to get a `wa::MessageKey` for follow-up operations like album child linking.
 
-For a DM, `result.recipient_fanout` tells you whether every one of the recipient's devices was included in the encrypted fan-out — not whether the recipient actually received or decrypted it, which the SDK has no way to know. A DM that loses some but not all devices from that fan-out still returns `Ok` with a real message id, matching WA Web. See [`RecipientFanout`](/api/send#recipientfanout) for the counts, and the [Error Types migration guide](/api/errors#from-pr-1362-a-dms-partial-fan-out-is-now-visible-and-a-primarys-406-now-fails-the-send) for why a partial fan-out still returns `Ok`.
+For a DM, `result.recipient_fanout` tells you whether every one of the recipient's devices was included in the encrypted fan-out — not whether the recipient actually received or decrypted it, which the SDK has no way to know. A DM that loses some but not all devices from that fan-out still returns `Ok` with a real message id, matching WA Web. See [`RecipientFanout`](/api/send#recipientfanout) for the counts, and the [current send error contract](/api/errors#handling-current-errors) for why a partial fan-out still returns `Ok`.
 
 ### Extended text message
 
@@ -233,6 +233,8 @@ Supply a Community Announcement Group post. A generic group reference does not a
 
 ```rust
 use whatsapp_rust::{EditRequest, EditOptions, StanzaId};
+use whatsapp_rust::waproto::whatsapp::Message;
+use whatsapp_rust::wacore::proto_helpers::MessageBuilderExt;
 let target = original_send.message_ref()?;
 let edited = client.edit_message(
     EditRequest::new(target, Message::text("Corrected text"))
@@ -681,7 +683,12 @@ use whatsapp_rust::wacore::proto_helpers::MessageExt;
 let mut forward = received_message.prepare_for_forward();
 // Tweak the prepared message here if needed, for example overriding a caption.
 
-client.send_message(destination_jid, forward).await?;
+use whatsapp_rust::{SendOptions, SendRequest};
+
+client.send(
+    SendRequest::new(destination_jid, forward)
+        .with_options(SendOptions::default()),
+).await?;
 ```
 
 <Note>
@@ -736,7 +743,7 @@ match client.send_message(jid.clone(), message).await {
 }
 ```
 
-A DM where every recipient device failed to encrypt — or where the fan-out resolved no recipient device at all for a non-self destination — returns `SendError::NoRecipientDevice` instead of reporting success. (A note to self with no recipient half is the normal shape, since every resolved device is your own, and still returns `Ok`.) Retry with `SendOptions::default().with_device_freshness(Freshness::Refresh)` passed to `send(SendRequest)` rather than an immediate resend — a resend with the same cached device list hits the same empty result. See [`NoRecipientDeviceError`](/api/errors#norecipientdeviceerror) for the two ways this can happen and the [Error Types migration guide](/api/errors#from-pr-1299-a-dm-with-no-recipient-device-now-returns-a-typed-error) for the full retry example.
+A DM where every recipient device failed to encrypt — or where the fan-out resolved no recipient device at all for a non-self destination — returns `SendError::NoRecipientDevice` instead of reporting success. (A note to self with no recipient half is the normal shape, since every resolved device is your own, and still returns `Ok`.) Retry with `SendOptions::default().with_device_freshness(Freshness::Refresh)` passed to `send(SendRequest)` rather than an immediate resend — a resend with the same cached device list hits the same empty result. See [`NoRecipientDeviceError`](/api/errors#norecipientdeviceerror) for the two ways this can happen and the [current send error contract](/api/errors#norecipientdeviceerror) for the full retry example.
 
 `SendError::PrimaryDeviceRejected` is narrower: it fires before any encryption is attempted, when the pre-key fetch itself gets back a `406` naming a primary device (device 0, either the recipient's or your own). The named device lists are already refreshed by the time this returns, so an immediate retry resolves them fresh rather than repeating the same fetch. A companion's `406` doesn't fail the fetch, so a send can still return `Ok` with a partial `recipient_fanout` (see above) — this error only fires for the stricter, primary-named case. See [`SendError::PrimaryDeviceRejected`](/api/errors#senderror) for the WA Web parity this matches.
 

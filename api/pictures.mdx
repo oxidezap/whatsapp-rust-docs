@@ -28,7 +28,7 @@ Construct with `new(target, picture_type)`. Fluent setters accept optional `exis
 
 Privacy tokens apply only to eligible user/bot targets; they are not inferred from a community/group target. Group invite and common-group fallback metadata are explicit.
 
-Lookup returns `ContactError` on request failures. Server outcomes remain `Found`, `Unchanged`, `NotFound`, `NotAuthorized`,; A 429 remains `ContactError::Iq` with the server rejection and optional backoff.
+Lookup returns `ContactError` on request failures. Server outcomes remain `Found`, `Unchanged`, `NotFound`, `NotAuthorized`. A 429 remains `ContactError::Iq` with the server rejection and optional backoff.
 
 ## Picture changes
 
