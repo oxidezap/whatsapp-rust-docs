@@ -1489,6 +1489,42 @@ Event::Presence(update) => {
 }
 ```
 
+### JSON event migration
+
+The availability and chat-activity payloads intentionally introduce breaking JSON changes. Update persisted-event readers and external consumers together. The examples below show only changed fields; `from`, `last_seen`, and `source` keep their existing representations.
+
+`PresenceUpdate` replaces the boolean `unavailable` with the string `status`:
+
+```json Before
+{"unavailable": false}
+```
+
+```json After
+{"status": "available"}
+```
+
+Map `unavailable: true` to `status: "unavailable"`. Do not treat a missing legacy boolean as an online status when reading the new payload.
+
+`ChatPresenceUpdate` replaces the `state`/`media` pair with one semantic `ChatActivity` value in `state`:
+
+```json Before
+{"state": "composing", "media": "audio"}
+```
+
+```json After
+{"state": "recording_audio"}
+```
+
+| Previous fields | New field |
+| --- | --- |
+| `"state": "composing", "media": ""` | `"state": "typing"` |
+| `"state": "composing", "media": "audio"` | `"state": "recording_audio"` |
+| `"state": "paused"` with either media value | `"state": "idle"` |
+
+Remove the separate `media` field when migrating stored payloads. These semantic JSON values do not change the chatstate stanzas described in [chatstate](/api/chatstate#activity-representation).
+
+This differs from `ReceiptType`: its existing JSON representation is preserved, including `"ReadSelf"`, `"Delivered"`, and `{"Other":"..."}`. Its deserializer now roundtrips that representation. See [receipt JSON persistence](/api/receipt#json-persistence).
+
 ## User update events
 
 ### PictureUpdate

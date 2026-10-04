@@ -118,6 +118,8 @@ println!("Unsubscribed from {}'s presence", contact_jid);
 
 ## PresenceStatus enum
 
+Persisted event JSON changes intentionally. See the [before/after migration examples](/concepts/events#json-event-migration) before updating external consumers.
+
 `PresenceStatus` is shared with `wacore::types::presence` and re-exported by the SDK. `PresenceUpdate.status` can be passed directly to `client.presence().set(status)`. This is global availability; use `ChatActivity` for typing and recording in one chat.
 
 ```rust
