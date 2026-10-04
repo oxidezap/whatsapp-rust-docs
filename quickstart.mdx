@@ -5,13 +5,17 @@ description: Build your first WhatsApp bot in minutes
 
 This guide will help you create a simple WhatsApp bot that responds to messages. You'll learn the core concepts and have a working bot by the end.
 
+<Note>
+This example targets the pinned Git snapshot below. Use the same dependency when adapting these current API examples; the published `0.7` crate has an earlier API. See [migration](/guides/migrating-current-api).
+</Note>
+
 ## Basic example
 
 Add the dependencies — one crate is enough; `whatsapp-rust` re-exports the entire stack:
 
 ```toml Cargo.toml
 [dependencies]
-whatsapp-rust = "0.7"
+whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "ff7acaddf80169013b0fd06df65296db7e4a8ca3" }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 

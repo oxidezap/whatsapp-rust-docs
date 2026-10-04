@@ -97,7 +97,7 @@ Type-safe IQ request/response specifications:
 - **`passive`** - Passive IQ handling
 - **`prekeys`** - Prekey distribution
 - **`privacy`** - Privacy settings
-- **`props`** - Server properties and A/B experiment configs. The companion [`abprops`](#a-b-props-registry) module ships the typed flag registry, and `props::WATCHED` lists the flags the library itself reads
+- **`props`** - Server properties and A/B experiment configs. The companion [`abprops`](#ab-props-registry) module ships the typed flag registry, and `props::WATCHED` lists the flags the library itself reads
 - **`spam_report`** - Spam reporting
 - **`tctoken`** - Temporary client tokens
 - **`usync`** - User synchronization. Ships a typed query/response model (`UsyncQuery`, `UsyncProtocol`, `UsyncResponse`, ...) covering every USync subprotocol observed in WhatsApp Web (device lists, contact/LID/username lookup, status, bot profiles, features). See [USync](/api/usync)
@@ -150,7 +150,7 @@ pub mod store;
 - **`Device`** - Core device state structure
 - **`DeviceCommand`** - State mutation commands
 - **`traits`** - Backend trait definitions (`Backend`, `SessionStore`, etc.)
-- **`ab_props`** - In-memory A/B experiment property cache (`AbPropsCache`), populated from `fetch_props()` on each connection. Features query this cache using typed flag constants from the [`abprops` registry](#a-b-props-registry) (e.g., privacy token attachment on group operations).
+- **`ab_props`** - In-memory A/B experiment property cache (`AbPropsCache`), populated from `fetch_props()` on each connection. Features query this cache using typed flag constants from the [`abprops` registry](#ab-props-registry) (e.g., privacy token attachment on group operations).
 
 See [State Management](/advanced/state-management) for the command pattern.
 

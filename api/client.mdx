@@ -956,7 +956,7 @@ Access newsletter (channel) operations.
 - `subscribe_live_updates(jid: &Jid)` - Subscribe to real-time updates
 
 <Note>
-Newsletter message sending is handled by the unified [`client.send_message()`](#send_message) method — pass a newsletter JID and the message is sent as plaintext automatically. See the [Send API](/api/send#send) for details.
+Newsletter message sending is handled by the unified [`client.send_message()`](/api/send#send) method — pass a newsletter JID and the message is sent as plaintext automatically. See the [Send API](/api/send#send) for details.
 </Note>
 
 **Example:**
@@ -1069,7 +1069,7 @@ let (enc_type, ciphertext) = client.signal().encrypt_message(&jid, plaintext).aw
 ```
 
 <Warning>
-These are low-level APIs that bypass the high-level message sending pipeline. Most users should use [`send_message()`](#send_message) which handles encryption automatically.
+These are low-level APIs that bypass the high-level message sending pipeline. Most users should use [`send_message()`](/api/send#send) which handles encryption automatically.
 </Warning>
 
 See [Signal API](/api/signal) for full documentation.

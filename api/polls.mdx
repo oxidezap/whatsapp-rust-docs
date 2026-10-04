@@ -14,16 +14,18 @@ Examples on this page target [source snapshot `ff7acad`](https://github.com/oxid
 `create` and `create_quiz` return `CreatedPoll`. The named result owns the send result, actual cryptographic creator and validated `MessageSecret`; it is not a `(SendResult, Vec<u8>)` tuple.
 
 ```rust
-use whatsapp_rust::{Client, Jid};
+use whatsapp_rust::{Client, Jid, CreatedPoll};
 
-async fn create_and_vote(client: &Client, chat: &Jid) -> whatsapp_rust::anyhow::Result<()> {
+async fn create_and_vote(client: &Client, chat: &Jid) -> whatsapp_rust::anyhow::Result<CreatedPoll> {
     let options = vec!["Rust".to_owned(), "Go".to_owned()];
     let created = client.polls().create(chat, "Language?", &options, 1).await?;
     client.polls().vote(&created.poll_ref()?, &["Rust".to_owned()]).await?;
     println!("{}", created.send_result().message_id);
-    Ok(())
+    Ok(created)
 }
 ```
+
+The function returns the creation result to its caller. Retain it for later votes, or persist its original message ID, chat, creator and secret using `into_parts()`.
 
 `create_quiz(chat, name, options, correct_option_index)` creates a quiz with one correct answer. Creation validates options before sending.
 

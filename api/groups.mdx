@@ -100,7 +100,7 @@ Inspect per-participant results; a successful outer IQ does not make every membe
 
 The combined operation adds participants and shares eligible recent history. History sharing has its own outcomes after the participant mutation; it is not atomic with adding a member.
 
-For cancellation control, use `prepare_group_history_share` and `deliver_prepared_history_share`. Preparation establishes the replay handle; retain it across cancellation and use `retry_group_history` for remaining deliveries. Do not repeat the participant add merely to retry history. Read the source's explicit selection, freshness and per-recipient constraints before constructing a custom flow.
+For cancellation control, use `prepare_group_history_share` and `deliver_prepared_history_share`. Preparation establishes the replay handle. Retain the `PreparedGroupHistoryShare` across cancellation and pass it to `deliver_prepared_history_share` again. When a retryable outcome returns a `GroupHistoryRetryToken`, pass that token to `retry_group_history` for remaining deliveries. Do not repeat the participant add merely to retry history. Read the source's explicit selection, freshness and per-recipient constraints before constructing a custom flow.
 
 ## Settings
 

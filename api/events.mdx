@@ -14,9 +14,9 @@ Examples on this page target [source snapshot `ff7acad`](https://github.com/oxid
 Use the builder for the non-exhaustive `EventCreationParams`. Only the name is required; creation rejects a blank name before sending. Times are Unix seconds.
 
 ```rust
-use whatsapp_rust::{Client, Jid, EventCreationParams, EventResponseType};
+use whatsapp_rust::{Client, Jid, EventCreationParams, EventResponseType, CreatedEvent};
 
-async fn schedule(client: &Client, chat: &Jid) -> whatsapp_rust::anyhow::Result<()> {
+async fn schedule(client: &Client, chat: &Jid) -> whatsapp_rust::anyhow::Result<CreatedEvent> {
     let params = EventCreationParams::builder()
         .name("Launch".to_owned())
         .description("Release planning".to_owned())
@@ -27,9 +27,11 @@ async fn schedule(client: &Client, chat: &Jid) -> whatsapp_rust::anyhow::Result<
         &created.event_ref()?, EventResponseType::Going, None,
     ).await?;
     println!("{}", created.send_result().message_id);
-    Ok(())
+    Ok(created)
 }
 ```
+
+The function returns the creation result to its caller. Retain it for later responses, or persist its original message ID, chat, creator and secret using `into_parts()`.
 
 ## Store the result
 
