@@ -21,7 +21,7 @@ Enable `plugins` on the same source and revision used by your host application:
 
 ```toml Cargo.toml
 [dependencies]
-whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "54ce6cd9007f4361a07dbad50718973bbf56e2e9", features = ["plugins"] }
+whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "86b1b315af3be1a48e1961c0a72f3e42152f1a33", features = ["plugins"] }
 ```
 
 A default build has neither plugin fields nor their runtime branches. If you're implementing a plugin directly in your application, enable `plugins` there. If you're publishing a reusable plugin crate, enable `plugins` on its own `whatsapp-rust` dependency. Cargo's [feature unification](https://doc.rust-lang.org/cargo/reference/features.html#feature-unification) activates the host only when both dependencies resolve to the same package identity: source, version, and git revision must match. A crates.io dependency and a git dependency are distinct packages even when their versions match; mixing them also produces incompatible plugin trait types.
