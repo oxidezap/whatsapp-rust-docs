@@ -1,314 +1,62 @@
 ---
 title: Polls
-description: Poll creation, voting, and vote decryption API reference
+description: Create polls and quizzes, vote and decrypt with a borrowed creation reference
 ---
 
-The `Polls` struct provides methods for creating polls, casting votes, and decrypting poll results. Votes are end-to-end encrypted using AES-256-GCM with HKDF-SHA256 key derivation.
+<Note>
+Examples on this page target [source snapshot `54ce6cd`](https://github.com/oxidezap/whatsapp-rust/tree/54ce6cd9007f4361a07dbad50718973bbf56e2e9), not a crates.io release. Use the [current API guide](/guides/current-api) to select the matching dependency.
+</Note>
 
-## Access
+## Create and vote
 
-Access poll operations through the client:
+`create` and `create_quiz` return `Result<CreatedPoll, PollError>`. The named result owns the send result, actual cryptographic creator and validated `MessageSecret`; it is not a `(SendResult, Vec<u8>)` tuple.
 
 ```rust
-let polls = client.polls();
+use whatsapp_rust::{Client, Jid};
+
+async fn create_and_vote(client: &Client, chat: &Jid) -> whatsapp_rust::anyhow::Result<()> {
+    let options = vec!["Rust".to_owned(), "Go".to_owned()];
+    let created = client.polls().create(chat, "Language?", &options, 1).await?;
+    client.polls().vote(&created.poll_ref()?, &["Rust".to_owned()]).await?;
+    println!("{}", created.send_result().message_id);
+    Ok(())
+}
 ```
 
-## Methods
+This example only creates and votes immediately; before returning, persist the original ID, addressing, crypto creator and secret if you need to handle later votes.
 
+`create_quiz(chat, name, options, correct_option_index)` creates a quiz with one correct answer. Creation requires 2 to 12 distinct options. The selectable count is from 1 through the option count; a quiz uses one selection and a zero-based correct index in range.
 
-### create
+## Decrypt votes
 
-```rust
-let options = vec!["Yes".to_string(), "No".to_string()];
-let created = client.polls().create(&chat, "Do you agree?", &options, 1).await?;
-println!("{}", created.send_result().message_id);
-```
-
-Returns `Result<CreatedPoll, PollError>`. A poll accepts 2 to 12 distinct options and a selectable count from 1 through the option count. Single-select and multi-select content use their corresponding protobuf creation form.
-
-### create_quiz
+Use the same `PollRef` for voting and decryption. `PollVoteCiphertext` borrows the encrypted payload and IV; decryption returns option hashes, not display names.
 
 ```rust
-let created = client.polls().create_quiz(&chat, "Choose the correct answer", &options, 0).await?;
-```
+use whatsapp_rust::{Client, Jid, PollRef, PollVoteCiphertext, PollError};
 
-Returns `Result<CreatedPoll, PollError>`. The correct index is zero-based and must be in range. A quiz is single-select.
-
-### vote
-
-```rust
-let selected = vec!["Yes".to_string()];
-client.polls().vote(&created.poll_ref()?, &selected).await?;
-```
-
-Use `vote(&PollRef, &[String])`. An empty selection clears the vote. `vote_raw` accepts explicit chat, original ID, crypto creator, raw secret, and selected names for interop; it validates the secret and ID first.
-
-## Creation references
-
-`CreatedPoll` owns the original send result, actual crypto creator, and validated `MessageSecret`. Read `send_result()`, `creator()`, `secret()`, or `poll_ref()`. `into_parts()` explicitly returns those owned values. Creation debug output is redacted; explicitly logging its `SendResult` can expose the protobuf's secret.
-
-For received or stored polls, construct `PollRef::new(message_ref, &original_creator, &secret)?`. The host must associate the correct original identity and 32-byte secret. Shape validation does not prove association, and a later PN/LID alias is not a substitute for the cryptographic creator.
-
-`StoredMessageSecret` validates bytes at the backend read boundary and preserves an optional creation timestamp. Reject malformed retained bytes as a storage error instead of returning invalid key material. See [storage secret reads](/api/store#msgsecretstore).
-
-`decrypt_vote_ref(PollVoteCiphertext, &PollRef, &voter)` uses the same creation reference. Low-level `decrypt_vote` and `aggregate_votes` remain available for raw ciphertext and stored metadata.
-
-### decrypt_vote
-
-Decrypt an encrypted poll vote.
-
-```rust
-pub async fn decrypt_vote(
-    &self,
+async fn decrypt(
+    client: &Client,
     ciphertext: PollVoteCiphertext<'_>,
-    message_secret: &[u8],
-    poll_msg_id: &str,
-    poll_creator_jid: &Jid,
-    voter_jid: &Jid,
-) -> Result<Vec<Vec<u8>>, PollError>
-```
-
-<Note>
-The instance methods consult known PN/LID mappings and try creator and voter aliases independently. Preserve the original crypto creator when persisting a poll reference.
-</Note>
-
-<ParamField path="ciphertext" type="PollVoteCiphertext<'_>" required>
-  Borrowed encrypted vote data: `enc_payload: &[u8]` holds the payload from
-  `PollUpdateMessage`, and `enc_iv: &[u8]` holds its 12-byte initialization vector.
-</ParamField>
-
-<ParamField path="message_secret" type="&[u8]" required>
-  The 32-byte secret from poll creation.
-</ParamField>
-
-<ParamField path="poll_msg_id" type="&str" required>
-  Message ID of the original poll.
-</ParamField>
-
-<ParamField path="poll_creator_jid" type="&Jid" required>
-  JID of the poll creator (AD suffix is stripped automatically).
-</ParamField>
-
-<ParamField path="voter_jid" type="&Jid" required>
-  JID of the voter (AD suffix is stripped automatically).
-</ParamField>
-
-<ResponseField name="selected_hashes" type="Vec<Vec<u8>>">
-  List of 32-byte SHA-256 hashes of the selected option names.
-</ResponseField>
-
-**Example:**
-
-```rust
-use whatsapp_rust::{Polls, PollVoteCiphertext};
-
-let selected_hashes = client
-    .polls()
-    .decrypt_vote(
-        PollVoteCiphertext { enc_payload: &enc_payload, enc_iv: &enc_iv },
-        &message_secret,
-        "3EB0ABC123",
-        &poll_creator_jid,
-        &voter_jid,
-    )
-    .await?;
-```
-
-### aggregate_votes
-
-Decrypt multiple votes and tally results per option. Later votes from the same voter replace earlier ones (last-vote-wins). Voters are deduped by their canonical (LID-preferred) identity, so a voter who re-votes under the opposite namespace counts once instead of producing a duplicate row.
-
-```rust
-pub async fn aggregate_votes(
-    &self,
-    poll_options: &[String],
-    votes: &[(&Jid, PollVoteCiphertext<'_>)],
-    message_secret: &[u8],
-    poll_msg_id: &str,
-    poll_creator_jid: &Jid,
-) -> Result<Vec<PollOptionResult>, PollError>
-```
-
-<Note>
-The instance methods consult known PN/LID mappings and try creator and voter aliases independently. Preserve the original crypto creator when persisting a poll reference.
-</Note>
-
-<ParamField path="poll_options" type="&[String]" required>
-  The original poll option names (in order).
-</ParamField>
-
-<ParamField path="votes" type="&[(&Jid, PollVoteCiphertext)]" required>
-  Slice of `(voter_jid, PollVoteCiphertext)` tuples, ordered oldest-first.
-</ParamField>
-
-<ParamField path="message_secret" type="&[u8]" required>
-  The 32-byte secret from poll creation.
-</ParamField>
-
-<ParamField path="poll_msg_id" type="&str" required>
-  Message ID of the original poll.
-</ParamField>
-
-<ParamField path="poll_creator_jid" type="&Jid" required>
-  JID of the poll creator.
-</ParamField>
-
-<ResponseField name="results" type="Vec<PollOptionResult>">
-  One entry per poll option, each containing the option name and a list of voter JID strings.
-</ResponseField>
-
-**Example:**
-
-```rust
-use whatsapp_rust::{Polls, PollOptionResult};
-
-let options = vec!["Yes".to_string(), "No".to_string()];
-
-let results = client
-    .polls()
-    .aggregate_votes(
-        &options,
-        &votes,
-        &message_secret,
-        &poll_msg_id,
-        &poll_creator_jid,
-    )
-    .await?;
-
-for result in &results {
-    println!("{}: {} votes", result.name, result.voters.len());
+    poll: &PollRef<'_>,
+    voter: &Jid,
+) -> Result<Vec<Vec<u8>>, PollError> {
+    client.polls().decrypt_vote_ref(ciphertext, poll, voter).await
 }
 ```
 
-<Note>
-Votes that fail to decrypt are logged as warnings and skipped. An empty selection from a voter clears their previous vote.
-</Note>
+The client tries known creator and voter PN/LID aliases independently. The stored crypto creator is not interchangeable with a later visible sender alias. Preserve it when saving a creation.
 
-## Types
+## Raw interoperability
 
-### PollOptionResult
+`vote_raw` and `decrypt_vote` accept the explicit secret, creation ID and creator metadata needed by external storage integrations. `decrypt_vote` has the same alias resolution as the typed entry point. Prefer `MessageSecret::try_from` and `PollRef::new` when you can validate stored data once at the boundary.
 
-Aggregated result for a single poll option.
+`decrypt_vote_ref(ciphertext, &PollRef, voter)` is the typed entry point. `decrypt_vote` accepts the explicit bytes, original ID and identities.
 
-```rust
-pub struct PollOptionResult {
-    pub name: String,
-    pub voters: Vec<String>,
-}
-```
+## Persist creation metadata
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `name` | `String` | The option name |
-| `voters` | `Vec<String>` | JID strings of voters who selected this option |
+Read `send_result()`, `creator()` and `secret()` or move them with `into_parts()`. Store secrets as sensitive data; neither a redacted `Debug` implementation nor a typed wrapper protects an explicitly exported byte array. `CreatedPoll` redacts the whole debug representation because its nested protobuf also carries the secret.
 
-<Note>
-`Polls`, `PollOptionResult`, and `PollVoteCiphertext` are re-exported from the crate root. `whatsapp_rust::Polls` and `whatsapp_rust::PollOptionResult` (shown in the examples above) are now the preferred paths; the legacy `whatsapp_rust::features::` import path continues to work as well.
-</Note>
+`aggregate_votes` hashes the named options, decrypts incoming updates and counts the latest selection per voter. Check its source signature when adapting a custom history pipeline. Missing or malformed parent secrets must not be silently padded or truncated; see [MsgSecretStore](/api/store#msgsecretstore).
 
-## Low-level utilities
-
-The `wacore::poll` module exposes the cryptographic primitives used internally:
-
-| Function | Description |
-|----------|-------------|
-| `compute_option_hash(name: &str) -> [u8; 32]` | SHA-256 hash of an option name |
-| `derive_vote_encryption_key(secret, stanza_id, creator, voter) -> [u8; 32]` | HKDF-SHA256 key derivation |
-| `encrypt_poll_vote(hashes, key, stanza_id, voter) -> (Vec<u8>, [u8; 12])` | AES-256-GCM encryption |
-| `decrypt_poll_vote(payload, iv, key, stanza_id, voter) -> Vec<Vec<u8>>` | AES-256-GCM decryption |
-| `decrypt_poll_vote_with_secret(payload, iv, secret, stanza_id, creator, voter) -> Vec<Vec<u8>>` | Single-namespace convenience: derives the vote key from the poll secret and decrypts |
-| `decrypt_poll_vote_with_fallback(ciphertext, secret, stanza_id, primary, fallback) -> Vec<Vec<u8>>` | Tries the canonical (creator, voter) namespace first and falls back to `(alt_creator, alt_voter)` so LID/PN-mixed votes still decrypt |
-
-## Decrypting secret-encrypted envelopes
-
-WhatsApp wraps message edits, poll edits, poll add-option, and event edits in a single `secret_encrypted_message` envelope keyed by a per-use-case secret derived from the parent message's `message_secret`. v0.6 added support for decrypting all four kinds.
-
-<Note>
-**The client now decrypts these inline on receive.** Since v0.6 the receive path automatically resolves the parent secret from the [`MsgSecretStore`](/api/store#msgsecretstore), decrypts the envelope, and dispatches the result as a normal [`Event::Messages`](/concepts/events#messages) carrying the decrypted payload — so most apps never call the helpers below. The client captures `MessageContextInfo.message_secret` from inbound messages and seeds secrets from history-sync, so edits decrypt as long as the parent secret is known. Edits whose secret can't be found are skipped silently (no undecryptable event); the raw envelope stays on the message. The manual helpers remain for custom pipelines or when you store secrets yourself.
-</Note>
-
-```rust
-use whatsapp_rust::features::message_edit::{
-    self, SecretEncKind, SecretEncrypted,
-};
-
-if let Some(envelope) = message_edit::extract_secret_encrypted(&message)? {
-    let SecretEncrypted { kind, target_message_id, sender, .. } = &envelope;
-    let parent_secret: [u8; 32] = load_message_secret(target_message_id)?;
-    let plaintext: wa::Message = message_edit::decrypt_secret_encrypted_with_fallback(
-        &envelope,
-        &parent_secret,
-        envelope.original_sender_jid(&my_jid).ok().as_ref(),
-    )?;
-
-    match kind {
-        SecretEncKind::MessageEdit   => handle_message_edit(plaintext),
-        SecretEncKind::PollEdit      => handle_poll_edit(plaintext),
-        SecretEncKind::PollAddOption => handle_poll_add_option(plaintext),
-        SecretEncKind::EventEdit     => handle_event_edit(plaintext),
-    }
-}
-```
-
-| Function | Description |
-|----------|-------------|
-| `extract_secret_encrypted(msg) -> Option<SecretEncrypted<'_>>` | Pulls envelope metadata (`kind`, target id, sender, ciphertext, IV) out of any `secret_encrypted_message` wrapper. Replaces the v0.5 `extract_envelope` helper (which now delegates to this). |
-| `decrypt_secret_encrypted(envelope, parent_secret) -> wa::Message` | Empty-AAD AES-GCM decrypt against the canonical addressing of the envelope. |
-| `decrypt_secret_encrypted_with_fallback(envelope, parent_secret, alt_sender) -> wa::Message` | Same as above but retries with `alt_sender` (typically the LID↔PN twin) so edits authored across the migration still decrypt. |
-| `SecretEncrypted::original_sender_jid(&self, my_jid: &Jid) -> Result<Jid, MessageEditError>` | Resolves the original sender from the target message key: `participant` if present, `my_jid` if `from_me == Some(true)`, otherwise `remote_jid`. Pass the result (as `Option`) as the fallback to recover edits whose sender migrated namespace between the original message and the edit. As of PR #1090 returns [`MessageEditError`](/api/errors#messageediterror) instead of `anyhow::Error`. |
-| `SecretEncrypted::original_sender_for_dispatch(is_from_me, envelope_sender, my_jid) -> Result<Jid, MessageEditError>` | Dispatch-time resolver. For `MessageEdit` it returns the **envelope sender** (an author edits their own message, so the secret target is written in the editor's frame); for poll/event kinds it falls back to the target-key resolution. Use this — not `original_sender_jid` — when decrypting incoming peer edits. Also returns `MessageEditError` as of PR #1090. |
-| `rewrap_as_legacy_edit(plaintext)` | Re-emits a decrypted `MessageEdit` envelope as the legacy `protocol_message { MESSAGE_EDIT }` shape for consumers that already handled the old form. |
-
-<Note>
-For incoming **peer** message edits (edits authored on a contact's other device, or self-synced from your own linked device), the parent-author resolution must use the envelope sender rather than the target key — otherwise the parent author resolves to the receiver and the GCM tag fails. The client handles this internally via `original_sender_for_dispatch`; replicate it if you decrypt edits yourself. `EncryptedEdit` exposes the same method for the `MessageEdit`-only façade.
-</Note>
-
-```rust
-pub enum SecretEncKind {
-    MessageEdit,    // edited text of a previously sent message
-    PollEdit,       // poll question / metadata change
-    PollAddOption,  // new option appended to a multi-select poll
-    EventEdit,      // event title / time change
-}
-```
-
-<Note>
-The `EncryptedEdit` type from v0.5 still exists as a `MessageEdit`-specific façade for callers that only care about text edits; `extract_envelope` now returns `SecretEncrypted` and the older shape is reachable via the same struct. Both `EncryptedEdit::original_sender_jid` and `SecretEncrypted::original_sender_jid` share the same [`MessageEditError`](/api/errors#messageediterror) error type.
-</Note>
-
-## Error handling
-
-All five poll methods (`create`, `create_quiz`, `vote`, `decrypt_vote`, and `aggregate_votes`) return `Result<T, PollError>`:
-
-```rust
-#[non_exhaustive]
-pub enum PollError {
-    #[error("{0}")]
-    Send(#[from] SendError),
-    #[error("invalid poll: {0}")]
-    InvalidPoll(String),
-    InvalidSecret(InvalidMessageSecret),
-    Reference(MessageRefError),
-    #[error("client is not logged in")]
-    NotLoggedIn,
-    #[error("poll vote crypto failed: {0}")]
-    Crypto(#[source] anyhow::Error),
-}
-```
-
-```rust
-use whatsapp_rust::PollError;
-
-match client.polls().create(jid, "Question?", &options, 1).await {
-    Ok(created) => println!("Poll created: {}", created.send_result().message_id),
-    Err(PollError::InvalidPoll(msg)) => eprintln!("Invalid poll: {}", msg),
-    Err(PollError::Send(e)) => eprintln!("Send failed: {}", e),
-    Err(e) => eprintln!("Error: {}", e),
-}
-```
-
-## See also
-
-- [Polls guide](/guides/polls) - Step-by-step usage guide
-- [Sending messages](/guides/sending-messages) - Send other message types
-- [Send API](/api/send) - Low-level send operations
+## Source reference
+[Poll facade, errors and aggregation](https://github.com/oxidezap/whatsapp-rust/blob/54ce6cd9007f4361a07dbad50718973bbf56e2e9/src/features/polls.rs) · [Creation results and borrowed references](https://github.com/oxidezap/whatsapp-rust/blob/54ce6cd9007f4361a07dbad50718973bbf56e2e9/src/features/creation.rs) · [Core encryption primitives](https://github.com/oxidezap/whatsapp-rust/blob/54ce6cd9007f4361a07dbad50718973bbf56e2e9/wacore/src/poll.rs)

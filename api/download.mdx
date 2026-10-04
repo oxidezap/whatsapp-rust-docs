@@ -43,6 +43,16 @@ A writer must implement `Write`, `Seek`, and `truncate`. `Cursor<Vec<u8>>` and `
 
 Match with a fallback arm because the enum is extensible. `ErrorChainExt` recovers typed source information such as HTTP status. Local writer I/O is terminal; HTTP reader failure can still fail over. An existing `anyhow::Result` function can use `?`, or explicitly convert the error at an erased return boundary.
 
+## Automatic retry and URL re-derivation
+
+For session-derived routes, the client performs applicable host failover and can refresh media credentials once after a reference rejection. Static URLs bypass session acquisition and their first reference rejection is terminal. Inspect `ClientDownloadError` for the final classification; a refreshed empty host list preserves the original rejection status. The standalone `MediaDownloader` cannot ask a client for refreshed credentials.
+
+Local writer failures do not trigger CDN retry or refresh. A consumed sink may have changed before failure; use the cleanup and cancellation boundaries above rather than publish partial output.
+
+## Recovering the CDN status by type
+
+Call `ErrorChainExt::http_status()` on the typed `ClientDownloadError`. It walks retained sources; absence of a status does not imply an HTTP exchange succeeded. Session acquisition failures retain their IQ cause, while cleanup failures can preserve both the download and cleanup causes. See [error chain recovery](/api/errors#error-chain-recovery).
+
 ## Music artwork
 
 `wa::EmbeddedMusic` implements `Downloadable` for encrypted artwork. To derive the mode from its actual chat:

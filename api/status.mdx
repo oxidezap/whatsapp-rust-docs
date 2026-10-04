@@ -1,306 +1,63 @@
 ---
-title: Status
-description: Post, react to, and manage WhatsApp status/story updates
+title: Status updates
+description: Post status content and keep message IDs separate from operation stanza IDs
 ---
 
-The `Status` feature provides APIs for posting text, image, and video status updates, reacting to statuses (e.g. the "like" heart), and revoking previously sent statuses.
-
-## Access
-
-Access status operations through the client:
-
-```rust
-let status = client.status();
-```
-
-## Methods
-
-### send_text
-
-Send a text status update with background color and font style.
-
-```rust
-pub async fn send_text(
-    &self,
-    text: &str,
-    background_argb: u32,
-    font: wa::message::extended_text_message::FontType,
-    recipients: &[Jid],
-    options: StatusSendOptions,
-) -> Result<SendResult, SendError>
-```
-
-**Parameters:**
-- `text` - Status text content
-- `background_argb` - Background color as ARGB (e.g., `0xFF1E6E4F`)
-- `font` - Pass one of the `FontType` variants (e.g. `FontType::SYSTEM`). This is a typed protocol enum, so you can't pass a value it doesn't define — an older `i32` form silently dropped out-of-range values at encode time
-- `recipients` - Slice of recipient JIDs
-- `options` - Privacy and delivery options
-
-**Returns:**
-- `SendResult` containing the `message_id` and `to` JID. Use `result.message_key()` to get a `wa::MessageKey` for revocation or other follow-up operations.
-
-**Example:**
-```rust
-use whatsapp_rust::waproto::whatsapp as wa;
-use whatsapp_rust::{Jid, StatusSendOptions};
-
-let recipients = [
-    Jid::pn("15551234567"),
-    Jid::pn("15559876543"),
-];
-
-let result = client.status()
-    .send_text(
-        "Hello from Rust!",
-        0xFF1E6E4F, // Green background
-        wa::message::extended_text_message::FontType::SYSTEM,
-        &recipients,
-        StatusSendOptions::default(),
-    )
-    .await?;
-
-println!("Status sent: {}", result.message_id);
-```
-
-### send_image
-
-Send an image status update.
-
-```rust
-pub async fn send_image(
-    &self,
-    upload: UploadResponse,
-    thumbnail: Vec<u8>,
-    caption: Option<&str>,
-    recipients: &[Jid],
-    options: StatusSendOptions,
-) -> Result<SendResult, SendError>
-```
-
-**Parameters:**
-- `upload` - Upload response from `client.upload()` (takes ownership)
-- `thumbnail` - JPEG thumbnail bytes
-- `caption` - Optional caption text
-- `recipients` - Slice of recipient JIDs
-- `options` - Privacy options
-
-**Example:**
-```rust
-use whatsapp_rust::wacore::download::MediaType;
-
-// Upload the image first
-let image_data = std::fs::read("photo.jpg")?;
-let upload = client.upload(image_data, MediaType::Image, Default::default()).await?;
-
-// Create thumbnail (simplified - use proper JPEG encoding)
-let thumbnail = create_thumbnail(&image_data)?;
-
-let result = client.status()
-    .send_image(
-        upload,
-        thumbnail,
-        Some("Check this out!"),
-        &[Jid::pn("15551234567")],
-        StatusSendOptions::default(),
-    )
-    .await?;
-```
-
-### send_video
-
-Send a video status update.
-
-```rust
-pub async fn send_video(
-    &self,
-    upload: UploadResponse,
-    thumbnail: Vec<u8>,
-    duration_seconds: u32,
-    caption: Option<&str>,
-    recipients: &[Jid],
-    options: StatusSendOptions,
-) -> Result<SendResult, SendError>
-```
-
-**Parameters:**
-- `upload` - Upload response from `client.upload()` (takes ownership)
-- `thumbnail` - JPEG thumbnail bytes
-- `duration_seconds` - Video duration
-- `caption` - Optional caption text
-- `recipients` - Slice of recipient JIDs
-- `options` - Privacy options
-
-**Example:**
-```rust
-use whatsapp_rust::wacore::download::MediaType;
-
-let video_data = std::fs::read("video.mp4")?;
-let upload = client.upload(video_data, MediaType::Video, Default::default()).await?;
-let thumbnail = extract_video_thumbnail(&video_data)?;
-
-let result = client.status()
-    .send_video(
-        upload,
-        thumbnail,
-        30, // 30 seconds
-        None,
-        &[Jid::pn("15551234567")],
-        StatusSendOptions::default(),
-    )
-    .await?;
-```
-
-### send_raw
-
-Send a custom message type as a status update.
-
-```rust
-pub async fn send_raw(
-    &self,
-    message: wa::Message,
-    recipients: &[Jid],
-    options: StatusSendOptions,
-) -> Result<SendResult, SendError>
-```
-
-**Example:**
-```rust
-use whatsapp_rust::waproto::whatsapp as wa;
-
-let message = wa::Message {
-    extended_text_message: buffa::MessageField::some(wa::message::ExtendedTextMessage {
-        text: Some("Custom message".to_string()),
-        ..Default::default()
-    }),
-    ..Default::default()
-};
-
-let result = client.status()
-    .send_raw(message, recipients, StatusSendOptions::default())
-    .await?;
-```
-
-
-### revoke
-
-```rust
-use whatsapp_rust::{Client, Jid, MessageId, SendResult, StanzaId, StatusSendOptions};
-
-async fn revoke_own_status(
-    client: &Client,
-    original_id: MessageId,
-    original_recipients: &[Jid],
-) -> Result<SendResult, whatsapp_rust::SendError> {
-    client.status().revoke(
-        original_id,
-        original_recipients,
-        StatusSendOptions::default().with_stanza_id(StanzaId::new("REVOKE-OPERATION")?),
-    ).await
-}
-```
-
-The target is a `MessageId`; the new revoke envelope has its own operation ID. Use the same recipients as the original post. A revoke override must differ from the target ID.
-
-### send_reaction
-
-React through `client.send_reaction(&MessageRef, emoji)` with a status reference retaining the original author. The reaction uses DM fanout to that author's devices. `send_reaction_raw` accepts an explicit raw chat/key pair. See [reactions](/api/send#send_reaction).
-
-### audience
-
-`client.status().audience()` returns the latest synced `StatusPrivacyAction`, or `None` when unobserved. `StatusPrivacyUpdate` reports changes. Neither the observed setting nor `StatusSendOptions::privacy` filters recipients automatically. Choose and validate recipients against the intended audience; unknown audience is not permission to send to all contacts.
-
-## Types
-
-### StatusPrivacySetting
-
-Privacy setting for status delivery.
-
-```rust
-#[non_exhaustive]
-pub enum StatusPrivacySetting {
-    /// Send to all contacts in address book (default)
-    Contacts,
-    /// Send only to contacts in an allow list
-    AllowList,
-    /// Send to all contacts except those in a deny list
-    DenyList,
-}
-```
-
-`StatusPrivacySetting` is `#[non_exhaustive]`, so match statements should include a wildcard arm to handle future variants.
-
-
-### StatusSendOptions
-
-The type is `#[non_exhaustive]`. Use `Default` and fluent setters:
-
-```rust
-use whatsapp_rust::{Freshness, MessageId, StatusSendOptions, StatusPrivacySetting};
-let options = StatusSendOptions::default()
-    .with_privacy(StatusPrivacySetting::AllowList)
-    .with_message_id(MessageId::new("STATUS-CONTENT")?)
-    .with_device_freshness(Freshness::Refresh);
-```
-
-Content posts accept `with_message_id(MessageId)`. Revoke or raw reaction operations accept `with_stanza_id(StanzaId)`. Simultaneous overrides, a wrong-role override, or a revoke collision fail with `InvalidRequest`. Fresh IDs remain the default.
-
-`with_extra_stanza_nodes` adds permitted children. `with_device_freshness` controls device discovery. Recipients remain a separate required argument. `privacy` only sets the status mode metadata and does not implement audience selection or application idempotency.
-
-## Font styles
-
-WhatsApp Web supports 5 font styles (0-4):
-
-| Index | Style |
-|-------|-------|
-| 0 | Default (sans-serif) |
-| 1 | Serif |
-| 2 | Typewriter (monospace) |
-| 3 | Bold script |
-| 4 | Condensed |
-
-## Background colors
-
-Background colors use ARGB format (`0xAARRGGBB`):
-
-```rust
-// Solid green
-let green = 0xFF1E6E4F_u32;
-
-// Solid blue
-let blue = 0xFF1A73E8_u32;
-
-// Solid red
-let red = 0xFFD93025_u32;
-
-// Semi-transparent black
-let overlay = 0x80000000_u32;
-```
-
-## Recipient management
-
-Recipients should be JIDs of users who can see the status. You can pass any `&[Jid]` — an array literal, a slice of a `Vec`, or a fixed-size array:
-
-```rust
-// Single recipient (array literal)
-let recipients = &[Jid::pn("15551234567")];
-
-// Multiple recipients
-let recipients = &[
-    Jid::pn("15551234567"),
-    Jid::pn("15559876543"),
-    "15557654321@s.whatsapp.net".parse()?,
-];
-
-// From an existing Vec
-let jids = vec![Jid::pn("15551234567")];
-let recipients = &jids;
-```
-
 <Note>
-The `recipients` list should match your privacy settings. When revoking a status, use the same recipients list that was used when posting.
+Examples on this page target [source snapshot `54ce6cd`](https://github.com/oxidezap/whatsapp-rust/tree/54ce6cd9007f4361a07dbad50718973bbf56e2e9), not a crates.io release. Use the [current API guide](/guides/current-api) to select the matching dependency.
 </Note>
 
-## Phash validation
+## Post content
 
-After sending a status update, the library validates the participant hash (`phash`) from the server's acknowledgment against the locally computed value. On mismatch, the sender key device cache is invalidated so the next status send re-fetches current device lists. This runs in the background and does not affect the send result. See [Signal Protocol — Phash validation](/advanced/signal-protocol#phash-validation-for-stale-device-list-detection) for details.
+Status sends require an explicit recipient list. `audience()` returns the last synchronized privacy snapshot, not a computed recipient list; `None` does not mean all contacts are allowed.
+
+```rust
+use whatsapp_rust::{Client, Jid, MessageId, StatusSendOptions};
+use whatsapp_rust::waproto::whatsapp::message::extended_text_message::FontType;
+
+async fn post(client: &Client, recipients: &[Jid]) -> whatsapp_rust::anyhow::Result<()> {
+    let options = StatusSendOptions::default()
+        .with_message_id(MessageId::new("STATUS-CONTENT")?);
+    let sent = client.status().send_text(
+        "Release day", 0xFF1E6E4F, FontType::SYSTEM, recipients, options,
+    ).await?;
+    println!("{}", sent.message_id);
+    Ok(())
+}
+```
+
+Use `send_raw` on the status facade for prepared protobuf media. The font argument is the generated `FontType`, not an arbitrary integer. Background colors use ARGB (`0xAARRGGBB`).
+
+## StatusSendOptions
+
+Start with `Default` and use builders for privacy, content ID, operation ID, extra nodes and device freshness. The type is non-exhaustive.
+
+- `with_message_id(MessageId)` overrides the ID of a new content post.
+- `with_stanza_id(StanzaId)` overrides an operation such as a revoke or raw reaction.
+- Passing a content override to an operation, an operation override to a post, or both overrides is rejected.
+
+## Revoke content
+
+The target remains a `MessageId`; the revoke has its own fresh `StanzaId`.
+
+```rust
+use whatsapp_rust::{Client, Jid, MessageId, StanzaId, StatusSendOptions};
+
+async fn revoke(client: &Client, recipients: &[Jid]) -> whatsapp_rust::anyhow::Result<()> {
+    client.status().revoke(
+        MessageId::new("STATUS-CONTENT")?,
+        recipients,
+        StatusSendOptions::default().with_stanza_id(StanzaId::new("STATUS-REVOKE")?),
+    ).await?;
+    Ok(())
+}
+```
+
+Pass the same recipient list used by the original post so the revoke reaches that audience. A revoke operation ID must differ from its target content ID. Do not convert a target ID into the operation domain merely to reuse the same string.
+
+## React to received status
+
+Use `client.send_reaction(&inbound.message_ref()?, emoji)` so the source owner and status metadata are retained. `client.send_reaction_raw` is the explicit raw interoperability path; consult its source for the exact owner/key arguments.
+
+## Source reference
+[Status options, audience and operations](https://github.com/oxidezap/whatsapp-rust/blob/54ce6cd9007f4361a07dbad50718973bbf56e2e9/src/features/status.rs) · [Typed status reactions](https://github.com/oxidezap/whatsapp-rust/blob/54ce6cd9007f4361a07dbad50718973bbf56e2e9/src/features/reaction.rs)

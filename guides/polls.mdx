@@ -1,142 +1,36 @@
 ---
-title: Polls
-description: Learn how to create polls, cast votes, and decrypt poll results in whatsapp-rust
+title: Polls and quizzes
+description: Create a poll once and reuse its validated reference for voting and decryption
 ---
 
-## Overview
-
-This guide covers creating polls in WhatsApp chats, casting votes on existing polls, and decrypting encrypted vote results. Polls support both single-select and multi-select modes and work in both direct messages and group chats.
-
-
-## Creating a poll
-
-```rust
-use whatsapp_rust::Jid;
-
-let chat_jid: Jid = "120363012345678@g.us".parse()?;
-let options = vec!["Option A".to_string(), "Option B".to_string()];
-let created = client.polls().create(&chat_jid, "What do you prefer?", &options, 1).await?;
-println!("Poll sent: {}", created.send_result().message_id);
-```
-
-The result is `CreatedPoll`, with a send result, original cryptographic creator, and validated 32-byte `MessageSecret`. Store their association to vote or decrypt later. Use a selectable count above one for multi-select; it cannot exceed the number of options. Polls require 2 to 12 unique option names.
-
-## Voting on a poll
-
-```rust
-let selected = vec!["Option A".to_string()];
-client.polls().vote(&created.poll_ref()?, &selected).await?;
-```
-
-For received or stored content, build `PollRef` from a `MessageRef`, exact original crypto creator, and validated secret. Do not infer cryptographic identity from a current alias. Use an empty selection to clear a vote. See [poll references](/api/polls#creation-references).
-
-## Decrypting votes
-
-When you receive poll update events, the vote payload is encrypted. Use `decrypt_vote` to retrieve the selected option hashes:
-
-```rust
-use whatsapp_rust::{PollOptionResult, PollVoteCiphertext};
-
-let selected_hashes = client
-    .polls()
-    .decrypt_vote(
-        PollVoteCiphertext { enc_payload: &enc_payload, enc_iv: &enc_iv },
-        &message_secret,
-        &poll_msg_id,
-        &poll_creator_jid,
-        &voter_jid,
-    )
-    .await?;
-```
-
-Each returned hash is a 32-byte SHA-256 hash of the option name. To map hashes back to option names, compare them against the known options using `wacore::poll::compute_option_hash`.
-
 <Note>
-The instance methods consult known PN/LID mappings and try creator and voter aliases independently. Preserve the original crypto creator when persisting a poll reference.
+Examples on this page target [source snapshot `54ce6cd`](https://github.com/oxidezap/whatsapp-rust/tree/54ce6cd9007f4361a07dbad50718973bbf56e2e9), not a crates.io release. Use the [current API guide](/guides/current-api) to select the matching dependency.
 </Note>
 
-## Aggregating results
+## Choose the creation type
 
-For tallying votes across multiple voters, use `aggregate_votes`. This handles vote replacement (last-vote-wins) and maps hashes back to option names. Voters are deduped by canonical identity, so a voter who re-votes under the opposite namespace counts once:
-
-```rust
-use whatsapp_rust::{PollOptionResult, PollVoteCiphertext};
-
-let poll_options = vec![
-    "Option A".to_string(),
-    "Option B".to_string(),
-    "Option C".to_string(),
-];
-
-// votes: Vec<(&Jid, PollVoteCiphertext)> — oldest first
-// Should be ordered oldest-first
-let results: Vec<PollOptionResult> = client
-    .polls()
-    .aggregate_votes(
-        &poll_options,
-        &votes,
-        &message_secret,
-        &poll_msg_id,
-        &poll_creator_jid,
-    )
-    .await?;
-
-for result in &results {
-    println!("{}: {} votes", result.name, result.voters.len());
-    for voter in &result.voters {
-        println!("  - {}", voter);
-    }
-}
-```
-
-<Note>
-Pass votes in chronological order (oldest first). When a voter changes their vote, only the latest vote counts. An empty selection clears the voter's previous vote.
-</Note>
-
-## Encryption details
-
-Poll votes use a multi-step encryption process:
-
-1. Each option is identified by its SHA-256 hash (not the option name)
-2. An encryption key is derived using HKDF-SHA256 from the `message_secret`, poll message ID, creator JID, and voter JID
-3. The selected option hashes are serialized as a protobuf `PollVoteMessage`
-4. The payload is encrypted with AES-256-GCM using the derived key and a random 12-byte IV
-5. Additional authenticated data (AAD) includes the poll message ID and voter JID
-
-This means each voter's encryption key is unique, and votes can only be decrypted by someone who has the original `message_secret`.
-
-## Error handling
+Use `polls().create` for single or multiple selections. Use `create_quiz` with a correct option index for a quiz. Both return `CreatedPoll` and carry the secret and creator needed by later votes.
 
 ```rust
-use anyhow::Result;
+use whatsapp_rust::{Client, Jid};
 
-async fn create_poll_safely(client: &Client) -> Result<()> {
-    let jid: Jid = "15551234567@s.whatsapp.net".parse()?;
-    let options = vec!["Yes".to_string(), "No".to_string()];
-
-    match client.polls().create(&jid, "Agree?", &options, 1).await {
-        Ok(created) => {
-            println!("Poll created: {}", created.send_result().message_id);
-            // Store secret for later vote decryption
-        }
-        Err(e) => {
-            eprintln!("Failed to create poll: {}", e);
-        }
-    }
-
+async fn quiz(client: &Client, chat: &Jid) -> whatsapp_rust::anyhow::Result<()> {
+    let options = vec!["A".to_owned(), "B".to_owned()];
+    let created = client.polls().create_quiz(chat, "Choose A", &options, 0).await?;
+    let target = created.poll_ref()?;
+    client.polls().vote(&target, &["A".to_owned()]).await?;
     Ok(())
 }
 ```
 
-Common errors:
-- Fewer than 2 or more than 12 options
-- Duplicate option names
-- `selectable_count` out of range
-- Invalid `message_secret` length (must be 32 bytes)
-- GCM tag verification failure during vote decryption
+## Keep the parent association
 
-## Next steps
+Save the creation message ID, destination, actual crypto creator and secret together. To rebuild a reference for an incoming poll, use its `InboundMessage::message_ref()`, the original creator and a validated `MessageSecret`. A message reference by itself does not include the crypto secret.
 
-- [Sending messages](/guides/sending-messages) - Send text, reactions, and other message types
-- [Receiving messages](/guides/receiving-messages) - Handle incoming messages and events
-- [Group management](/guides/group-management) - Work with group chats
+When processing updates, `decrypt_vote_ref(ciphertext, &target, voter).await` returns selected option hashes. Map hashes to the creation's option names or use `aggregate_votes` for a tally. Preserve voter identity and update order when building a custom aggregate.
+
+## Handle unavailable secrets
+
+A received update cannot be decrypted without its parent secret. Implement the named validated [storage read](/api/store#msgsecretstore) and retain the parent timestamp when known. History-sync and inbound processing can seed that store, but an application must not assume every parent is available.
+
+See the [poll task reference](/api/polls) for raw interoperability, source links and [current contracts](/guides/current-api#polls-and-events).

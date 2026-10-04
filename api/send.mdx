@@ -1,554 +1,124 @@
 ---
-title: "send"
-description: "Send, forward, edit, revoke, pin, and unpin messages with advanced options, including album support"
+title: Sending and message actions
+description: Send content and address edits, reactions, revokes, pins and keeps with typed references
 ---
 
+<Note>
+Examples on this page target [source snapshot `54ce6cd`](https://github.com/oxidezap/whatsapp-rust/tree/54ce6cd9007f4361a07dbad50718973bbf56e2e9), not a crates.io release. Use the [current API guide](/guides/current-api) to select the matching dependency.
+</Note>
 
 ## send
 
-Use `client.send(SendRequest)` for configurable sends. `send_message`, `send_text`, and `forward_message` are default shortcuts. The send result means the stanza was transmitted; it does not wait for a server ACK or establish delivery.
+Use `send_text` for text or `send_message` for protobuf content with default options. Use `send(SendRequest)` when you need options. The request owns the protobuf; the result shares the encoded message through an `Arc`.
 
 ```rust
-use whatsapp_rust::{MessageId, SendOptions, SendRequest};
+use whatsapp_rust::{Client, Jid, MessageId, SendOptions, SendRequest};
 use whatsapp_rust::proto_helpers::MessageBuilderExt;
 use whatsapp_rust::waproto::whatsapp::Message;
 
-let options = SendOptions::default()
-    .with_message_id(MessageId::new("CONTENT-123")?)
-    .with_ephemeral_expiration(604800);
-let sent = client.send(
-    SendRequest::new(&chat, Message::text("Hello"))
-        .with_options(options),
-).await?;
+async fn send(client: &Client, chat: &Jid) -> whatsapp_rust::anyhow::Result<()> {
+    client.send_text(chat, "Hello").await?;
+    let options = SendOptions::default()
+        .with_message_id(MessageId::new("CONTENT")?)
+        .with_ephemeral_expiration(86_400);
+    let sent = client.send(
+        SendRequest::new(chat, Message::text("Disappearing message"))
+            .with_options(options),
+    ).await?;
+    println!("{}", sent.message_id.as_str());
+    Ok(())
+}
 ```
-
-`SendRequest::new(&Jid, wa::Message)` owns the message in an `Arc` that the result reuses. Requests omit `Debug` because message content can contain secrets.
-
-## send_message
-
-```rust
-let sent = client.send_message(&chat, Message::text("Hello")).await?;
-```
-
-DMs and groups use E2E encryption. A newsletter JID selects the plaintext channel path. Newsletter actions use `client.newsletter()`.
-
-## forward_message
-
-```rust
-let sent = client.forward_message(&destination, &received).await?;
-```
-
-Forwarding prepares a new content message: it sets the forward marker, updates the forwarding score, clears quotes and mentions, and generates fresh reporting context. Existing media CDN fields can be reused without downloading and uploading the file.
 
 ## SendOptions
 
-Start from `SendOptions::default()` and use setters. The type is `#[non_exhaustive]`; external struct literals are unsupported.
+Start with `SendOptions::default()` and use `with_*` setters. The type is non-exhaustive, so downstream struct literals are unsupported. Options cover a content `MessageId`, disappearing-message duration, extra stanza nodes, stanza type, group metadata freshness and device freshness.
 
-| Setter | Input | Purpose |
-| --- | --- | --- |
-| `with_message_id` | `MessageId` | Override the content ID |
-| `with_ephemeral_expiration` | `u32` | Disappearing duration in seconds |
-| `with_extra_stanza_nodes` | `Vec<Node>` | Additional permitted stanza children |
-| `with_stanza_type_override` | `StanzaType` | Explicit stanza classification |
-| `with_group_metadata_freshness` | `Freshness` | Cached or refreshed group routing metadata |
-| `with_device_freshness` | `Freshness` | Cached or refreshed recipient devices |
+Setting an expiration on the message does not change the chat timer. Use `set_chat_disappearing_timer` for a DM or `groups().set_ephemeral` for a group. A send does not establish the recipient's retention policy.
 
-A chosen ID does not provide application idempotency or an exactly-once guarantee. Reserved encryption children and conflicting derived business/bot children fail validation before transmission.
+For a DM with no usable recipient device, handle `SendError::NoRecipientDevice` and deliberately retry with `with_device_freshness(Freshness::Refresh)`. Reusing the cached device list can repeat the same failure. See [error handling](/api/errors#norecipientdeviceerror).
 
 ## SendResult
 
-Read `message_id: MessageId`, `to: Jid`, `message: Arc<wa::Message>`, and `recipient_fanout: Option<RecipientFanout>`. Use `SendResult::builder()` when constructing a synthetic result in an adapter or test.
+`message_id: MessageId` identifies this send's envelope. `to` is its destination, `message` is the shared encoded protobuf, and `recipient_fanout` reports device encryption coverage for the DM branch. Fanout counts are not delivery receipts. Group sends, status posts and newsletter plaintext have different routing and do not report DM fanout.
 
-`message` is the content passed to the encoder after ephemeral, forward, or action preparation. It does not include delivery-only reporting context spliced into the encoding or the own-device `DeviceSentMessage` wrapper.
+`message_ref()` borrows chat addressing for later operations; it can reject destinations that need another reference type. `newsletter_ref()` keeps channel client and server content IDs separate. `stanza_id()` identifies the outer operation for ACK correlation.
 
-- `message_ref()` references this result's emitted message. For an edit or revoke, that is the operation envelope, not the original target.
-- `newsletter_ref()` references a channel post with a client content ID. It cannot invent the server content ID needed for reactions or votes.
-- `stanza_id()` returns the outer ID for ACK correlation.
-- `message_key()` creates a raw protobuf key for the sender's own message, useful for album child linking.
-
-## RecipientFanout
-
-For DMs, inspect `addressed`, `encrypted`, `skipped_primary`, `had_unregistered_device`, and `is_partial()`. A partial fanout can return `Ok`; these counts describe encryption coverage, not recipient delivery. If every recipient device fails, the send returns `SendError::NoRecipientDevice`. Consider a caller-selected retry with refreshed devices.
-
-Group sends, status posts, peer-sync messages, and newsletter plaintext return `None`. Status reactions take the DM path to the original author's devices.
-
-## Message references and IDs
-
-`MessageId` identifies content, `StanzaId` identifies a new operation, and `ServerMessageId` identifies channel content assigned by the server. These types are not interchangeable. `MessageId::new` and `StanzaId::new` reject empty strings. Convert to strings at storage or raw interoperability boundaries explicitly.
-
-```rust
-use whatsapp_rust::{MessageId, MessageRef};
-
-let target = MessageRef::new(&chat, MessageId::new("ORIGINAL")?, Some(&author), false)?;
-client.send_reaction(&target, "👍").await?;
-```
-
-Prefer `inbound.message_ref()?`, `MessageRef::from_info(&info)?`, or `sent.message_ref()?`. A received group reference needs the original author. References retain addressing and inbound metadata, not the message body, and grant no permissions. Keep PN/LID identity associations explicit.
+An edit, revoke or pin result describes the new operation, not the original content. Keep the target reference separately.
 
 ## edit_message
 
+Pass `EditRequest::new(target, replacement)`. Obtain the target from an inbound message, `MessageContext`, a send result, or validated addressing metadata.
+
 ```rust
-use whatsapp_rust::{EditOptions, EditRequest, StanzaId};
+use whatsapp_rust::{Client, EditOptions, EditRequest, Jid, StanzaId};
+use whatsapp_rust::proto_helpers::MessageBuilderExt;
+use whatsapp_rust::waproto::whatsapp::Message;
 
-let target = original_send.message_ref()?;
-let edited = client.edit_message(
-    EditRequest::new(target, Message::text("Corrected text"))
-        .with_options(EditOptions::default().with_stanza_id(StanzaId::new("EDIT-123")?)),
-).await?;
+async fn edit(client: &Client, chat: &Jid) -> whatsapp_rust::anyhow::Result<()> {
+    let original = client.send_text(chat, "Draft").await?;
+    let target = original.message_ref()?;
+    let options = EditOptions::default().with_stanza_id(StanzaId::new("EDIT-OPERATION")?);
+    let edit = client.edit_message(
+        EditRequest::new(target, Message::text("Published"))
+            .with_options(options),
+    ).await?;
+    println!("edit operation: {}", edit.message_id);
+    Ok(())
+}
 ```
-
-An edit requires an own-message target. Its result describes the new edit envelope. The original content ID stays in the target; the outer operation gets a fresh ID unless explicitly overridden. A forced collision with an existing ID is best effort and does not overwrite the original local secret or retry entry.
-
-Community announcement edits require `EditRequest::with_secret(&creator, &MessageSecret)` with the original cryptographic creator. The library does not substitute a later PN/LID alias. Event and poll replacement content selects its corresponding encrypted edit kind.
-
-`edit_message_raw` and `edit_message_encrypted_raw` are explicit low-level interop paths. Use the typed request for normal host code.
 
 ## EditOptions
 
-Use `EditOptions::default().with_stanza_id(StanzaId::new("EDIT-123")?)`. This extensible type contains an optional operation ID.
+The target's `MessageId` identifies content. `EditOptions::with_stanza_id` identifies the new edit operation. Defaults generate a fresh operation ID; overriding it changes server deduplication behavior.
 
-## revoke_message
-
-```rust
-client.revoke_message(&target).await?;
-```
-
-Own references use sender revocation. Other authors require a group target and server-checked admin rights. `revoke_message_raw` accepts explicit chat, target string ID, and `RevokeType`.
-
-## pin_message
-
-```rust
-use whatsapp_rust::PinDuration;
-client.pin_message(&target, PinDuration::Days7).await?;
-```
-
-`PinDuration` supports `Hours24`, `Days7`, and `Days30`. Pinning returns the new action's `SendResult`.
-
-## unpin_message
-
-```rust
-client.unpin_message(&target).await?;
-```
-
-## keep_message
-
-```rust
-client.keep_message(&target, true).await?;
-client.keep_message(&target, false).await?;
-```
-
-These operations use the target's original chat and author. `pin_message_raw`, `unpin_message_raw`, and `keep_message_raw` accept explicit raw chat/key pairs.
+For an encrypted edit, use `EditRequest::with_secret(original_creator, original_secret)`. Supply the creation's exact cryptographic creator, even when its visible sender has a PN/LID alias. This path does not look up or substitute an identity. Community announcement edits require that association.
 
 ## send_reaction
 
+`send_reaction(&MessageRef, emoji)` addresses chat content. An empty emoji removes a reaction. The reference preserves the original sender and inbound metadata needed for group, status and comment routing.
+
+## revoke_message
+
+`revoke_message(&MessageRef)` selects sender scope for your own content and admin scope for another group author's content. A reference grants no server permissions. Revoke another author's DM content with this API is unsupported.
+
+## pin_message
+
+`pin_message(&MessageRef, PinDuration)` accepts `Hours24`, `Days7` or `Days30`. Use the original group author in a received group reference.
+
+## unpin_message
+
+`unpin_message(&MessageRef)` sends a new operation targeting the same content.
+
+## keep_message
+
+`keep_message(&MessageRef, keep)` keeps or unkeeps disappearing content. Server rules still determine whether the operation is accepted.
+
 ```rust
-client.send_reaction(&inbound.message_ref()?, "👍").await?;
-client.send_reaction(&inbound.message_ref()?, "").await?;
+use whatsapp_rust::{Client, MessageRef, PinDuration};
+
+async fn act(client: &Client, target: &MessageRef<'_>) -> whatsapp_rust::anyhow::Result<()> {
+    client.send_reaction(target, "👍").await?;
+    client.pin_message(target, PinDuration::Days7).await?;
+    client.unpin_message(target).await?;
+    client.keep_message(target, true).await?;
+    Ok(())
+}
 ```
 
-An empty emoji removes the reaction. Status references route to the status author's devices. Broadcast-list targets are unsupported. Community announcement reactions use the captured original secret; missing secret material fails instead of sending a plaintext reaction.
+## Raw interoperability
 
-Use `send_reaction_raw` for explicit protobuf keys. Channel reactions require a `NewsletterMessageRef` and go through the [newsletter API](/api/newsletter#send_reaction).
+Use the explicitly named `*_raw` methods when integrating stored byte/string keys. Their arguments differ by operation; they do not replace a correctly scoped `MessageRef`. See the source reference for exact signatures. Channel actions use `NewsletterMessageRef`, not `MessageRef`.
 
-## set_chat_disappearing_timer
+## Forwarding and metadata
 
-```rust
-client.set_chat_disappearing_timer(chat.clone(), 604800).await?;
-client.set_chat_disappearing_timer(chat.clone(), 0).await?;
-```
+`forward_message` prepares and sends forwarded content with default options. `prepare_for_forward` prepares it without sending, strips the source secret and quote chain, and updates the forward marker. Use the resulting protobuf in a `SendRequest` when you need custom options.
 
-Use the group ephemeral setting for group-wide policy. Per-send expiration remains available through `SendOptions`.
+The send pipeline derives stanza metadata for polls, events, pins, media and business content. Extra nodes do not bypass validation; a conflicting automatically derived business or DM bot node is rejected. See [business messages](/api/business), [media](/guides/media-handling), [polls](/api/polls), [events](/api/events) and [newsletter actions](/api/newsletter).
 
-## Phash validation (stale device list detection)
-
-When sending group, status, or DM messages, the library automatically validates the participant hash (`phash`) from the server's acknowledgment against the locally computed value. Group sends only compare it as of [#1328](https://github.com/oxidezap/whatsapp-rust/pull/1328) — before that, a group ack's `phash` attribute was never checked at all. If the hashes differ:
-
-- **Group messages**: group metadata is invalidated (participants are re-queried on the next send); sender-key device tracking is **not** reset, since forcing full SKDM redistribution on every mismatch would cost a fan-out per message for as long as the divergence lasted
-- **Status messages**: sender key device cache is invalidated (forces full SKDM redistribution)
-- **DM messages**: the device registry cache is invalidated for both the recipient and your own phone number (PN), matching WA Web's `syncDeviceListJob([recipient, me])` behavior. As of [#1362](https://github.com/oxidezap/whatsapp-rust/pull/1362), a DM mismatch also re-resolves the recipient's device list and resends the message, under the original message id, to any device that list holds and the original stanza did not cover — see [Signal Protocol — phash repair](/advanced/signal-protocol#phash-validation-for-stale-device-list-detection)
-
-For DMs, the phash is computed locally from the sent device set but is **not** sent on the wire (WA Web only sends phash for groups). The phash is returned via the `PreparedDmStanza.phash` field and compared against the server's ACK phash.
-
-This runs asynchronously in the background and does not block the send path. See [Signal Protocol — Phash validation](/advanced/signal-protocol#phash-validation-for-stale-device-list-detection) for implementation details.
-
----
-
-## Automatic stanza metadata
-
-When you call `send_message` or `send(SendRequest)`, the library automatically infers and injects stanza-level metadata that WhatsApp servers expect for certain message types. This applies to all recipient types — direct messages, groups, and newsletters. You never need to set these manually — the library handles it for you.
-
-| Message type | Auto-injected metadata |
-|---|---|
-| `pin_in_chat_message` | Sets the `edit="2"` attribute on the message stanza |
-| `poll_creation_message` (v1, v2, v3) | Adds a `<meta polltype="creation"/>` child node |
-| `poll_update_message` (with vote) | Adds a `<meta polltype="vote"/>` child node |
-| `event_message` | Adds a `<meta event_type="creation"/>` child node |
-| `enc_event_response_message` | Adds a `<meta event_type="response"/>` child node |
-| `secret_encrypted_message` with `SecretEncType::EventEdit` | Adds a `<meta event_type="edit"/>` child node |
-| view-once media (image/video/voice wrapped as view-once) | Adds the `<meta view_once="true"/>` attribute so recipients render the one-time bubble |
-| group send to tagged members (member labels) | Adds the `appdata` / `tag_reason` meta attributes |
-
-This means you can construct a raw `wa::Message` with any of these fields set and pass it directly to `send(SendRequest)` — the correct protocol metadata is derived automatically. Any nodes you provide via `extra_stanza_nodes` in `SendOptions` are merged with the auto-inferred nodes above. A caller-supplied `<biz>` node, or a caller-supplied `<bot>` node on a DM, is a separate case: the library rejects the send instead of merging when this send also derives one of those from the message content — see [`extra_stanza_nodes`](#sendoptions) and [Automatic business node detection](#automatic-business-node-detection).
-
-<Note>
-  The `pin_message()` and `unpin_message()` convenience methods already handle this internally. Auto-detection is most useful when you build a `wa::Message` manually and send it through `send_message` or `send(SendRequest)`.
-</Note>
-
----
-
-## Automatic business node detection
-
-When you send an `InteractiveMessage` with a `NativeFlowMessage` (used for business features like payments, CTAs, and catalogs), the library automatically injects a `<biz>` stanza child node. You don't need to construct this manually.
-
-The detection works by:
-
-1. Inspecting the outgoing message for an `InteractiveMessage` with a `NativeFlowMessage`
-2. Extracting the first button's `name` field
-3. Mapping the button name to a WhatsApp flow name
-4. Building the `<biz>` XML node with the correct structure
-
-The resulting stanza child looks like:
-
-```xml
-<biz>
-  <interactive type="native_flow" v="1">
-    <native_flow name="order_details"/>
-  </interactive>
-</biz>
-```
-
-### Supported button-to-flow mappings
-
-| Button name | Flow name |
-|---|---|
-| `review_and_pay` | `order_details` |
-| `payment_info` | `payment_info` |
-| `review_order`, `order_status` | `order_status` |
-| `payment_status` | `payment_status` |
-| `payment_method` | `payment_method` |
-| `payment_reminder` | `payment_reminder` |
-| `open_webview` | `message_with_link` |
-| `message_with_link_status` | `message_with_link_status` |
-| `cta_url` | `cta_url` |
-| `cta_call` | `cta_call` |
-| `cta_copy` | `cta_copy` |
-| `cta_catalog` | `cta_catalog` |
-| `catalog_message` | `catalog_message` |
-| `quick_reply` | `quick_reply` |
-| `galaxy_message` | `galaxy_message` |
-| `booking_confirmation` | `booking_confirmation` |
-| `call_permission_request` | `call_permission_request` |
-
-Unrecognized button names pass through as-is.
-
-### Payment vs nested-form vs fallback shapes
-
-The `<biz>` node is emitted in one of three shapes depending on the button content, matching WA Web's reproducer for native-flow stanzas:
-
-1. **Payment buttons** (`review_and_pay`, `payment_info`, `payment_status`, …) — emitted as a flat `<native_flow name="…">` with a `privacy_mode_ts` attribute. `privacy_mode_ts` is the current Unix timestamp from the new `wacore::time::now_secs_u64()` helper, which safely handles clocks set before 1970 by returning `0` instead of panicking.
-2. **Nested-form buttons** (`cta_*`, `quick_reply`, `galaxy_message`, …) — emitted with the `<interactive type="native_flow" v="1">` wrapper shown above.
-3. **Mixed / unrecognized** — falls back to the wrapper form for forward compatibility.
-
-`bot_invoke_message` continues to emit a `<bot>` stanza child instead of `<biz>` and is unaffected by the above shapes.
-
-<Note>
-  The `<biz>` node is merged with any other auto-inferred metadata (like `<meta>` nodes for polls or events) and with any non-colliding `extra_stanza_nodes` you provide in `SendOptions` — see the next note for the `<biz>`/`<bot>` collision case. The library also checks inside `document_with_caption_message` wrappers for interactive messages.
-</Note>
-
-<Note>
-  On a DM (not a group), deriving a `<biz>` node also emits a `<bot biz_bot="1"/>` node immediately before it. A caller-supplied `<biz>` in `extra_stanza_nodes` collides with this — as does a caller-supplied `<bot>` on a DM. The library rejects the send with `SendError::InvalidRequest` naming the tag, instead of sending a stanza with two. The two nodes can encode different intentions: a caller-supplied `native_flow_name`, for instance, might disagree with the one this button derives. Which one the server or recipient would honor isn't observable from here, so neither side silently wins — see [`extra_stanza_nodes`](#sendoptions). `<meta>` is not covered by this rule: a caller-supplied `<meta>` node is always allowed, even when this send also infers one.
-</Note>
-
----
+## Source reference
+[Send options, results and routing](https://github.com/oxidezap/whatsapp-rust/blob/54ce6cd9007f4361a07dbad50718973bbf56e2e9/src/send/mod.rs) · [Request constructors](https://github.com/oxidezap/whatsapp-rust/blob/54ce6cd9007f4361a07dbad50718973bbf56e2e9/src/send/requests.rs) · [Editing](https://github.com/oxidezap/whatsapp-rust/blob/54ce6cd9007f4361a07dbad50718973bbf56e2e9/src/client/messaging.rs) · [Revokes, pins and keeps](https://github.com/oxidezap/whatsapp-rust/blob/54ce6cd9007f4361a07dbad50718973bbf56e2e9/src/send/actions.rs) · [Reactions](https://github.com/oxidezap/whatsapp-rust/blob/54ce6cd9007f4361a07dbad50718973bbf56e2e9/src/features/reaction.rs)
 
 ## Decrypt-fail suppression
 
-Certain infrastructure messages set `decrypt-fail="hide"` on their `<enc>` nodes so recipients don't see "waiting for this message" placeholders when decryption fails. The library applies this automatically based on message content — you don't need to handle it manually.
-
-The following message types are marked with `decrypt-fail="hide"`:
-
-| Message type | Condition |
-|---|---|
-| `reaction_message` | Always |
-| `enc_reaction_message` | Always |
-| `pin_in_chat_message` | Always |
-| `edited_message` | Always |
-| `keep_in_chat_message` | Always |
-| `enc_event_response_message` | Always |
-| `poll_update_message` | Only when `.vote` is present |
-| `message_history_notice` | Always |
-| `conditional_reveal_message` | Always |
-| `secret_encrypted_message` | Only when `SecretEncType` is `EVENT_EDIT`, `POLL_EDIT`, or `POLL_ADD_OPTION` |
-| `bot_invoke_message` | Only when the inner `protocol_message` has type `REQUEST_WELCOME_MESSAGE` |
-| `protocol_message` | When type is `EPHEMERAL_SYNC_RESPONSE`, `REQUEST_WELCOME_MESSAGE`, or `GROUP_MEMBER_LABEL_CHANGE`, or when `edited_message` is present |
-
-Additionally, `decrypt-fail="hide"` is applied for:
-- Messages with an `edit` attribute (except `Empty`, `AdminRevoke`, and `SenderRevoke` — WA Web never hides revokes and the server rejects revoke stanzas carrying this attribute)
-- Sender Key Distribution Message (SKDM) stanzas — always hidden since they are infrastructure-only
-
-<Note>
-  Wrapper messages (`ephemeral_message`, `view_once_message`, etc.) are unwrapped before checking. The `decrypt-fail` attribute is set on the inner `<enc>` node, not the outer `<message>` stanza.
-</Note>
-
----
-
-## Privacy token attachment
-
-When you send a 1:1 message (not to groups, newsletters, or yourself), the library automatically attaches a privacy token to the outgoing stanza. This follows WhatsApp Web's `MsgCreateFanoutStanza.js` fallback chain:
-
-| Priority | Token type | Condition | Stanza node |
-|---|---|---|---|
-| 1 | **tctoken** | Stored TC token exists and hasn't expired (within 28-day rolling window) | `<tctoken>` |
-| 2 | **cstoken** | No valid TC token, but NCT salt and recipient LID are available | `<cstoken>` |
-| 3 | None | Neither token nor salt available | No token node |
-
-After sending, if the TC token bucket boundary has been crossed (7-day buckets), the library automatically issues a new TC token to the recipient in the background.
-
-<Note>
-Privacy token selection is fully automatic. The library resolves the recipient's LID (using the LID-PN cache), looks up stored TC tokens, and falls back to cstoken computation when needed. See the [TC Token API](/api/tctoken) for details on the token lifecycle and NCT salt provisioning.
-</Note>
-
----
-
-## Stanza types
-
-When you send a message, the library automatically determines two protocol-level type attributes based on the protobuf message content. You don't need to set these manually, but understanding them can help with debugging.
-
-### Message stanza type
-
-The `type` attribute on the outer `<message>` XML node is determined by `stanza_type_from_message`:
-
-| Stanza type | Message types |
-|---|---|
-| `"text"` | `conversation`, `protocol_message`, `keep_in_chat_message`, `edited_message`, `pin_in_chat_message`, `album_message`, `extended_text_message` (without `matched_text`), `secret_encrypted_message` with `SecretEncType::MESSAGE_EDIT`, `poll_result_snapshot_message`, `poll_result_snapshot_message_v3`, `request_payment_message`, `send_payment_message`, `payment_invite_message`, `decline_payment_request_message`, `cancel_payment_request_message` |
-| `"media"` | `image_message`, `video_message`, `audio_message`, `document_message`, `sticker_message`, `sticker_pack_message`, `location_message`, `contact_message`, `extended_text_message` (with `matched_text`), and all other media types |
-| `"reaction"` | `reaction_message`, `enc_reaction_message` |
-| `"poll"` | `poll_creation_message`, `poll_creation_message_v2`, `poll_creation_message_v3`, `poll_creation_message_v5`, `poll_update_message`, `secret_encrypted_message` with `SecretEncType::POLL_EDIT` or `SecretEncType::POLL_ADD_OPTION` |
-| `"event"` | `event_message`, `enc_event_response_message`, `secret_encrypted_message` with `SecretEncType::EVENT_EDIT` |
-
-<Note>
-  The payment-family messages (`request_payment_message`, `send_payment_message`, `payment_invite_message`, `decline_payment_request_message`, `cancel_payment_request_message`) classify as `"text"`. These message types only exist on the Android client and are silently dropped by the server when sent as `"media"` (no `mediatype`) or as `"pay"`; `"text"` is the wire type that actually delivers.
-</Note>
-
-#### Overriding the stanza type
-
-When the classifier can't recognize a message variant, set `SendOptions.stanza_type_override` to force the `<message type="...">` attribute. Use the `StanzaType` enum:
-
-```rust
-use whatsapp_rust::{StanzaType, send::SendOptions};
-
-let options = SendOptions::default().with_stanza_type_override(StanzaType::Text);
-
-let result = client
-    .send(whatsapp_rust::SendRequest::new(&to, message).with_options(options))
-    .await?;
-```
-
-`StanzaType` variants map to the wire values listed above plus `"pay"`:
-
-| Variant | Wire value |
-|---|---|
-| `StanzaType::Text` | `"text"` |
-| `StanzaType::Media` | `"media"` |
-| `StanzaType::Reaction` | `"reaction"` |
-| `StanzaType::Poll` | `"poll"` |
-| `StanzaType::Event` | `"event"` |
-| `StanzaType::Pay` | `"pay"` |
-
-Leave `stanza_type_override` as `None` for normal sends — the classifier already handles every supported message type.
-
-### Encrypted media type
-
-The `mediatype` attribute on the inner `<enc>` XML node provides a more specific media classification. This is set by `media_type_from_message` and is omitted for text-only messages:
-
-| Media type | Condition |
-|---|---|
-| `"image"` | `image_message` present |
-| `"video"` | `video_message` with `gif_playback` not set or `false` |
-| `"gif"` | `video_message` with `gif_playback = true` |
-| `"ptv"` | `ptv_message` present |
-| `"ptt"` | `audio_message` with `ptt = true` |
-| `"audio"` | `audio_message` with `ptt` not set or `false` |
-| `"document"` | `document_message` present |
-| `"sticker"` | `sticker_message` present |
-| `"sticker_pack"` | `sticker_pack_message` present |
-| `"location"` | `location_message` with `is_live` not set or `false` |
-| `"livelocation"` | `location_message` with `is_live = true`, or `live_location_message` |
-| `"vcard"` | `contact_message` present |
-| `"contact_array"` | `contacts_array_message` present |
-| `"url"` | `extended_text_message` with non-empty `matched_text`, or `group_invite_message` |
-
-<Note>
-Both stanza type and encrypted media type are resolved automatically by the library before encryption. Wrapper messages are unwrapped first to determine the underlying content type. Since v0.6 `unwrap_message` peels a much wider set of `FutureProofMessage` wrappers — `group_status_mention_message` / `groupStatusV2`, `spoiler`, `question`, `newsletter`, `lottie`, and ~15 others — so classification follows the inner content rather than defaulting the wrapper to `"text"` (aligning with WA Web).
-</Note>
-
----
-
-## Message types
-
-The `wa::Message` protobuf supports various message types. Set exactly one of these fields:
-
-### Text Messages
-
-<ParamField path="conversation" type="String">
-  Simple text message without formatting
-</ParamField>
-
-<ParamField path="extended_text_message" type="ExtendedTextMessage">
-  Text with formatting, links, quoted replies, or mentions
-  
-  Key fields:
-  - `text` - Message text
-  - `contextInfo` - Quoted message, mentions
-  - `previewType` - Link preview behavior
-</ParamField>
-
-### Media Messages
-
-<ParamField path="image_message" type="ImageMessage">
-  Image with optional caption. Upload the image first using `client.upload()`, then populate:
-  - `url`, `direct_path`, `media_key`, `file_enc_sha256`, `file_sha256`, `file_length`, `media_key_timestamp`
-  - `caption` - Image caption
-  - `mimetype` - e.g., `"image/jpeg"`
-</ParamField>
-
-<ParamField path="video_message" type="VideoMessage">
-  Video with optional caption. Same upload pattern as images.
-</ParamField>
-
-<ParamField path="audio_message" type="AudioMessage">
-  Audio file or voice note:
-  - `ptt` - Set to `true` for voice notes (Push-To-Talk)
-  - `mimetype` - e.g., `"audio/ogg; codecs=opus"`
-</ParamField>
-
-<ParamField path="document_message" type="DocumentMessage">
-  Document/file with metadata:
-  - `file_name` - Original filename
-  - `mimetype` - File MIME type
-  - `caption` - Optional description
-</ParamField>
-
-<ParamField path="sticker_message" type="StickerMessage">
-  Sticker image (WebP format)
-</ParamField>
-
-<ParamField path="sticker_pack_message" type="StickerPackMessage">
-  Sticker pack containing multiple stickers as a ZIP. Build using `create_sticker_pack_zip` and `build_sticker_pack_message` from `wacore::sticker_pack`. Requires two uploads: the sticker pack ZIP (`MediaType::StickerPack`) and a JPEG thumbnail (`MediaType::StickerPackThumbnail`) sharing the same `media_key`. See [sticker packs](/guides/sending-messages#sticker-packs).
-</ParamField>
-
-### Other Messages
-
-<ParamField path="location_message" type="LocationMessage">
-  GPS location with latitude, longitude, and optional name/address
-</ParamField>
-
-<ParamField path="contact_message" type="ContactMessage">
-  Contact card with vCard data
-</ParamField>
-
-<ParamField path="contacts_array_message" type="ContactsArrayMessage">
-  Multiple contact cards
-</ParamField>
-
-<ParamField path="live_location_message" type="LiveLocationMessage">
-  Real-time location sharing
-</ParamField>
-
-<ParamField path="reaction_message" type="ReactionMessage">
-  Emoji reaction to another message
-</ParamField>
-
-<ParamField path="poll_creation_message" type="PollCreationMessage">
-  Poll with multiple options. Use `client.polls().create()` for a higher-level API that handles message secret generation automatically. See [Polls API](/api/polls).
-</ParamField>
-
-<ParamField path="event_message" type="EventMessage">
-  Calendar event message. The required `<meta event_type="creation"/>` stanza node is injected automatically when sent through `send_message` or `send(SendRequest)`.
-</ParamField>
-
-<ParamField path="album_message" type="AlbumMessage">
-  Album parent message declaring the expected number of grouped media items. Set `expected_image_count` and/or `expected_video_count`. After sending the parent, use `wrap_as_album_child` to wrap each child media message and link it to the parent via `SendResult::message_key()`. See [album messages](/guides/sending-messages#album-messages).
-</ParamField>
-
-### Example: Extended text with quote
-
-Use `build_quote_context_with_info` to create a reply with the correct `participant` and `remote_jid` fields. It takes both the quoted message's chat (`quoted_chat_jid`) and the chat you're sending into (`target_chat_jid`):
-
-```rust
-use whatsapp_rust::waproto::whatsapp as wa;
-use whatsapp_rust::wacore::proto_helpers::build_quote_context_with_info;
-
-let context = build_quote_context_with_info(
-    quoted_message_id,
-    &quoted_sender_jid,
-    &chat_jid, // quoted_chat_jid
-    &chat_jid, // target_chat_jid (same as quoted for in-place replies)
-    &quoted_message,
-);
-
-let message = wa::Message {
-    extended_text_message: buffa::MessageField::some(wa::message::ExtendedTextMessage {
-        text: Some("Reply to your message".to_string()),
-        context_info: buffa::MessageField::some(context),
-        ..Default::default()
-    }),
-    ..Default::default()
-};
-```
-
-`remote_jid` is emitted only when `quoted_chat_jid` and `target_chat_jid` refer to different chats (a cross-chat quote, such as quoting a status into a DM). Same-chat replies omit it, matching WhatsApp Web. For newsletter chats, the `participant` field is automatically set to the newsletter JID instead of the sender.
-
----
-
-## Error types
-
-### `SendError`
-
-All send-path methods return `Result<T, SendError>`:
-
-```rust
-#[derive(Debug, thiserror::Error)]
-#[non_exhaustive]
-pub enum SendError {
-    #[error("{0}")]
-    Client(ClientError),
-    #[error("client is not logged in")]
-    NotLoggedIn,
-    #[error("IQ request failed: {0}")]
-    Iq(#[from] IqError),
-    #[error("invalid send request: {0}")]
-    InvalidRequest(String),
-    #[error("{0}")]
-    NoRecipientDevice(#[source] wacore::send::NoRecipientDeviceError),
-    #[error("{0}")]
-    PrimaryDeviceRejected(#[source] wacore::send::PrimaryDeviceRejected),
-    #[error("{0}")]
-    Internal(#[from] anyhow::Error),
-}
-```
-
-**Variants:**
-- `NotLoggedIn` — client is not authenticated; check connection state before sending
-- `Iq` — IQ request required by the send path failed
-- `InvalidRequest` — the send request was malformed (e.g., invalid JID, bad message shape)
-- `NoRecipientDevice` — added in PR #1299. A DM had no recipient device available: every resolved recipient device failed encryption, or no recipient device resolved for a non-self destination, so nothing was sent. See [`NoRecipientDeviceError` in the Error Types reference](/api/errors#norecipientdeviceerror) for the two variants it can carry.
-- `PrimaryDeviceRejected` — added in [PR #1362](https://github.com/oxidezap/whatsapp-rust/pull/1362). The pre-key fetch ahead of a DM send got back a `406` naming a primary device (device 0), recipient's or sender's own, so nothing was built or sent. A companion's `406` does not trigger this. See [`SendError` in the Error Types reference](/api/errors#senderror) for the WA Web parity this matches and the retry it calls for.
-- `Client` — underlying transport/connection error
-- `Internal` — catch-all for errors not yet assigned a typed variant. Includes a failure to durably persist the outbound Signal ratchet advance before the stanza was sent — see the durability note under [`send_message`](#send_message).
-
-**Example:**
-
-```rust
-use whatsapp_rust::SendError;
-
-match client.send_message(jid.clone(), message).await {
-    Ok(result) => println!("Sent: {}", result.message_id),
-    Err(SendError::NotLoggedIn) => eprintln!("Not authenticated"),
-    Err(SendError::Iq(e)) => eprintln!("IQ failed: {}", e),
-    Err(SendError::InvalidRequest(msg)) => eprintln!("Bad request: {}", msg),
-    Err(SendError::NoRecipientDevice(e)) => eprintln!("No recipient device reached: {}", e),
-    Err(SendError::PrimaryDeviceRejected(e)) => eprintln!("A primary device was rejected fetching pre-keys: {}", e),
-    Err(e) => eprintln!("Send failed: {}", e),
-}
-```
+The send pipeline derives `decrypt-fail="hide"` for eligible add-ons and infrastructure content. It unwraps content before classification and attaches the attribute to encrypted nodes. Revokes are excluded from the edit-based rule. See the pinned send source for the complete predicate; callers do not need a second copied list of protobuf variants.

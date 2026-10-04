@@ -645,7 +645,7 @@ Access group management operations.
 - `resolve_participant_addresses(&mut GroupMetadata)` - Opt-in LID → PN backfill on fetched metadata
 - `create_group(options: GroupCreateOptions)` - Create a new group
 - `set_subject(jid: &Jid, subject: GroupSubject)` - Change group name
-- `set_description(jid: &Jid, desc: Option<GroupDescription>, prev: PreviousDescription<'_>)` - Change description; `prev` is an optimistic-concurrency token ([`PreviousDescription::Resolve`](/api/groups#previousdescription) reads the current one for you)
+- `set_description(jid: &Jid, desc: Option<GroupDescription>, prev: PreviousDescription<'_>)` - Change description; `prev` is an optimistic-concurrency token ([`PreviousDescription::Resolve`](/api/groups#set_description) reads the current one for you)
 - `leave(jid: &Jid)` - Leave a group
 - `add_participants(jid: &Jid, participants: &[Jid])` - Add members
 - `remove_participants(jid: &Jid, participants: &[Jid])` - Remove members
@@ -881,7 +881,7 @@ Access newsletter (channel) operations.
 - `subscribe_live_updates(jid: &Jid)` - Subscribe to real-time updates
 
 <Note>
-Newsletter message sending is handled by the unified [`client.send_message()`](/api/send#send_message) method — pass a newsletter JID and the message is sent as plaintext automatically. See the [Send API](/api/send#send_message) for details.
+Newsletter message sending is handled by the unified [`client.send_message()`](/api/send#send) method — pass a newsletter JID and the message is sent as plaintext automatically. See the [Send API](/api/send#send) for details.
 </Note>
 
 **Example:**
@@ -995,7 +995,7 @@ let (enc_type, ciphertext) = client.signal().encrypt_message(&jid, plaintext).aw
 ```
 
 <Warning>
-These are low-level APIs that bypass the high-level message sending pipeline. Most users should use [`send_message()`](/api/send#send_message) which handles encryption automatically.
+These are low-level APIs that bypass the high-level message sending pipeline. Most users should use [`send_message()`](/api/send#send) which handles encryption automatically.
 </Warning>
 
 See [Signal API](/api/signal) for full documentation.
@@ -1169,7 +1169,7 @@ The `LearningSource` enum indicates how a LID-PN mapping was discovered. The sou
 </Note>
 
 <Note>
-  History sync's own harvesting logic collapses its two mapping sources to one pair per LID before either reaches this policy. The bulk block outranks a conversation-derived pair naming the same LID or phone number. Ties within one source keep the first occurrence. See [PN/LID mapping cache — LID-PN mappings](/concepts/storage#lid-pn-mappings) ([#1345](https://github.com/oxidezap/whatsapp-rust/pull/1345)).
+  History sync's own harvesting logic collapses its two mapping sources to one pair per LID before either reaches this policy. The bulk block outranks a conversation-derived pair naming the same LID or phone number. Ties within one source keep the first occurrence. See [PN/LID mapping cache — LID-PN mappings](/concepts/storage#cache-coherence) ([#1345](https://github.com/oxidezap/whatsapp-rust/pull/1345)).
 </Note>
 
 #### Refresh on `refresh_lid` acks
@@ -1367,7 +1367,7 @@ Features like group privacy token attachment query the `AbPropsCache` to check w
 
 The client maintains an in-memory `AbPropsCache` that stores server-side A/B experiment properties. The cache is populated each time `fetch_props()` runs (automatically on connect) and is **not persisted** — props are re-fetched on every connection.
 
-Features query the cache by passing a typed `AbProp` constant from the vendored [`wacore::iq::abprops`](/api/wacore#a-b-props-registry) registry. A bool prop is considered enabled when its value is `"1"`, `"true"`, or `"enabled"` (case-insensitive), falling back to the registry default when the server didn't send it.
+Features query the cache by passing a typed `AbProp` constant from the vendored [`wacore::iq::abprops`](/api/wacore#a/b-props-registry) registry. A bool prop is considered enabled when its value is `"1"`, `"true"`, or `"enabled"` (case-insensitive), falling back to the registry default when the server didn't send it.
 
 ```rust
 use whatsapp_rust::wacore::iq::abprops::web;
@@ -1428,7 +1428,7 @@ Returns `None` when the client holds no value for `prop`:
 Unlike [`AbPropsCache::is_enabled`](#ab-props-cache), `ab_prop_enabled` does not substitute the registry default, so a caller can tell "off" from "unknown". A cached value is truthy when it equals `"1"`, `"true"`, or `"enabled"` (case-insensitive).
 
 <ParamField path="prop" type="AbProp" required>
-  Typed flag from [`wacore::iq::abprops`](/api/wacore#a-b-props-registry).
+  Typed flag from [`wacore::iq::abprops`](/api/wacore#a/b-props-registry).
 </ParamField>
 
 **Example:**
@@ -1696,7 +1696,7 @@ Consequences a consumer must plan for:
 
 - **Be idempotent and order-guarded.** The replay may re-deliver mutations the consumer already applied.
 - **Clear before replay** if the goal is to purge records the server dropped. Empty the local mirror of the collection first, then call `resync_app_state_collection`.
-- **Report is about the sync, not the mirror.** A collection reported `synced` only guarantees the server response was fetched, applied, and persisted, and mutations were dispatched to the event bus. It does not mean handlers have run. Under [`EventDelivery::Ordered`](/api/bot#eventdelivery), a full mailbox can drop callbacks.
+- **Report is about the sync, not the mirror.** A collection reported `synced` only guarantees the server response was fetched, applied, and persisted, and mutations were dispatched to the event bus. It does not mean handlers have run. Under [`EventDelivery::Ordered`](/api/bot#with_event_delivery), a full mailbox can drop callbacks.
 
 #### AppStateResyncReport
 
@@ -2302,7 +2302,7 @@ Any `pkmsg` referencing those old IDs will fail permanently with `InvalidPreKeyI
 **Behavior:**
 
 - Acquires the internal `prekey_upload_lock` so this force-upload cannot race with the count-based and digest-repair upload paths
-- Uploads a full batch of [`Client::wanted_pre_key_count()`](#wanted_pre_key_count) pre-keys (default 812, configurable via [`BotBuilder::with_wanted_pre_key_count`](/api/bot#with-wanted-pre-key-count) or [`set_wanted_pre_key_count`](#set_wanted_pre_key_count)) with Fibonacci retry backoff (1s, 2s, 3s, 5s, 8s, ... capped at 610s)
+- Uploads a full batch of [`Client::wanted_pre_key_count()`](#wanted_pre_key_count) pre-keys (default 812, configurable via [`BotBuilder::with_wanted_pre_key_count`](/api/bot#with_wanted_pre_key_count) or [`set_wanted_pre_key_count`](#set_wanted_pre_key_count)) with Fibonacci retry backoff (1s, 2s, 3s, 5s, 8s, ... capped at 610s)
 - Retries until success or the connection is lost
 
 <Warning>
@@ -2560,7 +2560,7 @@ if let Some(alloc) = report.alloc {
 ```
 
 <Note>
-  Storage, transport, and HTTP reports are supplied by the trait implementations behind `Client` — see [`DeviceStore::resource_report`](/api/store#resource_report), [`Transport::resource_report`](/api/transport#resource_report), and [`HttpClient::resource_report`](/api/http-client#resource_report). `AllocSnapshot`, `StorageResourceReport`, `TransportResourceReport`, and `HttpResourceReport` are re-exported from `wacore::stats`; all four are also re-exported from the `whatsapp_rust` crate root.
+  Storage, transport, and HTTP reports are supplied by the trait implementations behind `Client` — see [`DeviceStore::resource_report`](/api/store#resource-reports), [`Transport::resource_report`](/api/transport#resource_report), and [`HttpClient::resource_report`](/api/http-client#resource_report). `AllocSnapshot`, `StorageResourceReport`, `TransportResourceReport`, and `HttpResourceReport` are re-exported from `wacore::stats`; all four are also re-exported from the `whatsapp_rust` crate root.
 </Note>
 
 ### device_memo_stats

@@ -3,735 +3,46 @@ title: Custom Backends
 description: Learn how to implement custom storage, transport, and HTTP backends for whatsapp-rust
 ---
 
+<Note>
+Examples on this page target [source snapshot `54ce6cd`](https://github.com/oxidezap/whatsapp-rust/tree/54ce6cd9007f4361a07dbad50718973bbf56e2e9), not a crates.io release. Use the [current API guide](/guides/current-api) to select the matching dependency.
+</Note>
+
+
 ## Overview
 
 This guide covers implementing custom backends for storage, network transport, and HTTP operations in whatsapp-rust. The library uses trait-based abstractions to allow full customization.
 
 ## Storage backend architecture
 
-The storage backend is split into five domain-grouped traits:
+A `Backend` implements five traits: `SignalStore`, `AppSyncStore`, `ProtocolStore`, `MsgSecretStore` and `DeviceStore`. The blanket implementation supplies `Backend` once all five are implemented. A four-trait adapter is incomplete.
 
-1. **SignalStore** - Signal protocol cryptography (identities, sessions, keys)
-2. **AppSyncStore** - WhatsApp app state synchronization
-3. **ProtocolStore** - WhatsApp Web protocol alignment (SKDM, LID mapping, device registry)
-4. **DeviceStore** - Device persistence operations
-5. **MsgSecretStore** - Persist and validate message secrets for encrypted add-ons
+Use the pinned trait source for exact required methods and its Rustdoc for default behavior. Your database schema and transaction implementation remain adapter-specific; copying a partial SQL sketch is not a complete backend implementation.
 
-See [Store API reference](/api/store) for the complete trait definitions.
+## Implement the secret read boundary
 
-### Backend Trait
-
-Any type implementing all five traits automatically implements `Backend`:
+`MsgSecretStore::get_stored_msg_secret(chat, sender, id)` is required. Return a validated secret plus the parent's available timestamp. Do not return an arbitrary byte vector and assume the read is valid.
 
 ```rust
-use whatsapp_rust::wacore::store::traits::*;
+use whatsapp_rust::StoredMessageSecret;
+use whatsapp_rust::wacore::store::error::Result;
 
-pub trait Backend: SignalStore + AppSyncStore + ProtocolStore + MsgSecretStore + DeviceStore + Send + Sync {}
-
-impl<T> Backend for T 
-where 
-    T: SignalStore + AppSyncStore + ProtocolStore + MsgSecretStore + DeviceStore + Send + Sync
-{}
-```
-
-## Implementing a custom storage backend
-
-### Step 1: define your store
-
-```rust
-use std::sync::Arc;
-use async_trait::async_trait;
-use whatsapp_rust::wacore::store::traits::*;
-use whatsapp_rust::wacore::store::error::{Result, StoreError};
-
-#[derive(Clone)]
-pub struct MyCustomStore {
-    // Your storage implementation (database connection, file handle, etc.)
-    connection: Arc<MyConnection>,
-}
-
-impl MyCustomStore {
-    pub async fn new(connection_string: &str) -> Result<Self> {
-        let connection = MyConnection::connect(connection_string).await?;
-        Ok(Self {
-            connection: Arc::new(connection),
-        })
-    }
+fn read_projection(bytes: &[u8], parent_time: Option<i64>) -> Result<StoredMessageSecret> {
+    let stored = StoredMessageSecret::from_stored_bytes(bytes, parent_time.unwrap_or(0))?;
+    Ok(stored)
 }
 ```
 
-### Step 2: implement SignalStore
+Return `None` when there is no row. Unknown parent time is explicit `None`; a malformed secret returns `InvalidMessageSecret`. Implement `put_msg_secrets` and `delete_expired_msg_secrets` too. Preserve the expiry and timestamp conflict merge rules documented in [MsgSecretStore](/api/store#msgsecretstore).
 
-Handle Signal protocol cryptographic operations:
+## Preserve durability
 
-```rust
-use bytes::Bytes;
+Signal sessions and sender keys must become durable before publishing messages that advance their ratchets. Backend batching must preserve required ordering; an in-memory cache alone does not provide crash safety.
 
-#[async_trait]
-impl SignalStore for MyCustomStore {
-    // --- Identity Operations ---
-    
-    async fn put_identity(&self, address: &str, key: [u8; 32]) -> Result<()> {
-        self.connection.execute(
-            "INSERT OR REPLACE INTO identities (address, key) VALUES (?, ?)",
-            &[address, &key[..]],
-        ).await?;
-        Ok(())
-    }
-    
-    async fn load_identity(&self, address: &str) -> Result<Option<[u8; 32]>> {
-        let row = self.connection.query_optional(
-            "SELECT key FROM identities WHERE address = ?",
-            &[address],
-        ).await?;
-        Ok(row.map(|r| {
-            let bytes: Vec<u8> = r.get(0);
-            let mut arr = [0u8; 32];
-            arr.copy_from_slice(&bytes);
-            arr
-        }))
-    }
-    
-    async fn delete_identity(&self, address: &str) -> Result<()> {
-        self.connection.execute(
-            "DELETE FROM identities WHERE address = ?",
-            &[address],
-        ).await?;
-        Ok(())
-    }
-    
-    // --- Session Operations ---
-    
-    async fn get_session(&self, address: &str) -> Result<Option<Bytes>> {
-        let row = self.connection.query_optional(
-            "SELECT record FROM sessions WHERE address = ?",
-            &[address],
-        ).await?;
-        Ok(row.map(|r| Bytes::from(r.get::<Vec<u8>>(0))))
-    }
-    
-    async fn put_session(&self, address: &str, session: &[u8]) -> Result<()> {
-        self.connection.execute(
-            "INSERT OR REPLACE INTO sessions (address, record) VALUES (?, ?)",
-            &[address, session],
-        ).await?;
-        Ok(())
-    }
-    
-    async fn delete_session(&self, address: &str) -> Result<()> {
-        self.connection.execute(
-            "DELETE FROM sessions WHERE address = ?",
-            &[address],
-        ).await?;
-        Ok(())
-    }
-    
-    // --- PreKey Operations ---
-    
-    async fn store_prekey(&self, id: u32, record: &[u8], uploaded: bool) -> Result<()> {
-        self.connection.execute(
-            "INSERT OR REPLACE INTO prekeys (id, record, uploaded) VALUES (?, ?, ?)",
-            &[&id, record, &(uploaded as i32)],
-        ).await?;
-        Ok(())
-    }
-    
-    async fn load_prekey(&self, id: u32) -> Result<Option<Bytes>> {
-        let row = self.connection.query_optional(
-            "SELECT record FROM prekeys WHERE id = ?",
-            &[&id],
-        ).await?;
-        Ok(row.map(|r| Bytes::from(r.get::<Vec<u8>>(0))))
-    }
+For crash replay, implement the pending-inbound methods on `ProtocolStore`. Store the pending payload before acknowledgement, and clear it only at the documented commit boundary. The consumer hook still needs idempotent commits by `(chat, sender, id)` because a crash can occur after the application's commit and before the server receives its ACK. See [inbound durability](/advanced/inbound-durability).
 
-    // Override load_prekeys_batch for better performance (default loops over load_prekey)
-    async fn load_prekeys_batch(&self, ids: &[u32]) -> Result<Vec<(u32, Bytes)>> {
-        let placeholders = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
-        let query = format!("SELECT id, record FROM prekeys WHERE id IN ({})", placeholders);
-        let rows = self.connection.query_all(&query, ids).await?;
-        Ok(rows.iter().map(|r| (r.get(0), Bytes::from(r.get::<Vec<u8>>(1)))).collect())
-    }
-    
-    async fn remove_prekey(&self, id: u32) -> Result<()> {
-        self.connection.execute(
-            "DELETE FROM prekeys WHERE id = ?",
-            &[&id],
-        ).await?;
-        Ok(())
-    }
-    
-    async fn get_max_prekey_id(&self) -> Result<u32> {
-        let row = self.connection.query_optional(
-            "SELECT MAX(id) FROM prekeys",
-            &[],
-        ).await?;
-        Ok(row.and_then(|r| r.get(0)).unwrap_or(0))
-    }
-    
-    // --- Signed PreKey Operations ---
-    
-    async fn store_signed_prekey(&self, id: u32, record: &[u8]) -> Result<()> {
-        self.connection.execute(
-            "INSERT OR REPLACE INTO signed_prekeys (id, record) VALUES (?, ?)",
-            &[&id, record],
-        ).await?;
-        Ok(())
-    }
-    
-    async fn load_signed_prekey(&self, id: u32) -> Result<Option<Vec<u8>>> {
-        let row = self.connection.query_optional(
-            "SELECT record FROM signed_prekeys WHERE id = ?",
-            &[&id],
-        ).await?;
-        Ok(row.map(|r| r.get(0)))
-    }
-    
-    async fn load_all_signed_prekeys(&self) -> Result<Vec<(u32, Vec<u8>)>> {
-        let rows = self.connection.query(
-            "SELECT id, record FROM signed_prekeys",
-            &[],
-        ).await?;
-        Ok(rows.into_iter().map(|r| (r.get(0), r.get(1))).collect())
-    }
-    
-    async fn remove_signed_prekey(&self, id: u32) -> Result<()> {
-        self.connection.execute(
-            "DELETE FROM signed_prekeys WHERE id = ?",
-            &[&id],
-        ).await?;
-        Ok(())
-    }
-    
-    // --- Sender Key Operations ---
-    
-    async fn put_sender_key(&self, address: &str, record: &[u8]) -> Result<()> {
-        self.connection.execute(
-            "INSERT OR REPLACE INTO sender_keys (address, record) VALUES (?, ?)",
-            &[address, record],
-        ).await?;
-        Ok(())
-    }
-    
-    async fn get_sender_key(&self, address: &str) -> Result<Option<Vec<u8>>> {
-        let row = self.connection.query_optional(
-            "SELECT record FROM sender_keys WHERE address = ?",
-            &[address],
-        ).await?;
-        Ok(row.map(|r| r.get(0)))
-    }
-    
-    async fn delete_sender_key(&self, address: &str) -> Result<()> {
-        self.connection.execute(
-            "DELETE FROM sender_keys WHERE address = ?",
-            &[address],
-        ).await?;
-        Ok(())
-    }
-}
-```
+Device-scoped operations must isolate one account from another. `DeviceStore::resource_report` describes account-scoped storage; database-wide readers and adapters have a separate scope. Register an owned adapter with `with_backend` or an `Arc<dyn Backend>` with `with_backend_arc`.
 
-See [Store API reference](/api/store#signal-store) for all SignalStore methods.
-
-<Note>
-`delete_identity`, `delete_session`, `remove_prekey`, and `delete_sender_key` each have a batch counterpart (`delete_identities_batch`, `delete_sessions_batch`, `remove_prekeys_batch`, `delete_sender_keys_batch`) that the signal-cache flush uses to drop many rows — an offline drain's consumed pre-keys, or an identity reset's sessions — in one call instead of one call per row. Like `load_prekeys_batch` above, each defaults to looping the single-row method, so this example compiles and works as shown; override them with a single transaction and an `IN (...)` list (the same shape as the `load_prekeys_batch` override) if your backend supports transactions. See [SignalStoreCache: batched deletes](/concepts/storage#signalstorecache) for measured numbers.
-</Note>
-
-### Step 3: implement AppSyncStore
-
-Handle WhatsApp app state synchronization. This example's `app_state_versions` table needs a `bootstrapped` column alongside `name`, `version`, and `hash`. If you already have this table from before that field existed, add it first:
-
-```sql
-ALTER TABLE app_state_versions
-ADD COLUMN bootstrapped BOOLEAN NOT NULL DEFAULT FALSE;
-```
-
-```rust
-use whatsapp_rust::wacore::appstate::hash::HashState;
-use wacore_appstate::processor::AppStateMutationMAC;
-
-#[async_trait]
-impl AppSyncStore for MyCustomStore {
-    async fn get_sync_key(&self, key_id: &[u8]) -> Result<Option<AppStateSyncKey>> {
-        let row = self.connection.query_optional(
-            "SELECT key_data, fingerprint, timestamp FROM app_state_sync_keys WHERE key_id = ?",
-            &[key_id],
-        ).await?;
-        
-        Ok(row.map(|r| AppStateSyncKey {
-            key_data: r.get(0),
-            fingerprint: r.get(1),
-            timestamp: r.get(2),
-        }))
-    }
-    
-    async fn set_sync_key(&self, key_id: &[u8], key: AppStateSyncKey) -> Result<()> {
-        self.connection.execute(
-            "INSERT OR REPLACE INTO app_state_sync_keys (key_id, key_data, fingerprint, timestamp) VALUES (?, ?, ?, ?)",
-            &[key_id, &key.key_data[..], &key.fingerprint[..], &key.timestamp],
-        ).await?;
-        Ok(())
-    }
-    
-    async fn get_version(&self, name: &str) -> Result<Option<HashState>> {
-        // `None` means "never synced" — don't collapse it to `HashState::default()`.
-        // A collection that synced and is legitimately empty also sits at version 0
-        // with an all-zero ltHash, and the two are indistinguishable once merged.
-        let row = self.connection.query_optional(
-            "SELECT version, hash, bootstrapped FROM app_state_versions WHERE name = ?",
-            &[name],
-        ).await?;
-        
-        Ok(row.map(|r| HashState {
-            version: r.get(0),
-            hash: r.get(1),
-            bootstrapped: r.get(2),
-            ..Default::default()
-        }))
-    }
-    
-    async fn delete_version(&self, name: &str) -> Result<()> {
-        // Returns the collection to the never-synced state, so the next sync
-        // bootstraps it from a fresh snapshot instead of resuming.
-        self.connection.execute(
-            "DELETE FROM app_state_versions WHERE name = ?",
-            &[name],
-        ).await?;
-        Ok(())
-    }
-    
-    async fn set_version(&self, name: &str, state: HashState) -> Result<()> {
-        self.connection.execute(
-            "INSERT OR REPLACE INTO app_state_versions (name, version, hash, bootstrapped) VALUES (?, ?, ?, ?)",
-            &[name, &state.version, &state.hash[..], &state.bootstrapped],
-        ).await?;
-        Ok(())
-    }
-    
-    async fn put_mutation_macs(
-        &self,
-        name: &str,
-        version: u64,
-        mutations: &[AppStateMutationMAC],
-    ) -> Result<()> {
-        for mutation in mutations {
-            self.connection.execute(
-                "INSERT INTO mutation_macs (name, version, index_mac, value_mac) VALUES (?, ?, ?, ?)",
-                &[name, &version, &mutation.index_mac[..], &mutation.value_mac[..]],
-            ).await?;
-        }
-        Ok(())
-    }
-    
-    async fn get_mutation_mac(&self, name: &str, index_mac: &[u8]) -> Result<Option<Vec<u8>>> {
-        let row = self.connection.query_optional(
-            "SELECT value_mac FROM mutation_macs WHERE name = ? AND index_mac = ?",
-            &[name, index_mac],
-        ).await?;
-        Ok(row.map(|r| r.get(0)))
-    }
-    
-    async fn delete_mutation_macs(&self, name: &str, index_macs: &[Vec<u8>]) -> Result<()> {
-        for index_mac in index_macs {
-            self.connection.execute(
-                "DELETE FROM mutation_macs WHERE name = ? AND index_mac = ?",
-                &[name, &index_mac[..]],
-            ).await?;
-        }
-        Ok(())
-    }
-    
-    async fn get_latest_sync_key_id(&self) -> Result<Option<Vec<u8>>> {
-        let row = self.connection.query_optional(
-            "SELECT key_id FROM app_state_sync_keys ORDER BY timestamp DESC LIMIT 1",
-            &[],
-        ).await?;
-        Ok(row.map(|r| r.get(0)))
-    }
-}
-```
-
-See [Store API reference](/api/store#app-sync-store) for all AppSyncStore methods.
-
-### Step 4: implement ProtocolStore
-
-Handle WhatsApp Web protocol alignment:
-
-```rust
-use whatsapp_rust::wacore_binary::jid::Jid;
-
-#[async_trait]
-impl ProtocolStore for MyCustomStore {
-    // --- Per-Device Sender Key Tracking ---
-    
-    async fn get_sender_key_devices(&self, group_jid: &str) -> Result<Vec<(String, bool)>> {
-        let rows = self.connection.query(
-            "SELECT device_jid, has_key FROM sender_key_devices WHERE group_jid = ?",
-            &[group_jid],
-        ).await?;
-        
-        Ok(rows.into_iter()
-            .map(|r| (r.get::<String>(0), r.get::<i32>(1) != 0))
-            .collect())
-    }
-    
-    async fn set_sender_key_status(&self, group_jid: &str, entries: &[(&str, bool)]) -> Result<()> {
-        for (device_jid, has_key) in entries {
-            self.connection.execute(
-                "INSERT OR REPLACE INTO sender_key_devices (group_jid, device_jid, has_key, updated_at) VALUES (?, ?, ?, strftime('%s', 'now'))",
-                &[group_jid, device_jid, &(*has_key as i32)],
-            ).await?;
-        }
-        Ok(())
-    }
-    
-    async fn clear_sender_key_devices(&self, group_jid: &str) -> Result<()> {
-        self.connection.execute(
-            "DELETE FROM sender_key_devices WHERE group_jid = ?",
-            &[group_jid],
-        ).await?;
-        Ok(())
-    }
-    
-    // --- LID-PN Mapping ---
-    
-    async fn get_lid_mapping(&self, lid: &str) -> Result<Option<LidPnMappingEntry>> {
-        let row = self.connection.query_optional(
-            "SELECT lid, phone_number, created_at, updated_at, learning_source FROM lid_pn_mappings WHERE lid = ?",
-            &[lid],
-        ).await?;
-        
-        Ok(row.map(|r| LidPnMappingEntry {
-            lid: r.get(0),
-            phone_number: r.get(1),
-            created_at: r.get(2),
-            updated_at: r.get(3),
-            learning_source: r.get(4),
-        }))
-    }
-    
-    async fn get_pn_mapping(&self, phone: &str) -> Result<Option<LidPnMappingEntry>> {
-        let row = self.connection.query_optional(
-            "SELECT lid, phone_number, created_at, updated_at, learning_source FROM lid_pn_mappings WHERE phone_number = ? ORDER BY updated_at DESC LIMIT 1",
-            &[phone],
-        ).await?;
-        
-        Ok(row.map(|r| LidPnMappingEntry {
-            lid: r.get(0),
-            phone_number: r.get(1),
-            created_at: r.get(2),
-            updated_at: r.get(3),
-            learning_source: r.get(4),
-        }))
-    }
-    
-    async fn put_lid_mapping(&self, entry: &LidPnMappingEntry) -> Result<()> {
-        self.connection.execute(
-            "INSERT OR REPLACE INTO lid_pn_mappings (lid, phone_number, created_at, updated_at, learning_source) VALUES (?, ?, ?, ?, ?)",
-            &[&entry.lid, &entry.phone_number, &entry.created_at, &entry.updated_at, &entry.learning_source],
-        ).await?;
-        Ok(())
-    }
-    
-    async fn get_all_lid_mappings(&self) -> Result<Vec<LidPnMappingEntry>> {
-        let rows = self.connection.query(
-            "SELECT lid, phone_number, created_at, updated_at, learning_source FROM lid_pn_mappings",
-            &[],
-        ).await?;
-        
-        Ok(rows.into_iter().map(|r| LidPnMappingEntry {
-            lid: r.get(0),
-            phone_number: r.get(1),
-            created_at: r.get(2),
-            updated_at: r.get(3),
-            learning_source: r.get(4),
-        }).collect())
-    }
-    
-    // --- Sent Message Store (retry support) ---
-
-    async fn store_sent_message(
-        &self,
-        chat_jid: &str,
-        message_id: &str,
-        payload: &[u8],
-    ) -> Result<()> {
-        self.connection.execute(
-            "INSERT OR REPLACE INTO sent_messages (chat_jid, message_id, payload, created_at) VALUES (?, ?, ?, strftime('%s', 'now'))",
-            &[chat_jid, message_id, payload],
-        ).await?;
-        Ok(())
-    }
-
-    async fn take_sent_message(
-        &self,
-        chat_jid: &str,
-        message_id: &str,
-    ) -> Result<Option<Vec<u8>>> {
-        // Atomic read-and-delete
-        let row = self.connection.query_optional(
-            "DELETE FROM sent_messages WHERE chat_jid = ? AND message_id = ? RETURNING payload",
-            &[chat_jid, message_id],
-        ).await?;
-        Ok(row.map(|r| r.get(0)))
-    }
-
-    async fn delete_expired_sent_messages(&self, cutoff_timestamp: i64) -> Result<u32> {
-        let count = self.connection.execute(
-            "DELETE FROM sent_messages WHERE created_at < ?",
-            &[&cutoff_timestamp],
-        ).await?;
-        Ok(count as u32)
-    }
-
-    // ... Implement remaining methods (base_key, device_list, tc_token)
-}
-```
-
-See [Store API reference](/api/store#protocol-store) for all ProtocolStore methods.
-
-### Pending Inbound Buffer
-
-If you want to support the opt-in [`InboundDurabilityHook`](/advanced/inbound-durability), your backend must implement four additional `ProtocolStore` methods. Without them, `Bot::build()` rejects any attempt to register a durability hook with a `BotBuilderError::UnsupportedDurabilityBackend` error.
-
-<Note>
-Two further methods, `store_pending_inbound_batch` and `delete_pending_inbound_batch`, back the client's [inbound commit batching](/advanced/inbound-durability#batching) during the offline drain. Both default to looping the single-row methods below, so implementing just the four methods in this section is enough — your backend keeps working, just without batch atomicity. Override them if you want the whole batch committed in one transaction:
-
-```rust
-async fn store_pending_inbound_batch(&self, rows: &[PendingInboundRow<'_>]) -> Result<()> {
-    // device_id is *your* store's own field (like SqliteStore's), not a
-    // parameter — see the note on device_id scoping below.
-    let device_id = self.device_id;
-    // e.g. one multi-row INSERT inside a single transaction
-    self.connection.transaction(|tx| async move {
-        for row in rows {
-            tx.execute(
-                "INSERT OR REPLACE INTO pending_inbound_messages \
-                 (chat, sender, id, device_id, message, inserted_at) \
-                 VALUES (?, ?, ?, ?, ?, strftime('%s', 'now'))",
-                &[row.chat, row.sender, row.id, &device_id, row.message],
-            ).await?;
-        }
-        Ok(())
-    }).await
-}
-
-async fn delete_pending_inbound_batch(&self, keys: &[PendingInboundKey<'_>]) -> Result<()> {
-    let device_id = self.device_id;
-    self.connection.transaction(|tx| async move {
-        for key in keys {
-            tx.execute(
-                "DELETE FROM pending_inbound_messages WHERE chat = ? AND sender = ? AND id = ? AND device_id = ?",
-                &[key.chat, key.sender, key.id, &device_id],
-            ).await?;
-        }
-        Ok(())
-    }).await
-}
-```
-
-The bundled `SqliteStore` overrides both this way, so the offline-drain batcher pays one Diesel transaction per batch instead of one round-trip per message.
-</Note>
-
-The default trait implementations **fail closed** (return an error) rather than silently degrading to at-most-once, so you only need to override them if your backend opts in.
-
-<Note>
-`store_pending_inbound`/`get_pending_inbound`/`delete_pending_inbound`/`delete_expired_pending_inbound` and their batch counterparts do **not** take `device_id` as a parameter — `(chat, sender, id)` is the whole key on the trait. A store that serves a single account scopes rows by `(chat, sender, id)` alone. If your backend is a **shared multi-account store** (one table/connection serving several `SqliteStore`-like instances), scope rows by your own instance's device id internally, the same way the bundled `SqliteStore` reads its own `self.device_id` field rather than accepting it as an argument.
-</Note>
-
-```rust
-#[async_trait]
-impl ProtocolStore for MyCustomStore {
-    // ... other methods ...
-
-    // --- Pending Inbound Buffer (required for InboundDurabilityHook) ---
-    //
-    // Keyed by (chat, sender, id): stanza ids are only unique within a
-    // (chat, sender) pair. `self.device_id` scopes rows to this store
-    // instance for backends sharing one table across accounts/devices —
-    // it is not part of the trait signature.
-
-    async fn store_pending_inbound(
-        &self,
-        chat: &str,
-        sender: &str,
-        id: &str,
-        message: &[u8],
-    ) -> Result<()> {
-        let device_id = self.device_id;
-        self.connection.execute(
-            "INSERT OR REPLACE INTO pending_inbound_messages \
-             (chat, sender, id, device_id, message, inserted_at) \
-             VALUES (?, ?, ?, ?, ?, strftime('%s', 'now'))",
-            &[chat, sender, id, &device_id, message],
-        ).await?;
-        Ok(())
-    }
-
-    async fn get_pending_inbound(
-        &self,
-        chat: &str,
-        sender: &str,
-        id: &str,
-    ) -> Result<Option<Vec<u8>>> {
-        let device_id = self.device_id;
-        let row = self.connection.query_optional(
-            "SELECT message FROM pending_inbound_messages \
-             WHERE chat = ? AND sender = ? AND id = ? AND device_id = ?",
-            &[chat, sender, id, &device_id],
-        ).await?;
-        Ok(row.map(|r| r.get(0)))
-    }
-
-    async fn delete_pending_inbound(
-        &self,
-        chat: &str,
-        sender: &str,
-        id: &str,
-    ) -> Result<()> {
-        let device_id = self.device_id;
-        self.connection.execute(
-            "DELETE FROM pending_inbound_messages \
-             WHERE chat = ? AND sender = ? AND id = ? AND device_id = ?",
-            &[chat, sender, id, &device_id],
-        ).await?;
-        Ok(())
-    }
-
-    // Called unconditionally by the keepalive sweep on every backend.
-    // Must return Ok(0) for backends that have no buffer rather than erroring.
-    async fn delete_expired_pending_inbound(&self, cutoff_timestamp: i64) -> Result<u32> {
-        let device_id = self.device_id;
-        let count = self.connection.execute(
-            "DELETE FROM pending_inbound_messages \
-             WHERE device_id = ? AND inserted_at < ?",
-            &[&device_id, &cutoff_timestamp],
-        ).await?;
-        Ok(count as u32)
-    }
-}
-```
-
-The recommended schema (matching the bundled SQLite migration):
-
-```sql
-CREATE TABLE pending_inbound_messages (
-    chat        TEXT    NOT NULL,
-    sender      TEXT    NOT NULL,
-    id          TEXT    NOT NULL,
-    message     BLOB    NOT NULL,
-    device_id   INTEGER NOT NULL DEFAULT 1,
-    inserted_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
-    PRIMARY KEY (chat, sender, id, device_id)
-);
-
--- For the per-device retention sweep (delete_expired_pending_inbound).
-CREATE INDEX idx_pending_inbound_inserted
-    ON pending_inbound_messages (device_id, inserted_at);
-```
-
-<Note>
-The `device_id` column exists so one shared table can serve multiple accounts/devices without cross-account collisions — the bundled `SqliteStore` has one such table per account and always filters by its own `self.device_id`. A backend with one table per account can drop the column and the `device_id` predicate entirely.
-</Note>
-
-<Note>
-The `message` column stores the proto-serialized `wa::Message` bytes. The client writes them before the Signal ratchet advances so that a crash between the buffer write and the hook return can replay the exact same decrypted bytes on redelivery.
-</Note>
-
-### Step 5: implement DeviceStore
-
-Handle device data persistence:
-
-```rust
-use whatsapp_rust::wacore::store::Device;
-
-#[async_trait]
-impl DeviceStore for MyCustomStore {
-    async fn save(&self, device: &Device) -> Result<()> {
-        // Serialize device data (use your preferred format)
-        let serialized = bincode::serialize(device)
-            .map_err(|e| StoreError::Serialization(Box::new(e)))?;
-        
-        self.connection.execute(
-            "UPDATE devices SET data = ? WHERE id = 1",
-            &[&serialized[..]],
-        ).await?;
-        Ok(())
-    }
-    
-    async fn load(&self) -> Result<Option<Device>> {
-        let row = self.connection.query_optional(
-            "SELECT data FROM devices WHERE id = 1",
-            &[],
-        ).await?;
-        
-        match row {
-            Some(r) => {
-                let data: Vec<u8> = r.get(0);
-                let device = bincode::deserialize(&data)
-                    .map_err(|e| StoreError::Serialization(Box::new(e)))?;
-                Ok(Some(device))
-            }
-            None => Ok(None),
-        }
-    }
-    
-    async fn exists(&self) -> Result<bool> {
-        let row = self.connection.query_optional(
-            "SELECT 1 FROM devices WHERE id = 1",
-            &[],
-        ).await?;
-        Ok(row.is_some())
-    }
-    
-    async fn create(&self) -> Result<i32> {
-        self.connection.execute(
-            "INSERT INTO devices (id, data) VALUES (1, ?)",
-            &[&Vec::<u8>::new()],
-        ).await?;
-        Ok(1)
-    }
-    
-    async fn snapshot_db(&self, name: &str, extra_content: Option<&[u8]>) -> Result<()> {
-        // Optional: Implement database snapshotting for debugging
-        Ok(())
-    }
-}
-```
-
-See [Store API reference](/api/store#device-store) for all DeviceStore methods.
-
-### Step 6: implement MsgSecretStore
-
-Your backend also needs these required methods:
-
-```rust
-async fn put_msg_secrets(&self, entries: Vec<MsgSecretEntry>) -> Result<usize>;
-async fn get_stored_msg_secret(
-    &self, chat: &str, sender: &str, msg_id: &str,
-) -> Result<Option<StoredMessageSecret>>;
-async fn delete_expired_msg_secrets(&self, cutoff_timestamp: i64) -> Result<u32>;
-```
-
-Key records by chat, original sender, and message ID, scoped to your account. Persist both expiry and parent event time. Validate bytes when reading with `StoredMessageSecret::from_stored_bytes`; an invalid length is `StoreError::InvalidMessageSecret`, not a missing record. An unknown event time is `None` and a zero expiry means retain indefinitely.
-
-The single-secret write and byte-vector read have defaults built on these methods. Preserve the later deadline on an upsert, treating zero as indefinite, and the later nonzero parent timestamp. See [MsgSecretStore](/api/store#msgsecretstore) for the full contract.
-
-### Using your custom backend
-
-```rust
-use whatsapp_rust::bot::Bot;
-use whatsapp_rust::TokioRuntime;
-
-let backend = Arc::new(MyCustomStore::new("my://connection").await?);
-
-let bot = Bot::builder()
-    .with_backend_arc(backend)
-    .with_transport_factory(transport_factory)
-    .with_http_client(http_client)
-    .with_runtime(TokioRuntime)
-    .build()
-    .await?;
-```
+[Storage trait reference](https://github.com/oxidezap/whatsapp-rust/blob/54ce6cd9007f4361a07dbad50718973bbf56e2e9/wacore/src/store/traits.rs) · [SQLite reference implementation](https://github.com/oxidezap/whatsapp-rust/blob/54ce6cd9007f4361a07dbad50718973bbf56e2e9/storages/sqlite-storage/src/lib.rs)
 
 ## Custom Runtime
 
@@ -869,7 +180,7 @@ To route all traffic through a proxy, you need to configure **both** layers.
 Use `TokioWebSocketTransportFactory::with_connector` to supply a custom TLS `Connector` — for example, adding custom CA certificates or client certificates:
 
 ```rust
-use whatsapp_rust::transport::{TokioWebSocketTransportFactory, Connector};
+use whatsapp_rust_tokio_transport::{TokioWebSocketTransportFactory, Connector};
 use tokio_rustls::TlsConnector;
 use rustls::RootCertStore;
 use std::sync::Arc;
@@ -908,7 +219,7 @@ See [Transport API reference](/api/transport#with_origin) for details.
 For full proxy support (SOCKS5, HTTP CONNECT, etc.), implement the `TransportFactory` trait directly. Establish the WebSocket connection through your proxy, then wrap it with `from_websocket`:
 
 ```rust
-use whatsapp_rust::transport::from_websocket;
+use whatsapp_rust_tokio_transport::from_websocket;
 use whatsapp_rust::wacore::net::{Transport, TransportEvent, TransportFactory};
 use async_trait::async_trait;
 use std::sync::Arc;
@@ -947,7 +258,7 @@ impl TransportFactory for ProxyTransportFactory {
 Use `UreqHttpClient::with_agent` to supply a pre-configured `ureq::Agent` with proxy settings:
 
 ```rust
-use whatsapp_rust::http::UreqHttpClient;
+use whatsapp_rust_ureq_http_client::UreqHttpClient;
 use ureq::config::Config;
 
 let agent: ureq::Agent = Config::builder()
@@ -1055,7 +366,7 @@ impl TransportFactory for MyCustomTransportFactory {
 }
 ```
 
-See [Transport API reference](/api/transport#transport-factory) for factory details.
+See [Transport API reference](/api/transport#transportfactory-trait) for factory details.
 
 ### Transport Events
 
@@ -1069,6 +380,7 @@ pub enum TransportEvent {
     Disconnected(DisconnectReason),
 }
 
+// Sketch: provide your runtime's AsyncRead and read_frame implementation.
 // Read pump example
 async fn read_pump(
     mut reader: impl AsyncRead,
@@ -1143,7 +455,7 @@ If your HTTP client doesn't support streaming, you only need to implement `execu
 
 The library includes a full SQLite implementation you can use as reference:
 
-See [Store API reference](/api/store#sqlite-store) for the SQLite implementation details.
+See [Store API reference](/api/store#sqlitestore-implementation) for the SQLite implementation details.
 
 ### Key Features
 
@@ -1178,7 +490,7 @@ Implement the `CacheStore` trait from `wacore::store::cache`:
 use async_trait::async_trait;
 use std::time::Duration;
 // You can import from either location:
-// use wacore::store::cache::CacheStore;
+// use whatsapp_rust::wacore::store::cache::CacheStore;
 use whatsapp_rust::CacheStore;
 
 pub struct MyRedisCacheStore {
@@ -1312,16 +624,14 @@ let bot = Bot::builder()
     .with_transport_factory(transport)
     .with_http_client(http_client)
     .with_runtime(TokioRuntime)
-    .with_cache_config({
-    let mut options = CacheConfig::default();
-    options.cache_stores = {
-    let mut options = CacheStores::default();
-    options.group_cache = Some(redis.clone());
-    options.device_registry_cache = Some(redis.clone());
-    options
-};
-    options
-})
+    .with_cache_config(CacheConfig {
+        cache_stores: CacheStores {
+            group_cache: Some(redis.clone()),
+            device_registry_cache: Some(redis.clone()),
+            ..Default::default()
+        },
+        ..Default::default()
+    })
     .build()
     .await?;
 ```
@@ -1329,10 +639,9 @@ let bot = Bot::builder()
 Or route all pluggable caches to the same backend:
 
 ```rust
-let config = {
-    let mut options = CacheConfig::default();
-    options.cache_stores = CacheStores::all(redis.clone());
-    options
+let config = CacheConfig {
+    cache_stores: CacheStores::all(redis.clone()),
+    ..Default::default()
 };
 ```
 

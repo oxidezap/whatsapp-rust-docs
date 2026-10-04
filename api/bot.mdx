@@ -91,7 +91,7 @@ let bot = Bot::builder()
 ```
 
 <Tip>
-For multiple accounts, open one `SqliteDatabase` and obtain a store with `database.store(device_id)`. Configure the shared writer/read pools with `SqliteDatabase::open(path, config)`; see [SQLite storage](/api/store#sqlite-implementation) and [Storage tuning](/concepts/storage).
+For multiple accounts, open one `SqliteDatabase` and obtain a store with `database.store(device_id)`. Configure the shared writer/read pools with `SqliteDatabase::open(path, config)`; see [SQLite storage](/api/store#sqlitestore-implementation) and [Storage tuning](/concepts/storage).
 
 </Tip>
 
@@ -622,7 +622,7 @@ Register extra A/B props for the [`AbPropsCache`](/api/client#ab-props-cache) to
 The client discards every prop it does not watch while the catalog streams in, so the set is fixed on the builder before the first fetch. Calls accumulate.
 
 <ParamField path="props" type="impl IntoIterator<Item = AbProp>" required>
-  Typed flags from [`wacore::iq::abprops`](/api/wacore#a-b-props-registry). Pass a single-element array, a slice, or any iterator.
+  Typed flags from [`wacore::iq::abprops`](/api/wacore#a/b-props-registry). Pass a single-element array, a slice, or any iterator.
 </ParamField>
 
 **Example:**
@@ -692,7 +692,7 @@ Pair code runs concurrently with QR code pairing — whichever completes first w
 </Note>
 
 <Tip>
-The `companion_platform_display` shown on the phone is derived automatically from the resolved `platform_id` and a **canonicalized** OS derived from the device's `os` string: web variants emit `<Browser> (<OS>)` (Android `PlatformType`s map to `Chrome`, so they show as `Chrome (Android)` by default); explicit `AndroidPhone`/`AndroidTablet`/`AndroidAmbiguous` overrides emit `Android (<OS>)`. The OS is coerced into a small server-safe set (`Windows`/`Mac OS`/`Linux`/`Android`/`iOS`) because the pair-code server rejects a non-OS display with `bad-request` — an arbitrary branding `os` string falls back to `Linux`. Set `PairCodeOptions::display_os` to send a real, non-canonical OS name verbatim instead. See [Authentication — companion_platform_display](/concepts/authentication#companion-platform-display) for the full classification table.
+The `companion_platform_display` shown on the phone is derived automatically from the resolved `platform_id` and a **canonicalized** OS derived from the device's `os` string: web variants emit `<Browser> (<OS>)` (Android `PlatformType`s map to `Chrome`, so they show as `Chrome (Android)` by default); explicit `AndroidPhone`/`AndroidTablet`/`AndroidAmbiguous` overrides emit `Android (<OS>)`. The OS is coerced into a small server-safe set (`Windows`/`Mac OS`/`Linux`/`Android`/`iOS`) because the pair-code server rejects a non-OS display with `bad-request` — an arbitrary branding `os` string falls back to `Linux`. Set `PairCodeOptions::display_os` to send a real, non-canonical OS name verbatim instead. See [Authentication — companion_platform_display](/concepts/authentication#companion_platform_display) for the full classification table.
 </Tip>
 
 ### on_pair_code_refresh

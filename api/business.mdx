@@ -800,7 +800,7 @@ See [Contacts API](/api/contacts) for details.
 
 When sending interactive business messages (native-flow buttons for payments, CTAs, catalogs, etc.), the library automatically injects a `<biz>` stanza child node on the outgoing message. This means you can send `InteractiveMessage` with `NativeFlowMessage` content through `send_message` or `send(SendRequest)` without manually constructing business protocol nodes.
 
-See [Send API - Automatic business node detection](/api/send#automatic-business-node-detection) for the full list of supported button-to-flow mappings.
+Read the [pinned business classification and node builders](https://github.com/oxidezap/whatsapp-rust/blob/54ce6cd9007f4361a07dbad50718973bbf56e2e9/src/send/mod.rs#L1145) for button-to-flow mappings and envelope-dependent behavior.
 
 ## See also
 
@@ -808,4 +808,4 @@ See [Send API - Automatic business node detection](/api/send#automatic-business-
 - [MEX API](/api/mex) - GraphQL transport used by catalog, collections, and order lookup
 - [Contacts API](/api/contacts) - Check `is_business` flag on contacts
 - [Events](/concepts/events#businessstatusupdate) - Business status update events
-- [Send API](/api/send#automatic-business-node-detection) - Auto-detected `<biz>` stanza nodes
+- [Send API](/api/send#forwarding-and-metadata) - Auto-detected `<biz>` stanza nodes

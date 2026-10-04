@@ -1,0 +1,54 @@
+---
+title: Current API contracts
+description: Choose supported requests, message references and storage boundaries
+---
+
+## Select a matching source
+
+These examples use the merged source snapshot [54ce6cd](https://github.com/oxidezap/whatsapp-rust/tree/54ce6cd9007f4361a07dbad50718973bbf56e2e9). The package's declared version does not prove that a main-branch API exists in the published crate. Use the pinned dependency from [installation](/installation) to compile these examples. For a released dependency, select its exact version in [Rustdoc](https://docs.rs/whatsapp-rust).
+
+## Sends and edits
+
+Use `send_text`, `send_message` or `forward_message` for default sends. Use `send(SendRequest::new(chat, message).with_options(options))` for custom options. Build `SendOptions` and `EditOptions` from `Default` with their typed setters.
+
+Pass `EditRequest::new(target, replacement)` to `edit_message`. Encrypted edits carry the original crypto creator and validated secret through `with_secret`. Keep the original target separately from the result's operation ID. See [sending](/api/send).
+
+## Message actions and identity
+
+Obtain `MessageRef` from `InboundMessage`, `MessageContext` or `SendResult`. For stored addressing, validate `MessageRef::new(chat, MessageId, original_sender, from_me)?`. Group and status references retain the original author. Construction validates shape and does not grant server permissions.
+
+Reactions, revokes, pins and keeps take that reference. Channel actions take `NewsletterMessageRef`: edits and revokes require the client `MessageId`; reactions and poll votes require the observed `ServerMessageId`. An outer `StanzaId` identifies the operation for ACK correlation. These IDs have separate purposes.
+
+## Polls and events
+
+Creation returns `Result<CreatedPoll, PollError>` or `Result<CreatedEvent, SendError>`. Read the send result, creator and secret through named accessors or transfer ownership with `into_parts()`. Persist the original ID, chat addressing, crypto creator and secret together before dropping the creation result if you need later updates.
+
+Use `vote(&PollRef, selected_options)` and `decrypt_vote_ref(ciphertext, &PollRef, voter)` for polls. `decrypt_vote` accepts explicit bytes, original ID and identities at an interop boundary. Event RSVPs use `respond(&EventRef, response, extra_guests)`. A later PN/LID alias does not replace the recorded crypto creator.
+
+Named results redact their debug representation. Exported secret bytes and the nested send protobuf remain sensitive. See [polls](/api/polls) and [events](/api/events).
+
+## Groups and communities
+
+Construct `GroupCreateOptions` with a required subject and `GroupParticipantOptions` with a JID. Build extensible mock outputs with `GroupMetadata::new` and `GroupParticipant::new`; use `..` in DTO patterns and a fallback when matching extensible enums.
+
+Choose overview, full metadata or routing projections according to the task. Preserve found, truncated, forbidden and missing batch outcomes.
+
+`CreateCommunityOptions::new(name)?` validates the subject; descriptions use `GroupDescription`. `ConfigurationFailed` means creation succeeded before follow-up configuration failed. Resume on `created_jid` rather than create a duplicate. Link/unlink failures are `SubgroupFailure` records; subgroup participant counts are `(Jid, u32)` tuples. See [groups](/api/groups) and [communities](/api/community).
+
+## Pictures and status
+
+Use `pictures().lookup(ProfilePictureRequest::new(target, size))` with an explicit contact, group or community target. An `Unchanged` result does not supply a new image, and a 429 remains an operational error with rejection metadata.
+
+Status posts need caller-selected recipients. Synced audience observations do not filter recipients automatically. Build `StatusSendOptions` with typed `MessageId` for content and `StanzaId` for operations; revokes retain the original audience. See [pictures](/api/pictures) and [status](/api/status).
+
+## Hooks and backend reads
+
+A backend implements all five traits: Signal, app state, protocol, message secrets and device storage. The required secret-store methods are `put_msg_secrets`, `get_stored_msg_secret` and `delete_expired_msg_secrets`. The named read returns a validated secret and optional parent timestamp. Unknown time is `None`; it is neither the epoch nor the expiry deadline. Preserve deterministic expiry and timestamp merges on writes. See [storage](/api/store#msgsecretstore).
+
+An inbound durability hook commits idempotently by `(chat, sender, message_id)` before returning success. PDO placeholder recovery is event-only; a later encrypted retry still crosses the durability gate even if its equivalent event was already published. See [inbound durability](/advanced/inbound-durability).
+
+## SQLite database and account scope
+
+Use `SqliteStore::open` for the default account. Configure resources with `SqliteDatabaseConfig` when opening `SqliteDatabase`. Select with `store(id)`, provision a chosen unused ID with `provision_device`, or allocate with `create_device`. Enumeration, reset and removal belong to the database facade.
+
+Selection does not create a row. Stop an account's background tasks before reset/removal; retained handles are not revoked. Keep writer `pool_size` at 1 and use `read_pool_size` for eligible concurrent reads. Count database-wide resource reports once per database. See [storage tasks](/api/store).

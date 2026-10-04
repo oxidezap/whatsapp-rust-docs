@@ -486,7 +486,7 @@ pub(crate) async fn resolve_dm_wire_jid(&self, to: &Jid) -> Jid {
 
 `Client::is_lid_migrated()` is `true` when either is true:
 
-1. The persisted `Device.lid_migrated` flag (see [Storage — DeviceStore](/concepts/storage#devicestore)), set once from the primary's `pair-success` `<client-props>` (`isChatDbLidMigrated`) or from a `lid_migration_mapping_sync_message` protocol message pushed to the primary's own companions (self-only — see [Authentication — one-to-one LID migration state](/concepts/authentication#one-to-one-lid-migration-state)).
+1. The persisted `Device.lid_migrated` flag (see [Storage — DeviceStore](/concepts/storage#storage-domains)), set once from the primary's `pair-success` `<client-props>` (`isChatDbLidMigrated`) or from a `lid_migration_mapping_sync_message` protocol message pushed to the primary's own companions (self-only — see [Authentication — one-to-one LID migration state](/concepts/authentication#one-to-one-lid-migration-state)).
 2. The `lid_one_on_one_migration_enabled` ab prop, as a fallback for sessions paired before the flag existed. The first observation of this prop being on also latches the persisted flag, so the account doesn't flap back to PN addressing before the next props fetch.
 
 Once set, `lid_migrated` never reverts for the same account — only pairing a *different* account onto the same store resets it. Signal session addressing (`resolve_encryption_jid`) and inbound decrypt are unaffected by any of this; only the outbound DM wire namespace is gated.
@@ -761,7 +761,7 @@ Before distributing sender keys, the group message path checks whether the local
 
 ### Per-device sender key tracking
 
-To avoid resending Sender Key Distribution Messages on every group message, the client tracks sender key distribution status **per device** for each group. This uses a unified `sender_key_devices` table (see [Storage - ProtocolStore](/concepts/storage#protocolstore)) that matches WhatsApp Web's `participant.senderKey Map<deviceJid, boolean>` model — a single boolean per device per group indicating whether that device has a valid sender key (`true`) or needs fresh SKDM distribution (`false`).
+To avoid resending Sender Key Distribution Messages on every group message, the client tracks sender key distribution status **per device** for each group. This uses a unified `sender_key_devices` table (see [Storage - ProtocolStore](/concepts/storage#storage-domains)) that matches WhatsApp Web's `participant.senderKey Map<deviceJid, boolean>` model — a single boolean per device per group indicating whether that device has a valid sender key (`true`) or needs fresh SKDM distribution (`false`).
 
 The tracking update is **deferred until after the server acknowledges** the message stanza. This matches WhatsApp Web's behavior where `markHasSenderKey()` is only called after the server confirms receipt.
 
@@ -1078,7 +1078,7 @@ The per-batch upload count is configurable through the builder/factory API (defa
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| [`BotBuilder::with_wanted_pre_key_count`](/api/bot#with-wanted-pre-key-count) / [`Client::set_wanted_pre_key_count`](/api/client#set-wanted-pre-key-count) | 812 | Number of pre-keys generated and uploaded per batch. Clamped to `5..=65_535` at upload time. |
+| [`BotBuilder::with_wanted_pre_key_count`](/api/bot#with_wanted_pre_key_count) / [`Client::set_wanted_pre_key_count`](/api/client#set_wanted_pre_key_count) | 812 | Number of pre-keys generated and uploaded per batch. Clamped to `5..=65_535` at upload time. |
 | `MIN_PRE_KEY_COUNT` (private const) | 5 | Minimum server-side pre-key count before triggering an upload. |
 
 ```rust
@@ -1150,7 +1150,7 @@ Location: `src/prekeys.rs`, `src/retry.rs`
 
 When migrating a device from an external source (e.g., a Baileys session into an `InMemoryBackend`), the server may still hold pre-key IDs whose private key material you cannot reconstruct. Any `pkmsg` referencing those IDs will fail permanently with `InvalidPreKeyId`.
 
-The public `refresh_pre_keys()` method force-uploads a fresh batch of `Client::wanted_pre_key_count()` pre-keys (default 812; tunable via [`with_wanted_pre_key_count`](/api/bot#with-wanted-pre-key-count) / [`set_wanted_pre_key_count`](/api/client#set-wanted-pre-key-count)), giving the server new IDs the caller has locally. Old unmatched IDs drain naturally as peers consume them.
+The public `refresh_pre_keys()` method force-uploads a fresh batch of `Client::wanted_pre_key_count()` pre-keys (default 812; tunable via [`with_wanted_pre_key_count`](/api/bot#with_wanted_pre_key_count) / [`set_wanted_pre_key_count`](/api/client#set_wanted_pre_key_count)), giving the server new IDs the caller has locally. Old unmatched IDs drain naturally as peers consume them.
 
 ```rust
 // After restoring a session from another library
@@ -1416,7 +1416,7 @@ A live reload never surfaces this, since a trusted-incarnation reload (above) sk
 
 `SessionRecord::rebase_lease_after_sender_chain_reset()` closes this gap. As part of the same mutation that swaps in the fresh chain, it lowers the ceiling to at most one `SENDER_CHAIN_RESERVATION_BATCH`. It only ever lowers, never raises, so you can never publish a counter under a ceiling that isn't yet durable. The lowering happens atomically with the chain swap, so no snapshot can pair the retired chain with a ceiling rebased for it, or vice versa. Rebasing to one batch instead of zero keeps the fresh chain's first counters lease-covered, so steady-state ping-pong keeps its write-behind send path instead of paying a synchronous flush on the very next send. A chain that's *archived* rather than discarded keeps its claim on the lease instead: `promote_fresh_state` burns the outgoing state to the ceiling before resetting it.
 
-If a record already has a stranded ceiling — written by a build that predates this fix — it recovers on its own the next time you use that address; you don't need to delete the row by hand. See [undecodable session rows](/concepts/storage#signalstorecache).
+If a record already has a stranded ceiling — written by a build that predates this fix — it recovers on its own the next time you use that address; you don't need to delete the row by hand. See [undecodable session rows](/concepts/storage#cache-coherence).
 
 ### Waiving the counter lease
 

@@ -1,38 +1,51 @@
 ---
-title: "Events"
-description: "Create event messages and respond with validated creation references"
+title: Calendar events
+description: Create an event and send RSVP responses with its named creation result
 ---
 
-## create
+<Note>
+Examples on this page target [source snapshot `54ce6cd`](https://github.com/oxidezap/whatsapp-rust/tree/54ce6cd9007f4361a07dbad50718973bbf56e2e9), not a crates.io release. Use the [current API guide](/guides/current-api) to select the matching dependency.
+</Note>
+
+## Create an event
+
+Use the builder for the non-exhaustive `EventCreationParams`. Only the name is required; creation rejects a blank name before sending. Times are Unix seconds.
 
 ```rust
-use whatsapp_rust::{EventCreationParams, EventResponseType};
-let params = EventCreationParams::builder()
-    .name("Team offsite".into())
-    .description("Bring a laptop".into())
-    .build();
-let created = client.events().create(&chat, params).await?;
-let sent = created.send_result();
-println!("{}", sent.message_id);
-client.events().respond(&created.event_ref()?, EventResponseType::Going, Some(2)).await?;
+use whatsapp_rust::{Client, Jid, EventCreationParams, EventResponseType};
+
+async fn schedule(client: &Client, chat: &Jid) -> whatsapp_rust::anyhow::Result<()> {
+    let params = EventCreationParams::builder()
+        .name("Launch".to_owned())
+        .description("Release planning".to_owned())
+        .start_time(1_800_000_000)
+        .build();
+    let created = client.events().create(chat, params).await?;
+    client.events().respond(
+        &created.event_ref()?, EventResponseType::Going, None,
+    ).await?;
+    println!("{}", created.send_result().message_id);
+    Ok(())
+}
 ```
 
-`create` returns `Result<CreatedEvent, SendError>`. `CreatedEvent` carries the original `SendResult`, cryptographic creator `Jid`, and validated 32-byte `MessageSecret`. Read them with `send_result()`, `creator()`, and `secret()`. `event_ref()` borrows the association without cloning the protobuf. `into_parts()` transfers ownership explicitly.
+## Store the result
 
-## EventCreationParams
+The example above demonstrates an immediate RSVP. Before returning or dropping the result, persist its secret together with the original event ID, chat, original author/direction and exact crypto creator. Incoming responses require that retained association after `CreatedEvent` is gone.
 
-Use `EventCreationParams::builder()` with a required `name`. Optional fields are `description`, `start_time`, `end_time`, `join_link`, `location`, `is_scheduled_call`, and `extra_guests_allowed`. Times are Unix seconds. Blank names fail before send. The extensible DTO has no invalid all-default constructor; add `..` in patterns.
+`CreatedEvent` owns the send result, crypto creator and `MessageSecret`. Use `event_ref()` to borrow those for an RSVP. Use `into_parts()` when transferring ownership to storage. Do not destructure the result as the old tuple or infer the crypto creator from a PN/LID display alias.
 
-## respond
+`Debug` redacts the whole creation result. Explicitly reading its secret or nested protobuf exposes sensitive data.
 
-`respond(&EventRef, EventResponseType, Option<i32>)` sends an encrypted RSVP and returns its `SendResult`. `Going`, `NotGoing`, and `Maybe` are response choices. The creator must be the original crypto identity, not an assumed current PN/LID alias.
+## Respond to a received event
 
-For received or stored events, construct `EventRef::new(message_ref, &creator, &secret)?`. The host must associate matching addressing, creator, and secret; construction validates shape without proving that association. `respond_raw` is the explicit string/slice interop path and validates IDs and secret length before encryption.
+Combine `InboundMessage::message_ref()` with the original creator and validated secret using `EventRef::new`. `respond(&EventRef, response, extra_guests)` produces an encrypted RSVP. `respond_raw` is the explicit byte/ID interoperability entry point.
 
-## Secrets and inbound responses
+For manual RSVP decryption, the core helper `wacore::event::decrypt_event_response_with_secret` requires that same parent association. Do not reuse a vote's secret or a new send's ID.
 
-Before dropping `CreatedEvent`, persist `secret()` together with the original event ID, chat, original author/direction, and `creator()`. Keep the exact crypto creator even if a PN/LID alias changes later. Incoming RSVP decryption needs that association after the creation result is gone; retaining only `SendResult` is insufficient. Store secrets securely and validate retained bytes as `MessageSecret` when reading them.
+## Edit an event
 
-`MessageSecret` accepts exactly 32 bytes, redacts `Debug`, and zeroizes owned bytes on drop. `CreatedEvent` and `EventRef` redact their debug output too. Explicitly exposing `SendResult` or its protobuf can expose the embedded secret; do not log those values as if redaction still applied.
+Use `EditRequest::new(target, replacement).with_secret(created.creator(), created.secret())`. The target addresses the original content; the returned send result describes the edit operation. Read the [send task reference](/api/send#edit_message) before overriding operation IDs.
 
-Use `whatsapp_rust::wacore::event::decrypt_event_response_with_secret` for inbound encrypted RSVP data, with the stored original ID, creator, and responder identities. The library's receive path materializes supported encrypted add-ons. See [message references](/api/send#message-references-and-ids) and [poll secrets](/api/polls#creation-references).
+## Source reference
+[Event builder and facade](https://github.com/oxidezap/whatsapp-rust/blob/54ce6cd9007f4361a07dbad50718973bbf56e2e9/src/features/events.rs) · [CreatedEvent and EventRef](https://github.com/oxidezap/whatsapp-rust/blob/54ce6cd9007f4361a07dbad50718973bbf56e2e9/src/features/creation.rs) · [Core RSVP helpers](https://github.com/oxidezap/whatsapp-rust/blob/54ce6cd9007f4361a07dbad50718973bbf56e2e9/wacore/src/event.rs)

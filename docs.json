@@ -47,6 +47,7 @@
               {
                 "group": "Guides",
                 "pages": [
+                  "guides/current-api",
                   "guides/sending-messages",
                   "guides/receiving-messages",
                   "guides/media-handling",
@@ -149,7 +150,7 @@
         "language": "pt",
         "tabs": [
           {
-            "tab": "Documentação",
+            "tab": "Documenta\u00e7\u00e3o",
             "groups": [
               {
                 "group": "Primeiros Passos",

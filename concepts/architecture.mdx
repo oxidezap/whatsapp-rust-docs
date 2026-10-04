@@ -391,7 +391,7 @@ When a connection is lost or `disconnect()` is called, `cleanup_connection_state
 | Transport | Closed via `Client::close_transport_bounded` (bounded by `TRANSPORT_CLOSE_TIMEOUT`, 2s) | An untimed close shares the transport's sink with every send and can be retried by the kernel for as long as `tcp_retries2` allows (~15 min on Linux); this runs on the caller's thread of control (the run loop, or `disconnect()`'s caller), so an unbounded close parks the whole client |
 
 <Note>
-**Bounded teardown ([whatsapp-rust#1410](https://github.com/oxidezap/whatsapp-rust/pull/1410)).** Every teardown path's transport close — `disconnect()`, `reconnect()`, `reconnect_immediately()`, `pause()`, and this cleanup routine — is now bounded by `TRANSPORT_CLOSE_TIMEOUT`. `abort_sender()` runs first, closing the sender task's job channel and aborting it outright; any send it cuts off (queued or already in flight) fails with `EncryptSendError::channel_closed()` rather than hanging — a send racing a teardown was going to fail once the socket closed anyway. See [WebSocket & Noise Protocol — Disconnect](/advanced/websocket-handling#4-disconnect) for the full mechanics.
+**Bounded teardown ([whatsapp-rust#1410](https://github.com/oxidezap/whatsapp-rust/pull/1410)).** Every teardown path's transport close — `disconnect()`, `reconnect()`, `reconnect_immediately()`, `pause()`, and this cleanup routine — is now bounded by `TRANSPORT_CLOSE_TIMEOUT`. `abort_sender()` runs first, closing the sender task's job channel and aborting it outright; any send it cuts off (queued or already in flight) fails with `EncryptSendError::channel_closed()` rather than hanging — a send racing a teardown was going to fail once the socket closed anyway. See [WebSocket & Noise Protocol — Disconnect](/advanced/websocket-handling#cleanup) for the full mechanics.
 </Note>
 
 <Note>
@@ -579,7 +579,7 @@ pub(crate) struct PendingDeviceSync {
 
 The `PendingDeviceSync` state is cleared on reconnect to prevent stale entries from leaking across connections.
 
-The `<devices><update hash="…"/></notification>` hash-only path described in [Storage → Granular cache patching](/concepts/storage#granular-cache-patching) resolves its target contact and joins this same `schedule_unknown_device_sync()` batching — offline resumes queue it here instead of firing an immediate usync mid-drain.
+The `<devices><update hash="…"/></notification>` hash-only path described in [Storage → Granular cache patching](/concepts/storage#cache-coherence) resolves its target contact and joins this same `schedule_unknown_device_sync()` batching — offline resumes queue it here instead of firing an immediate usync mid-drain.
 
 Location: `src/pending_device_sync.rs`, `src/handlers/ib.rs`, `src/usync.rs`
 

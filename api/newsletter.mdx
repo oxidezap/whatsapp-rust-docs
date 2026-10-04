@@ -3,9 +3,13 @@ title: Newsletter
 description: Newsletter (channel) operations — create, manage, administer, subscribe, and send messages to WhatsApp channels
 ---
 
+<Note>
+Examples on this page target [source snapshot `54ce6cd`](https://github.com/oxidezap/whatsapp-rust/tree/54ce6cd9007f4361a07dbad50718973bbf56e2e9), not a crates.io release. Use the [current API guide](/guides/current-api) to select the matching dependency.
+</Note>
+
 The `Newsletter` feature provides methods for managing WhatsApp newsletter channels, including creation, subscription management, admin operations, reactions, and live updates. Newsletter operations use MEX (GraphQL) for metadata/management and IQ stanzas for message operations.
 
-Newsletter message sending is handled by the unified `client.send_message()` method — see the [Send API](/api/send#send_message). Reactions remain on the `Newsletter` struct because they use a different stanza format.
+Newsletter message sending is handled by the unified `client.send_message()` method — see the [Send API](/api/send#send). Reactions remain on the `Newsletter` struct because they use a different stanza format.
 
 <Note>
 Newsletter messages are **plaintext** — they are not encrypted with the Signal protocol.
@@ -401,10 +405,10 @@ The mute state is sent as `ON`/`OFF`; the mute expiration is local database stat
 
 ### Sending messages
 
-Newsletter message sending is handled by the unified `client.send_message()` method. See the [Send API reference](/api/send#send_message) for full details.
+Newsletter message sending is handled by the unified `client.send_message()` method. See the [Send API reference](/api/send#send) for full details.
 
 ```rust
-use whatsapp_rust::waproto::whatsapp as wa;
+use waproto::whatsapp as wa;
 
 let message = wa::Message {
     conversation: Some("Hello subscribers!".to_string()),
@@ -421,46 +425,48 @@ The library detects newsletter recipients automatically and sends messages as pl
 `Newsletter::send_message()` was removed. Use `client.send_message()` instead — it accepts newsletter, group, and direct message JIDs.
 </Note>
 
-
 ### send_reaction
 
+Use `NewsletterMessageRef` to preserve separate client and server content IDs. A fetched `NewsletterMessage::message_ref(chat)` and an inbound message's `newsletter_ref()` construct the relevant association without cloning the message body.
+
 ```rust
-let target = history_message.message_ref(&newsletter_jid)?;
-let operation_id = client.newsletter().send_reaction(&target, "👍").await?;
+use whatsapp_rust::{Client, NewsletterMessageRef};
+
+async fn react(client: &Client, target: &NewsletterMessageRef<'_>) -> whatsapp_rust::anyhow::Result<()> {
+    let operation = client.newsletter().send_reaction(target, "👍").await?;
+    println!("ACK operation: {}", operation.as_str());
+    client.newsletter().send_reaction(target, "").await?;
+    Ok(())
+}
 ```
 
-Requires the reference's `ServerMessageId` and returns a fresh `StanzaId` for ACK correlation. An empty reaction removes the selection. A client-only reference fails instead of substituting its ID. Server ID zero remains a valid observed value.
+A reaction requires a server content ID and returns a new `StanzaId` for ACK correlation. It is not a delivery guarantee. A missing server ID is rejected; it is never synthesized from a client ID.
 
 ### send_poll_vote
 
-```rust
-let hashes = [whatsapp_rust::wacore::poll::compute_option_hash("Option A")];
-let operation_id = client.newsletter().send_poll_vote(&target, &hashes).await?;
-```
+`send_poll_vote(&NewsletterMessageRef, &[[u8; 32]])` replaces the full selection. Hash option names exactly as the original poll carries them, preserving variation selectors and ZWJ sequences. An empty selection removes your vote; duplicate hashes and oversized selections are rejected.
 
-The server ID identifies the poll content. Each send replaces the entire selection; an empty slice clears it. Hash the exact option name, including Unicode selectors, without normalization. Returns the new operation's `StanzaId`, not delivery confirmation.
+```rust
+use whatsapp_rust::{Client, NewsletterMessageRef};
+use whatsapp_rust::wacore::poll::compute_option_hash;
+
+async fn vote(client: &Client, poll: &NewsletterMessageRef<'_>) -> whatsapp_rust::anyhow::Result<()> {
+    client.newsletter().send_poll_vote(poll, &[compute_option_hash("Rust")]).await?;
+    Ok(())
+}
+```
 
 ### edit_message
 
-```rust
-client.newsletter().edit_message(&target, replacement).await?;
-```
-
-Requires the client content `MessageId`. Channel edit/revoke reuse that target ID and return `()`; do not assume they produce a fresh operation ID or `SendResult`.
+`edit_message(&NewsletterMessageRef, replacement)` uses the client content `MessageId`, not its server ID. This is the channel plaintext path; root chat edits take `EditRequest`. Missing client IDs are rejected rather than derived from another ID domain.
 
 ### revoke_message
 
-```rust
-client.newsletter().revoke_message(&target).await?;
-```
+`revoke_message(&NewsletterMessageRef)` likewise requires the client content ID. Explicit `send_reaction_raw`, `send_poll_vote_raw`, `edit_message_raw` and `revoke_message_raw` remain for external byte/ID integrations.
 
-### Raw channel actions
+Consult the pinned source for exact signatures and ownership checks. A reference's optional ownership declaration does not grant server permission.
 
-`send_reaction_raw`, `send_poll_vote_raw`, `edit_message_raw`, and `revoke_message_raw` retain explicit chat/ID inputs. Reactions/votes still return `StanzaId`; edit/revoke return `()`. Use typed references for ordinary consumers.
-
-## NewsletterMessageRef
-
-`NewsletterMessageRef::new(&chat, Option<MessageId>, Option<ServerMessageId>)?` retains independent optional content IDs. History messages and live-update messages expose `message_ref(&chat)`; sent channel posts expose `SendResult::newsletter_ref()` without inventing a server ID. `with_from_me(bool)` is an explicit caller ownership declaration.
+[Channel actions and history message references](https://github.com/oxidezap/whatsapp-rust/blob/54ce6cd9007f4361a07dbad50718973bbf56e2e9/src/features/newsletter.rs)
 
 ### get_messages
 
@@ -581,7 +587,6 @@ Metadata for a newsletter channel. Implements `PartialEq` and `Eq` for direct co
 
 ```rust
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[non_exhaustive]
 pub struct NewsletterMetadata {
     pub jid: Jid,
     pub name: String,
@@ -668,7 +673,6 @@ An admin's public profile within a newsletter, carried on [`NewsletterAdminInfo`
 
 ```rust
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[non_exhaustive]
 pub struct NewsletterAdminProfile {
     pub id: Option<String>,
     pub name: String,
@@ -687,7 +691,6 @@ Admin-side information about a newsletter, returned by [`get_admin_info`](#get_a
 
 ```rust
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[non_exhaustive]
 pub struct NewsletterAdminInfo {
     pub admin_count: Option<u32>,
     pub admin_profile: Option<NewsletterAdminProfile>,
@@ -705,7 +708,6 @@ A follower (subscriber) of a newsletter, returned by [`get_followers`](#get_foll
 
 ```rust
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[non_exhaustive]
 pub struct NewsletterFollower {
     pub jid: Jid,
     pub phone_jid: Option<Jid>,
@@ -757,7 +759,7 @@ pub struct NewsletterMessage {
 }
 ```
 
-- `message_id` — Optional client content `MessageId`: `None` when omitted. Obtain `message_ref(&newsletter_jid)?` for [`edit_message`](#edit_message) or [`revoke_message`](#revoke_message); those operations require this ID. Reactions require the independently observed server ID.
+- `message_id` — Optional client content ID. It stays absent when the server omitted it. Use `message_ref(chat)` for actions; edits/revokes require this domain, while reactions require the server content ID.
 - `server_id` — Server-assigned monotonic id. Use it as the pagination cursor in [`get_messages`](#get_messages) and as the target for [`send_reaction`](#send_reaction).
 - `timestamp` — Message timestamp (Unix seconds). Moves with an edit.
 - `message_type` — `Text`, `Media`, or `Poll` on the wire. An edit or revocation is not a message type; see `edit`. Reactions are counts on the reacted-to message, not a type. A message without a `type` attribute reads as `Text`.
@@ -853,7 +855,6 @@ pub enum NewsletterMessageAssociationType {
 A reaction count on a newsletter message.
 
 ```rust
-#[non_exhaustive]
 pub struct NewsletterReactionCount {
     pub code: String,
     pub count: u64,

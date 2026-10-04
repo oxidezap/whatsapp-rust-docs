@@ -238,7 +238,7 @@ pub enum UsyncValidationError {
 
 ## Hosted addressing
 
-`UsyncDeviceResult.is_hosted` (and the corresponding `is_hosted` field on the persisted `DeviceInfo`/`UsyncDevice` types — see [Store: DeviceListRecord](/api/store#devicelistrecord)) marks a device as belonging to WhatsApp's *hosted* PN/LID address space rather than the regular one. Use `Jid::with_device_hosting(device_id, is_hosted)` to build a correctly-addressed device JID from a device-list entry:
+`UsyncDeviceResult.is_hosted` (and the corresponding `is_hosted` field on the persisted `DeviceInfo`/`UsyncDevice` types — see [Store: DeviceListRecord](/api/store#source-reference)) marks a device as belonging to WhatsApp's *hosted* PN/LID address space rather than the regular one. Use `Jid::with_device_hosting(device_id, is_hosted)` to build a correctly-addressed device JID from a device-list entry:
 
 ```rust
 let device_jid = user_jid.with_device_hosting(device.id, device.is_hosted);

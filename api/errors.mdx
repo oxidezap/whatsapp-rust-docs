@@ -595,7 +595,7 @@ pub enum SignalMaintenanceError {
 
 ### MessageEditError
 
-Returned by `EncryptedEdit::original_sender_jid`, `SecretEncrypted::original_sender_jid`, and `SecretEncrypted::original_sender_for_dispatch` — the target-key sender resolvers used when decrypting `secret_encrypted_message` envelopes (message edits, poll edits/add-option, event edits). Added in PR #1090, replacing bare `anyhow::Error`. See [Decrypting secret-encrypted envelopes](/api/polls#decrypting-secret-encrypted-envelopes) for how these methods are used.
+Returned by `EncryptedEdit::original_sender_jid`, `SecretEncrypted::original_sender_jid`, and `SecretEncrypted::original_sender_for_dispatch` — the target-key sender resolvers used when decrypting `secret_encrypted_message` envelopes (message edits, poll edits/add-option, event edits). Added in PR #1090, replacing bare `anyhow::Error`. Read the [pinned target-key resolvers](https://github.com/oxidezap/whatsapp-rust/blob/54ce6cd9007f4361a07dbad50718973bbf56e2e9/wacore/src/proto_helpers.rs) when handling an encrypted add-on.
 
 ```rust
 #[non_exhaustive]

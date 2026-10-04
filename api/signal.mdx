@@ -6,7 +6,7 @@ description: Low-level Signal protocol operations for encryption, decryption, an
 The `Signal` struct provides direct access to Signal protocol operations including message encryption/decryption for both 1:1 and group conversations, session management, and participant node creation.
 
 <Warning>
-  These are low-level APIs that bypass the high-level message sending pipeline. Most users should use [`client.send_message()`](/api/client#send_message) which handles encryption automatically. Use these methods only when you need direct control over the Signal protocol layer.
+  These are low-level APIs that bypass the high-level message sending pipeline. Most users should use [`client.send_message()`](/api/send#send) which handles encryption automatically. Use these methods only when you need direct control over the Signal protocol layer.
 </Warning>
 
 ## Access
@@ -614,7 +614,7 @@ if !client.signal().has_sender_key(&group_jid, &my_jid).await? {
 
 ### Reset a broken session
 
-Use this for a session that decodes fine but is logically wrong — for example, after a known identity compromise. A session row that fails to decode from storage doesn't need this: the next send or decrypt for that address recovers it automatically, by fetching a fresh pre-key bundle and replacing the row. See [undecodable session rows](/concepts/storage#signalstorecache) for the mechanics.
+Use this for a session that decodes fine but is logically wrong — for example, after a known identity compromise. A session row that fails to decode from storage doesn't need this: the next send or decrypt for that address recovers it automatically, by fetching a fresh pre-key bundle and replacing the row. See [undecodable session rows](/concepts/storage#cache-coherence) for the mechanics.
 
 ```rust
 // Delete a session you know is logically wrong (e.g. after an identity compromise)

@@ -30,7 +30,7 @@ tokio = { version = "1.53", features = ["macros", "rt-multi-thread"] }
 `AudioSource` / `AudioSink` / `VideoSource` / `VideoSink` are channel-based, and the examples below build those channels through `whatsapp_rust::async_channel` — the re-export, so you don't have to add or version-pin `async-channel` yourself.
 
 <Warning>
-  [PR #1051](https://github.com/oxidezap/whatsapp-rust/pull/1051) changed `CallHandle::accept_video`'s signature and the shape of `CallEvent::PeerVideoStateChanged` to close a race where a cancelled or superseded video-upgrade request could still attach a camera. If you're upgrading from before this PR, see [Peer initiates](#video-io) below and the `VideoUpgradeToken` field on the event.
+  [PR #1051](https://github.com/oxidezap/whatsapp-rust/pull/1051) changed `CallHandle::accept_video`'s signature and the shape of `CallEvent::PeerVideoStateChanged` to close a race where a cancelled or superseded video-upgrade request could still attach a camera. If you're upgrading from before this PR, see [Peer initiates](#video-i/o) below and the `VideoUpgradeToken` field on the event.
 </Warning>
 
 <Warning>
@@ -42,11 +42,11 @@ tokio = { version = "1.53", features = ["macros", "rt-multi-thread"] }
 </Warning>
 
 <Note>
-  [PR #1385](https://github.com/oxidezap/whatsapp-rust/pull/1385) added `CallHandle::request_peer_keyframe(urgency)`, so a 1:1 call can ask the peer to recover a dropped inbound access unit instead of waiting on its next scheduled keyframe — see [H.264 video plane](#h264-video-plane) below.
+  [PR #1385](https://github.com/oxidezap/whatsapp-rust/pull/1385) added `CallHandle::request_peer_keyframe(urgency)`, so a 1:1 call can ask the peer to recover a dropped inbound access unit instead of waiting on its next scheduled keyframe — see [H.264 video plane](#h-264-video-plane) below.
 </Note>
 
 <Note>
-  [PR #1498](https://github.com/oxidezap/whatsapp-rust/pull/1498) added `CallHandle::resume_video(source, sink)` and `CallHandle::video_states()`, and made `start_video`'s 5-second timeout direction-aware: an unanswerable request against a peer that's already video now stands only our direction down instead of killing the call. The exact timeout is also published as `voip::VIDEO_UPGRADE_TIMEOUT`. See [Video I/O](#video-io) below.
+  [PR #1498](https://github.com/oxidezap/whatsapp-rust/pull/1498) added `CallHandle::resume_video(source, sink)` and `CallHandle::video_states()`, and made `start_video`'s 5-second timeout direction-aware: an unanswerable request against a peer that's already video now stands only our direction down instead of killing the call. The exact timeout is also published as `voip::VIDEO_UPGRADE_TIMEOUT`. See [Video I/O](#video-i/o) below.
 </Note>
 
 <Note>
@@ -121,7 +121,7 @@ async fn on_event(client: &Client, event: Event) -> anyhow::Result<()> {
 </Note>
 
 <Note>
-  `start()` can fail with two errors specific to this flow. `CallError::VideoNotOffered` is returned if you call `.video(...)` but the incoming offer's `is_video` was `false` — add video later with `CallHandle::start_video` instead (see [Video I/O](#video-io)). `CallError::CallEndedDuringSetup` is returned if the peer terminates or supersedes the call while `start()` is still decrypting the callKey or connecting the relay.
+  `start()` can fail with two errors specific to this flow. `CallError::VideoNotOffered` is returned if you call `.video(...)` but the incoming offer's `is_video` was `false` — add video later with `CallHandle::start_video` instead (see [Video I/O](#video-i/o)). `CallError::CallEndedDuringSetup` is returned if the peer terminates or supersedes the call while `start()` is still decrypting the callKey or connecting the relay.
 </Note>
 
 ## Placing an Outgoing Call
@@ -490,7 +490,7 @@ handle.resume_video(camera_source, video_sink).await?;
 | `handle.stop_video().await` | Stop our own outbound video; idempotent. The peer's video plane is unaffected if they keep sending — see Video I/O above |
 | `handle.resume_video(source, sink).await` | Re-add our video direction inside an already-video call: re-attaches endpoints, ungates the plane, and announces a bare `Enabled`. No handshake, no timeout. Refuses unless our direction is stopped with no upgrade outstanding either way — see Video I/O above |
 | `handle.video_states()` | Read back this call's `(self, peer)` `VideoState` pair, or `None` when the call is gone. Diagnostics for clients driving upgrades from outside |
-| `handle.request_peer_keyframe(urgency)` | Ask the peer to send a video keyframe, by RTCP PLI — call it when your decoder loses or discards an access unit. `urgency` is a `KeyframeUrgency`: `Coalesced` for an ordinary gap, `Immediate` for a decoder that has already failed and reset. Fire-and-forget, throttled in the engine, does nothing in a group call — see [H.264 video plane](#h264-video-plane) below |
+| `handle.request_peer_keyframe(urgency)` | Ask the peer to send a video keyframe, by RTCP PLI — call it when your decoder loses or discards an access unit. `urgency` is a `KeyframeUrgency`: `Coalesced` for an ordinary gap, `Immediate` for a decoder that has already failed and reset. Fire-and-forget, throttled in the engine, does nothing in a group call — see [H.264 video plane](#h-264-video-plane) below |
 | `handle.take_events()` | Acquire the owned, single-reader `CallEvents` once |
 | `handle.media_stats()` | Snapshot of per-call audio- and video-path counters (`CallMediaStats`) — see [Media stats and silence detection](#media-stats-and-silence-detection) |
 | `handle.group_state()` | Roster/relay/waiting-room snapshot for a group or call-link call, `None` on a plain 1:1 call — see [Group calls](#group-calls) |
@@ -839,8 +839,6 @@ The decoder operates at a single fixed point:
 The encoder runs two perceptual/LPC-analysis FFTs: a 512-point transform and a 576-point transform. Both take real-valued input on the forward pass and Hermitian input on the inverse pass. Each now packs its own input into its own half-length complex transform, instead of running a full-length complex transform on data that's half redundant. This roughly halves the butterflies each FFT needs. It also needs no separate encoder-side heap arena to hold a second, full-length plan. In [PR #1330](https://github.com/oxidezap/whatsapp-rust/pull/1330)'s own benchmark — five runs pinned to a P-core over 486 s of audio — this cut whole-encode CPU by about 21%.
 
 This is the encoder's only analysis-FFT path in current source. There is no feature flag and no full-length fallback to opt into. PR #1330 removed the earlier opt-in `mlow-fast-fft` feature that gated this transform. That change established perceptual equivalence with the reference encoder it replaced — measured with PESQ-WB, ESTOI, segSNR, and LSD over 991 s of clean and noisy speech. It also confirmed that every one of the 8,106 frames in that validation corpus keeps the same TOC byte and packet-size envelope as before. The half-length technique turns out to be what the `smpl` C reference implementation this codec was validated against already uses.
-
-
 
 ## H.264 video plane
 

@@ -300,7 +300,7 @@ A byte-less placeholder (written by post-send issuance before any real token has
 
 Tokens can arrive keyed by phone number before a contact's LID is known — for example, a token received while the peer was still PN-only. `resolve_tc_token_key` keys token lookups: it returns the LID as soon as a PN↔LID mapping exists for that contact, and the PN before that. So the moment the client learns a mapping, a token still filed under the PN becomes unreachable through this lookup — the send path then behaves as if no token had ever arrived, even though one is stored.
 
-To prevent that, the client migrates a PN-keyed token to the LID key as part of LID discovery, alongside the device-registry and Signal-session re-keying that already happens there (see [LID-PN mappings](/concepts/storage#lid-pn-mappings)):
+To prevent that, the client migrates a PN-keyed token to the LID key as part of LID discovery, alongside the device-registry and Signal-session re-keying that already happens there (see [LID-PN mappings](/concepts/storage#cache-coherence)):
 
 1. Read any token stored under the phone number
 2. If found, write it under the LID — **newer-wins**, so a token already stored under the LID (e.g. from a message that arrived after the mapping was learned) is never regressed by the older PN-keyed one

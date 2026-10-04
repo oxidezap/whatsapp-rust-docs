@@ -3,6 +3,10 @@ title: Inbound Durability Hook
 description: Opt in to at-least-once message delivery by deferring the transport ack until your consumer durably commits each batch of messages.
 ---
 
+<Note>
+Examples on this page target [source snapshot `54ce6cd`](https://github.com/oxidezap/whatsapp-rust/tree/54ce6cd9007f4361a07dbad50718973bbf56e2e9), not a crates.io release. Use the [current API guide](/guides/current-api) to select the matching dependency.
+</Note>
+
 ## Overview
 
 By default the client acknowledges a message to the WhatsApp server **as soon as it is decrypted** (at-most-once delivery). The ack tells the server to drop the message from its offline queue and never resend it. If your process crashes, or your storage write fails, *after* the ack but *before* you persist the message, the message is lost — the server will not redeliver it.
@@ -159,7 +163,7 @@ Durable cross-crash replay requires a backend that implements the pending-inboun
 - `delete_pending_inbound` — clear the buffer after the hook commits
 - `delete_expired_pending_inbound` — retention sweep (called unconditionally from keepalive)
 
-Two additional batch-oriented methods, `store_pending_inbound_batch` and `delete_pending_inbound_batch`, default to looping the single-row methods above, so existing custom backends keep working unchanged. The bundled `SqliteStore` overrides both to commit a whole batch in one transaction — see [Custom Backends](/guides/custom-backends#pending-inbound-buffer) if you want the same atomicity in your own backend.
+Two additional batch-oriented methods, `store_pending_inbound_batch` and `delete_pending_inbound_batch`, default to looping the single-row methods above, so existing custom backends keep working unchanged. The bundled `SqliteStore` overrides both to commit a whole batch in one transaction — see [Custom Backends](/guides/custom-backends#preserve-durability) if you want the same atomicity in your own backend.
 
 Backends that implement none of these return an error from the defaults, which causes `Bot::build()` to fail with `BotBuilderError::UnsupportedDurabilityBackend` — a clear error rather than a silent runtime degradation.
 
@@ -255,3 +259,11 @@ Always use `tokio::task::spawn_blocking` for disk I/O inside the hook. Blocking 
 
 - [Retry Admission Hook](/advanced/retry-admission) — the sibling opt-in hook idiom (`OnceLock`, zero overhead unset) for gating inbound group/status retry receipts.
 - [History Sync Admission Hook](/advanced/history-sync-admission) — the sibling opt-in policy for rejecting inbound history-sync chunks before the major-sync queue.
+
+## Current references and replay
+
+Use `InboundMessage::message_ref()` for chat actions and `newsletter_ref()` for channels. Construct non-exhaustive inbound DTOs with builders in host fixtures. Preserve wildcard arms when matching extensible enums. See [current contracts](/guides/current-api#hooks-and-backend-reads).
+
+PDO placeholder recovery remains event-only. A later encrypted retry still must complete its durability hook even when the equivalent user event was already dispatched. The retry can promote that recovery to committed state without publishing the same event again. Distinct user payloads in an SKDM-bearing retry retain separate dispatch claims; adding an SKDM envelope does not make their user content identical. Hooks and event consumers still need idempotent `(chat, sender, id)` handling.
+
+[PDO retry and durability regression scenarios](https://github.com/oxidezap/whatsapp-rust/blob/54ce6cd9007f4361a07dbad50718973bbf56e2e9/src/message/tests.rs)

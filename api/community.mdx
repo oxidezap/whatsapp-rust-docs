@@ -1,688 +1,88 @@
 ---
-title: Community
-description: Community operations — create, deactivate, and manage community subgroups
+title: Communities
+description: Create communities, configure subgroups and recover partial remote creation
 ---
 
-The `Community` feature provides methods for managing WhatsApp communities, including creation, subgroup linking/unlinking, and metadata queries. Community mutations use IQ stanzas (`w:g2` namespace) while metadata queries use MEX (GraphQL).
-
-## Access
-
-Access community operations through the client:
-
-```rust
-let community = client.community();
-```
-
-## Methods
-
-### create
-
-Create a new community.
-
-```rust
-pub async fn create(
-    &self,
-    options: CreateCommunityOptions,
-) -> Result<CreateCommunityResult, CommunityError>
-```
-
-**Parameters:**
-- `options` — Community creation options (see [CreateCommunityOptions](#createcommunityoptions))
-
-**Returns:**
-- `CreateCommunityResult` — Contains the full `metadata: GroupMetadata` for the created community parent group
-
-
-### Creation example
-
-```rust
-use whatsapp_rust::{CreateCommunityOptions, GroupDescription};
-let options = CreateCommunityOptions::new("My Community")?
-    .with_description(GroupDescription::new("Community discussions")?);
-let result = client.community().create(options).await?;
-println!("Created community: {}", result.metadata.id);
-```
-
-Description is configured by a follow-up IQ. If that step fails, `ConfigurationFailed` retains the created JID and cause. See [partial configuration failure](#partial-configuration-failure).
-
-### list_participating
-
-List every parent community the account participates in as slim [`GroupOverview`](/api/groups#groupoverview) records. Same slim wire projection as [`Groups::list_participating`](/api/groups#list_participating): id, subject, [hierarchy](/api/groups#grouphierarchy), and participant count — no subgroup members, no settings, one round trip.
-
-```rust
-pub async fn list_participating(
-    &self,
-) -> Result<Vec<GroupOverview>, CommunityError>
-```
-
-**Returns:**
-- `Vec<GroupOverview>` — one overview per parent community.
-
-**Example:**
-```rust
-let communities = client.community().list_participating().await?;
-
-for overview in communities {
-    let subject = overview.subject.as_deref().unwrap_or("(no subject)");
-    let count = overview.participant_count.unwrap_or(0);
-    println!("Community: {subject} ({}) — {count} members", overview.id);
-}
-```
-
-### fetch_participating_metadata
-
-Fetch full [`GroupMetadata`](/api/groups#groupmetadata) for every parent community the account participates in.
-
-```rust
-pub async fn fetch_participating_metadata(
-    &self,
-) -> Result<HashMap<Jid, GroupMetadata>, CommunityError>
-```
-
-**Returns:**
-- `HashMap<Jid, GroupMetadata>` — Map of community JID to metadata.
-
-Always hits the network. Returns protocol data only; call [`Groups::resolve_participant_addresses`](/api/groups#resolve_participant_addresses) per result when PN-keyed display data is needed. Prefer [`list_participating`](#list_participating) when the display fields are all you need.
-
-**Example:**
-```rust
-let communities = client.community().fetch_participating_metadata().await?;
-
-for (jid, metadata) in communities {
-    let subject = metadata.subject.as_deref().unwrap_or("(no subject)");
-    println!("Community: {subject} ({jid})");
-}
-```
-
-### deactivate
-
-Deactivate (delete) a community. Subgroups are unlinked but not deleted.
-
-```rust
-pub async fn deactivate(&self, community_jid: &Jid) -> Result<(), CommunityError>
-```
-
-**Parameters:**
-- `community_jid` — JID of the community to deactivate
-
-**Example:**
-```rust
-client.community().deactivate(&community_jid).await?;
-```
-
-### link_subgroups
-
-Link existing groups as subgroups of a community. All groups are linked with the default [`SubgroupVisibility::Visible`](#subgroupvisibility); use [`link_subgroups_with_options`](#link_subgroups_with_options) to mix visible and hidden groups in a single request.
-
-```rust
-pub async fn link_subgroups(
-    &self,
-    community_jid: &Jid,
-    subgroup_jids: &[Jid],
-) -> Result<LinkSubgroupsResult, CommunityError>
-```
-
-**Parameters:**
-- `community_jid` — JID of the parent community
-- `subgroup_jids` — Array of group JIDs to link
-
-**Returns:**
-- `LinkSubgroupsResult` — Contains `linked_jids` (successfully linked) and `failed_groups` (`SubgroupFailure` entries with `jid` and `code`)
-
-**Example:**
-```rust
-let subgroup_jids = vec![
-    "120363001111111@g.us".parse()?,
-    "120363002222222@g.us".parse()?,
-];
-
-let result = client.community()
-    .link_subgroups(&community_jid, &subgroup_jids)
-    .await?;
-
-println!("Linked: {:?}", result.linked_jids);
-for failure in &result.failed_groups {
-    let jid = &failure.jid;
-    let error_code = failure.code;
-    eprintln!("Failed: {} (error {})", jid, error_code);
-}
-```
-
-### link_subgroups_with_options
-
-Link existing groups to a community with a per-group visibility. A single request can mix visible and hidden groups.
-
-```rust
-pub async fn link_subgroups_with_options(
-    &self,
-    community_jid: &Jid,
-    subgroup_options: &[LinkSubgroupOptions],
-) -> Result<LinkSubgroupsResult, CommunityError>
-```
-
-**Parameters:**
-- `community_jid` — JID of the parent community
-- `subgroup_options` — Array of per-group link options (see [`LinkSubgroupOptions`](#linksubgroupoptions))
-
-**Returns:**
-- `LinkSubgroupsResult` — Same shape as [`link_subgroups`](#link_subgroups).
-
-**Example:**
-```rust
-use whatsapp_rust::features::community::{LinkSubgroupOptions, SubgroupVisibility};
-
-let options = vec![
-    LinkSubgroupOptions::new(
-        "120363001111111@g.us".parse()?,
-        SubgroupVisibility::Visible,
-    ),
-    LinkSubgroupOptions::new(
-        "120363002222222@g.us".parse()?,
-        SubgroupVisibility::Hidden,
-    ),
-];
-
-let result = client.community()
-    .link_subgroups_with_options(&community_jid, &options)
-    .await?;
-```
-
 <Note>
-Visibility is set at link time. To change a group's visibility later you must unlink and re-link it.
+Examples on this page target [source snapshot `54ce6cd`](https://github.com/oxidezap/whatsapp-rust/tree/54ce6cd9007f4361a07dbad50718973bbf56e2e9), not a crates.io release. Use the [current API guide](/guides/current-api) to select the matching dependency.
 </Note>
 
-### create_subgroup
+## create
 
-Create a new group that is already linked as a subgroup of a community, in one call. The subgroup is created with the default [`SubgroupVisibility::Visible`](#subgroupvisibility).
-
-```rust
-pub async fn create_subgroup(
-    &self,
-    name: &str,
-    participants: &[Jid],
-    parent_jid: &Jid,
-) -> Result<CreateCommunityResult, CommunityError>
-```
-
-**Parameters:**
-- `name` — Name of the new subgroup
-- `participants` — Initial participant JIDs to add to the subgroup
-- `parent_jid` — JID of the parent community to link the new subgroup under
-
-**Returns:**
-- `CreateCommunityResult` — Contains the full `metadata: GroupMetadata` for the created subgroup
-
-**Example:**
-```rust
-let participants = vec![
-    "5511999999999@s.whatsapp.net".parse()?,
-];
-
-let result = client.community()
-    .create_subgroup("My Subgroup", &participants, &community_jid)
-    .await?;
-
-println!("Created subgroup: {} ({})", result.metadata.subject, result.metadata.id);
-```
-
-<Note>
-Equivalent to creating a group and then calling [`link_subgroups`](#link_subgroups), but done in a single round-trip.
-</Note>
-
-### create_subgroup_with_options
-
-Create a new subgroup linked to a community with an explicit visibility. Use this when the subgroup should be hidden from non-members in the community's subgroup list.
+Validate the name with `CreateCommunityOptions::new(name)?`. Use a typed `GroupDescription` for the optional description. The options and output DTOs are non-exhaustive; use constructors, then supported field mutation or builders.
 
 ```rust
-pub async fn create_subgroup_with_options(
-    &self,
-    options: CreateSubgroupOptions,
-) -> Result<CreateCommunityResult, CommunityError>
-```
+use whatsapp_rust::{Client, CreateCommunityOptions, GroupDescription};
 
-**Parameters:**
-- `options` — Subgroup creation options (see [`CreateSubgroupOptions`](#createsubgroupoptions))
-
-**Returns:**
-- `CreateCommunityResult` — Contains the full `metadata: GroupMetadata` for the created subgroup
-
-**Example:**
-```rust
-use whatsapp_rust::features::community::{CreateSubgroupOptions, SubgroupVisibility};
-
-let participants = vec!["5511999999999@s.whatsapp.net".parse()?];
-
-let options = CreateSubgroupOptions::new("Mods only", &participants, community_jid.clone())
-    .with_visibility(SubgroupVisibility::Hidden);
-
-let result = client.community()
-    .create_subgroup_with_options(options)
-    .await?;
-```
-
-<Note>
-Visibility is fixed at creation time. WhatsApp does not support changing a subgroup's visibility later.
-</Note>
-
-### unlink_subgroups
-
-Unlink subgroups from a community.
-
-```rust
-pub async fn unlink_subgroups(
-    &self,
-    community_jid: &Jid,
-    subgroup_jids: &[Jid],
-    remove_orphan_members: bool,
-) -> Result<UnlinkSubgroupsResult, CommunityError>
-```
-
-**Parameters:**
-- `community_jid` — JID of the parent community
-- `subgroup_jids` — Array of subgroup JIDs to unlink
-- `remove_orphan_members` — Whether to remove members who are only in the community through the unlinked subgroups
-
-**Returns:**
-- `UnlinkSubgroupsResult` — Contains `unlinked_jids` (successfully unlinked) and `failed_groups` (`SubgroupFailure` entries with `jid` and `code`)
-
-**Example:**
-```rust
-let result = client.community()
-    .unlink_subgroups(&community_jid, &subgroup_jids, true)
-    .await?;
-
-println!("Unlinked: {:?}", result.unlinked_jids);
-```
-
-### get_subgroups
-
-Fetch all subgroups of a community via MEX (GraphQL).
-
-```rust
-pub async fn get_subgroups(
-    &self,
-    community_jid: &Jid,
-) -> Result<Vec<CommunitySubgroup>, CommunityError>
-```
-
-**Parameters:**
-- `community_jid` — JID of the community
-
-**Returns:**
-- `Vec<CommunitySubgroup>` — List of subgroups with metadata
-
-**Example:**
-```rust
-let subgroups = client.community()
-    .get_subgroups(&community_jid)
-    .await?;
-
-for sg in &subgroups {
-    println!("{}: {} (default: {}, general: {}, hidden: {})",
-        sg.id, sg.subject, sg.is_default_sub_group, sg.is_general_chat, sg.is_hidden_group);
+async fn create(client: &Client) -> whatsapp_rust::anyhow::Result<()> {
+    let options = CreateCommunityOptions::new("Engineering")?
+        .with_description(GroupDescription::new("Team discussions")?);
+    let result = client.community().create(options).await?;
+    println!("{}", result.metadata.id);
+    Ok(())
 }
 ```
 
-### get_subgroup_participant_counts
+## Recover partial creation
 
-Fetch participant counts per subgroup via MEX (GraphQL).
+Creation and description configuration are separate remote operations. `CommunityError::ConfigurationFailed { created_jid, step, source }` means the community already exists. Resume configuration on that JID; blindly repeating `create` can create a duplicate. The error preserves the failed step and its `GroupError` cause.
+
+For description recovery use `groups().set_description(created_jid, Some(description), PreviousDescription::Resolve)` to read the current optimistic concurrency token. This is a returned-error contract, not a cancellation or rollback guarantee.
 
 ```rust
-pub async fn get_subgroup_participant_counts(
-    &self,
-    community_jid: &Jid,
-) -> Result<Vec<(Jid, u32)>, CommunityError>
-```
+use whatsapp_rust::{Client, CommunityError, CreateCommunityOptions,
+    GroupDescription, PreviousDescription};
 
-**Parameters:**
-- `community_jid` — JID of the community
-
-**Returns:**
-- `Vec<(Jid, u32)>` — Pairs of subgroup JID and participant count
-
-**Example:**
-```rust
-let counts = client.community()
-    .get_subgroup_participant_counts(&community_jid)
-    .await?;
-
-for (jid, count) in &counts {
-    println!("{}: {} participants", jid, count);
+async fn create_or_resume(client: &Client) -> whatsapp_rust::anyhow::Result<()> {
+    let description = GroupDescription::new("Team discussions")?;
+    let result = client.community().create(
+        CreateCommunityOptions::new("Engineering")?
+            .with_description(description.clone()),
+    ).await;
+    match result {
+        Ok(created) => println!("{}", created.metadata.id),
+        Err(CommunityError::ConfigurationFailed { created_jid, step, source }) => {
+            eprintln!("{created_jid}: {step:?}: {source}");
+            client.groups().set_description(
+                &created_jid, Some(description), PreviousDescription::Resolve,
+            ).await?;
+        }
+        Err(error) => return Err(error.into()),
+    }
+    Ok(())
 }
 ```
 
-### query_linked_group
+## create_subgroup_with_options
 
-Query a linked subgroup's metadata from the parent community.
+`create_subgroup(name, participants, parent)` uses default subgroup options. For explicit visibility use `CreateSubgroupOptions::new(name, participants, parent).with_visibility(SubgroupVisibility)`. The result is `CreateCommunityResult { metadata, .. }`; there is no separate `gid` output field.
 
-```rust
-pub async fn query_linked_group(
-    &self,
-    community_jid: &Jid,
-    subgroup_jid: &Jid,
-) -> Result<GroupMetadata, CommunityError>
-```
+## link_subgroups
 
-**Parameters:**
-- `community_jid` — JID of the parent community
-- `subgroup_jid` — JID of the subgroup to query
+`link_subgroups(parent, &[Jid])` uses default visibility. `link_subgroups_with_options` accepts `LinkSubgroupOptions::new(jid, visibility)`. A batch can contain both successes and failures; inspect `linked_jids` and every `SubgroupFailure`'s `jid` and `code`. Failures are named records, not `(Jid, u32)` tuples.
 
-**Returns:**
-- `GroupMetadata` — Full group metadata (see [Groups API](/api/groups#fetch_metadata))
+## unlink_subgroups
 
-**Example:**
-```rust
-let metadata = client.community()
-    .query_linked_group(&community_jid, &subgroup_jid)
-    .await?;
+Inspect `unlinked_jids` and `failed_groups` for the same partial-result behavior. Do not retry successful entries merely because another entry failed.
 
-println!("Subject: {}", metadata.subject);
-```
+## Query and manage
 
-### join_subgroup
+| Task | Entry point |
+| --- | --- |
+| List community overviews | `list_participating` |
+| Fetch participating full metadata | `fetch_participating_metadata` |
+| Enumerate or paginate linked subgroups | `get_subgroups` |
+| Query counts | `get_subgroup_participant_counts` |
+| Inspect or join one linked group | `query_linked_group`, `join_subgroup` |
+| Fetch linked participant sets | `get_linked_groups_participants` |
+| Remove community participants | `remove_participants` |
+| Deactivate the parent | `deactivate` |
 
-Join a linked subgroup via the parent community.
+`get_subgroup_participant_counts` returns `Result<Vec<(Jid, u32)>, CommunityError>`: each tuple contains a subgroup JID and its participant count. This differs from link/unlink `SubgroupFailure` records.
 
-```rust
-pub async fn join_subgroup(
-    &self,
-    community_jid: &Jid,
-    subgroup_jid: &Jid,
-) -> Result<GroupMetadata, CommunityError>
-```
+`get_subgroups` returns paginated `CommunitySubgroup` records with typed `GroupParticipant`s. Check `has_more` before deciding your list is complete. Membership approval is a distinct error for a subgroup join; it does not prove the caller joined.
 
-**Parameters:**
-- `community_jid` — JID of the parent community
-- `subgroup_jid` — JID of the subgroup to join
+For a community parent picture use the [pictures facade](/api/pictures) with an explicit `Community` target. Reactions, comments and encrypted edits address announcement posts through their message references; see [message actions](/api/send) and [the community guide](/guides/communities).
 
-**Returns:**
-- `GroupMetadata` — Metadata of the joined subgroup
-
-**Example:**
-```rust
-let metadata = client.community()
-    .join_subgroup(&community_jid, &subgroup_jid)
-    .await?;
-
-println!("Joined: {}", metadata.subject);
-```
-
-### get_linked_groups_participants
-
-Get all participants across all linked groups of a community.
-
-```rust
-pub async fn get_linked_groups_participants(
-    &self,
-    community_jid: &Jid,
-) -> Result<Vec<GroupParticipant>, CommunityError>
-```
-
-**Parameters:**
-- `community_jid` — JID of the community
-
-**Returns:**
-- `Vec<GroupParticipant>` — List of participants across all subgroups
-
-**Example:**
-```rust
-let participants = client.community()
-    .get_linked_groups_participants(&community_jid)
-    .await?;
-
-for p in &participants {
-    println!("{} (admin: {})", p.jid, p.is_admin);
-}
-```
-
-### remove_participants
-
-Remove participants from a community.
-
-```rust
-pub async fn remove_participants(
-    &self,
-    community_jid: &Jid,
-    participants: &[Jid],
-) -> Result<Vec<ParticipantChangeResponse>, CommunityError>
-```
-
-**Parameters:**
-- `community_jid` — JID of the community
-- `participants` — Array of participant JIDs to remove
-
-**Returns:**
-- `Vec<ParticipantChangeResponse>` — Result for each participant (see [`ParticipantChangeResponse`](/api/groups#participantchangeresponse))
-
-**Example:**
-```rust
-let to_remove = vec!["15551234567@s.whatsapp.net".parse()?];
-
-let results = client.community()
-    .remove_participants(&community_jid, &to_remove)
-    .await?;
-
-for result in results {
-    println!("{}: status {:?}", result.jid, result.status);
-}
-```
-
-## Types
-
-
-### CreateCommunityOptions
-
-```rust
-use whatsapp_rust::{CreateCommunityOptions, GroupDescription};
-let mut options = CreateCommunityOptions::new("Team")?
-    .with_description(GroupDescription::new("Team discussions")?);
-options.closed = true;
-let created = client.community().create(options).await?;
-```
-
-`name: GroupSubject` is required. Description is `Option<GroupDescription>`. Construction and execution validate input before remote creation, including unchecked response newtypes reused as inputs. The options are extensible and have no identity-free `Default`. Defaults remain open, admin-only subgroup creation, and general chat enabled. Configure public boolean fields as needed.
-
-### CreateCommunityResult
-
-Result of creating a community.
-
-```rust
-#[derive(Debug, Clone)]
-#[non_exhaustive]
-pub struct CreateCommunityResult {
-    pub metadata: GroupMetadata,
-}
-```
-
-The `metadata` field carries the full community parent metadata from the server, with `description: Option<String>` populated locally after the optional follow-up description IQ succeeds. See [`GroupMetadata`](/api/groups#groupmetadata) for the full field list.
-
-`CreateCommunityResult` is `#[non_exhaustive]`: struct-literal construction and exhaustive struct destructuring from outside the crate are both disallowed. Field reads are unaffected; add `..` to any exhaustive destructuring patterns.
-
-<Note>
-Prior to v0.6 this struct exposed only `gid: Jid` and derived `PartialEq, Eq`. The `Eq` derives were dropped because `GroupMetadata` does not implement them.
-</Note>
-
-### CommunitySubgroup
-
-A subgroup within a community. Implements `PartialEq` and `Eq`.
-
-```rust
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[non_exhaustive]
-pub struct CommunitySubgroup {
-    pub id: Jid,
-    pub subject: String,
-    pub participant_count: Option<u32>,
-    pub creation: Option<u64>,
-    pub owner: Option<Jid>,
-    pub is_default_sub_group: bool,
-    pub is_general_chat: bool,
-    pub is_hidden_group: bool,
-}
-```
-
-`CommunitySubgroup` is `#[non_exhaustive]`: struct-literal construction and exhaustive struct destructuring from outside the crate are both disallowed. Field reads are unaffected; add `..` to any exhaustive destructuring patterns.
-
-**Fields:**
-- `id` — Subgroup JID
-- `subject` — Subgroup name
-- `participant_count` — Number of participants (if available)
-- `creation` — Subgroup creation timestamp (Unix seconds), if available
-- `owner` — JID of the subgroup owner, if available
-- `is_default_sub_group` — Whether this is the default announcement subgroup
-- `is_general_chat` — Whether this is the general chat subgroup
-- `is_hidden_group` — Whether this subgroup is hidden from non-members in the community's subgroup list. Reflects the `hidden_group` property parsed from the MEX response; defaults to `false` if the server omits it.
-
-### SubgroupVisibility
-
-Visibility selected when a subgroup is created or linked. Implements `Copy`, `PartialEq`, `Eq`, and `Default` (`Visible`).
-
-```rust
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-#[non_exhaustive]
-pub enum SubgroupVisibility {
-    #[default]
-    Visible,
-    Hidden,
-}
-```
-
-**Variants:**
-- `Visible` — The subgroup appears in the community's subgroup list.
-- `Hidden` — The subgroup is omitted from the community's subgroup list for users who are not members. Visibility cannot be changed after linking.
-
-### CreateSubgroupOptions
-
-Options passed to [`create_subgroup_with_options`](#create_subgroup_with_options) when creating a subgroup already linked to a community.
-
-```rust
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[non_exhaustive]
-pub struct CreateSubgroupOptions {
-    pub name: String,
-    pub participants: Vec<Jid>,
-    pub parent_jid: Jid,
-    pub visibility: SubgroupVisibility,
-}
-```
-
-**Fields:**
-- `name` — Name of the new subgroup
-- `participants` — Initial participant JIDs to add to the subgroup
-- `parent_jid` — JID of the parent community to link the new subgroup under
-- `visibility` — Visibility applied at creation time (defaults to `Visible`)
-
-**Constructors:**
-```rust
-// Visible-by-default options
-let options = CreateSubgroupOptions::new("Announcements", &participants, community_jid.clone());
-
-// Override the visibility
-let hidden = options.with_visibility(SubgroupVisibility::Hidden);
-```
-
-### LinkSubgroupOptions
-
-Options for linking a single existing group to a community via [`link_subgroups_with_options`](#link_subgroups_with_options).
-
-```rust
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[non_exhaustive]
-pub struct LinkSubgroupOptions {
-    pub jid: Jid,
-    pub visibility: SubgroupVisibility,
-}
-```
-
-**Fields:**
-- `jid` — JID of the existing group to link
-- `visibility` — Visibility applied to this group at link time
-
-**Constructor:**
-```rust
-let opt = LinkSubgroupOptions::new(group_jid, SubgroupVisibility::Hidden);
-```
-
-### LinkSubgroupsResult
-
-Result of linking subgroups to a community. Implements `PartialEq` and `Eq`.
-
-```rust
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[non_exhaustive]
-pub struct LinkSubgroupsResult {
-    pub linked_jids: Vec<Jid>,
-    pub failed_groups: Vec<SubgroupFailure>,
-}
-```
-
-`LinkSubgroupsResult` is `#[non_exhaustive]`: struct-literal construction and exhaustive struct destructuring from outside the crate are both disallowed. Field reads are unaffected; add `..` to any exhaustive destructuring patterns.
-
-### UnlinkSubgroupsResult
-
-Result of unlinking subgroups from a community. Implements `PartialEq` and `Eq`.
-
-```rust
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[non_exhaustive]
-pub struct UnlinkSubgroupsResult {
-    pub unlinked_jids: Vec<Jid>,
-    pub failed_groups: Vec<SubgroupFailure>,
-}
-```
-
-`UnlinkSubgroupsResult` is `#[non_exhaustive]`: struct-literal construction and exhaustive struct destructuring from outside the crate are both disallowed. Field reads are unaffected; add `..` to any exhaustive destructuring patterns.
-
-
-### Community hierarchy
-
-Read `metadata.hierarchy()` or `overview.hierarchy`. `GroupHierarchy` preserves standalone, community, and subgroup-with-parent roles. `SubgroupKind` distinguishes regular, announcement, and general chat. Match extensible enums with a fallback. See [group hierarchy](/api/groups#grouphierarchy).
-
-### SubgroupFailure
-
-Link and unlink results retain successes and `failed_groups: Vec<SubgroupFailure>`. Each failure has `jid` and numeric `code`, including zero or unknown codes. Construct mocks with `SubgroupFailure::new(jid, code)`. Results can contain duplicates and partial successes; do not retry an entire batch as if it were atomic.
-
-## Error handling
-
-All community methods return `Result<T, CommunityError>`:
-
-```rust
-#[derive(Debug, thiserror::Error)]
-#[non_exhaustive]
-pub enum CommunityError {
-    #[error("{0}")]
-    Iq(#[from] IqError),
-    #[error("{0}")]
-    Mex(#[from] MexError),
-    #[error("{0}")]
-    Group(#[from] GroupError),
-    #[error("invalid community request: {0}")]
-    InvalidRequest(String),
-    #[error("subgroup join requires membership approval: {0}")]
-    MembershipApprovalRequired(Jid),
-    #[error("community {created_jid} created, but {step:?} failed: {source}")]
-    ConfigurationFailed {
-        created_jid: Jid,
-        step: CommunityConfigurationStep,
-        #[source]
-        source: Box<GroupError>,
-    },
-}
-```
-
-```rust
-use whatsapp_rust::CommunityError;
-
-match client.community().deactivate(&community_jid).await {
-    Ok(_) => println!("Community deactivated"),
-    Err(CommunityError::Iq(e)) => eprintln!("Server error: {}", e),
-    Err(CommunityError::Mex(e)) => eprintln!("MEX error: {}", e),
-    Err(e) => eprintln!("Error: {}", e),
-}
-```
-
-## Partial configuration failure
-
-`CommunityError::ConfigurationFailed { created_jid, step, source }` means creation succeeded but later configuration failed. `CommunityConfigurationStep::SetDescription` currently identifies description failure. Preserve the typed `GroupError` source and use the returned JID; blindly repeating creation can create another community.
-
-To resume the selected configuration explicitly, call `groups().set_description(&created_jid, Some(description), PreviousDescription::Resolve)`. Resolve the current token because the failed IQ may already have committed. There is no rollback, atomicity, automatic retry, or durable cancellation guarantee.
+## Source reference
+[Community inputs, partial errors and output DTOs](https://github.com/oxidezap/whatsapp-rust/blob/54ce6cd9007f4361a07dbad50718973bbf56e2e9/src/features/community.rs)

@@ -1029,7 +1029,7 @@ pub struct MessageSource {
 }
 ```
 
-`sender_alt` carries the LID/PN counterpart of `sender` whenever the stanza exposes one — including `status@broadcast` messages, which always include `participant_lid` (or `participant_pn` for LID-addressed status). The library reads it unconditionally so the [LID-PN cache](/concepts/storage#lidpncache) can re-warm from the message itself, matching WA Web's `WAWebMsgParser`.
+`sender_alt` carries the LID/PN counterpart of `sender` whenever the stanza exposes one — including `status@broadcast` messages, which always include `participant_lid` (or `participant_pn` for LID-addressed status). The library reads it unconditionally so the [LID-PN cache](/concepts/storage#cache-coherence) can re-warm from the message itself, matching WA Web's `WAWebMsgParser`.
 
 <Warning>
 Breaking change: `MessageInfo::r#type` changed from `String` to `Option<StanzaMessageType>`, and `MessageInfo::media_type` changed from `String` to `Option<EncMediaType>`. Migrate a comparison like `info.r#type == "text"` to `info.r#type == Some(StanzaMessageType::Text)`, or keep comparing strings with `info.r#type.as_ref().map(StanzaMessageType::as_str) == Some("text")` — same shape for `media_type` with `EncMediaType`. Code that previously treated `""` as "absent" now matches `None` instead.
@@ -1731,7 +1731,7 @@ A single group notification from the server can contain multiple actions. The li
 
 The server can also send `<notification type="w:gp2">` wrapping a `<groups_dirty>` child, naming one or more groups whose cached metadata is now stale (for example, after a bulk membership change made elsewhere). This is not an ordinary group notification — its `from` is the group server, not a group JID — so it produces no `GroupUpdate` event. Instead, the library evicts the cached snapshot for each named group and still dispatches the raw stanza as [`Event::Notification`](#notification) — an exception to that event's usual "unhandled types only" rule, since the library both acts on `groups_dirty` (the cache eviction) and forwards it.
 
-The next send to an affected group transparently re-fetches its routing snapshot from the server, since the send-path cache only serves an entry when it is populated. You do not need to fetch anything yourself in response to this notification — see [Cache group information](/guides/group-management#cache-group-information).
+The next send to an affected group transparently re-fetches its routing snapshot from the server, since the send-path cache only serves an entry when it is populated. You do not need to fetch anything yourself in response to this notification — see [Cache group information](/guides/group-management#separate-listing-from-routing).
 
 ## Contact notification events
 
@@ -2754,7 +2754,7 @@ pub struct ClientExpirationChanged {
 <Note>
 This is **notice, not an instruction**. The client keeps connecting until the server actually refuses it — the stanza is about the *build*, not the current connection — so whether to ship a newer version or alert an operator is the consumer's call; this library never disconnects on its own because of it.
 
-The recorded deadline is never sooner than **three days** out, even when the server's own answer is more abrupt (`t` at or before now) — a server that says "now" still has to leave a window in which the build can be replaced. The raw `t` is only acted on when it's sooner than the `expires_at` already stored — a `t` at or after that is treated as a stale retransmit or a host that hasn't caught up, and is ignored rather than granted as an extension. That gate gets re-evaluated against "now" each time, though, so it does *not* mean the stored deadline can only move earlier over time: a server that keeps resending the same already-elapsed `t` keeps clearing the gate (it stays "sooner than stored") and each acceptance re-floors three days out from the new "now" — pushing the stored deadline later each time even though `t` itself never changed. A dated deadline in the future, by contrast, settles once stored: restating it no longer clears the gate, so repeats change nothing and dispatch nothing. See [`ServerClientExpiration`](/concepts/storage#serverclientexpiration) for the persisted record and the full decision rule.
+The recorded deadline is never sooner than **three days** out, even when the server's own answer is more abrupt (`t` at or before now) — a server that says "now" still has to leave a window in which the build can be replaced. The raw `t` is only acted on when it's sooner than the `expires_at` already stored — a `t` at or after that is treated as a stale retransmit or a host that hasn't caught up, and is ignored rather than granted as an extension. That gate gets re-evaluated against "now" each time, though, so it does *not* mean the stored deadline can only move earlier over time: a server that keeps resending the same already-elapsed `t` keeps clearing the gate (it stays "sooner than stored") and each acceptance re-floors three days out from the new "now" — pushing the stored deadline later each time even though `t` itself never changed. A dated deadline in the future, by contrast, settles once stored: restating it no longer clears the gate, so repeats change nothing and dispatch nothing. See [`ServerClientExpiration`](/concepts/storage#validate-stored-secrets) for the persisted record and the full decision rule.
 </Note>
 
 **Example:**
@@ -3031,7 +3031,7 @@ pub struct IncomingCall {
 </Note>
 
 <Note>
-  [PR #1355](https://github.com/oxidezap/whatsapp-rust/pull/1355) added `video_orientation`. `IncomingCall` only fires for a stanza the peer sent, so this field is always their rotation, never your own. As a callee, it's the caller's rotation, carried on the `Offer`. As a caller, it's the callee's rotation, carried on the `Accept` you receive back. A video-from-start party announces its camera rotation exactly once, in that stanza, and sends no mid-call `<video>` of its own until the camera actually turns. Before this field existed, that initial rotation was dropped: a call starting with the peer's phone already sideways rendered upright until their next rotation change. See [Video I/O](/guides/voip-calls#video-io) in the VoIP guide for how this compares to `VideoFrame::orientation`.
+  [PR #1355](https://github.com/oxidezap/whatsapp-rust/pull/1355) added `video_orientation`. `IncomingCall` only fires for a stanza the peer sent, so this field is always their rotation, never your own. As a callee, it's the caller's rotation, carried on the `Offer`. As a caller, it's the callee's rotation, carried on the `Accept` you receive back. A video-from-start party announces its camera rotation exactly once, in that stanza, and sends no mid-call `<video>` of its own until the camera actually turns. Before this field existed, that initial rotation was dropped: a call starting with the peer's phone already sideways rendered upright until their next rotation change. See [Video I/O](/guides/voip-calls#video-i/o) in the VoIP guide for how this compares to `VideoFrame::orientation`.
 </Note>
 
 `GroupCallUpdate` is the same authoritative roster/relay type `CallHandle::group_state()` exposes once you've joined (via `GroupCallState::snapshot()` — see [Reading group state](/guides/voip-calls#reading-group-state)):
@@ -3662,8 +3662,6 @@ async fn handle_event(event: &Event, client: Arc<Client>) -> Result<()> {
     Complete client API reference
   </Card>
 </CardGroup>
-
-
 
 ## Subscriptions
 

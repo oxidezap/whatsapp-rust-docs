@@ -3,7 +3,11 @@ title: Contacts
 description: Contact lookup, profile picture, and user info operations
 ---
 
-The `Contacts` struct provides methods for checking WhatsApp registration status and retrieving user information. Use `client.pictures()` for profile picture lookups.
+<Note>
+Examples on this page target [source snapshot `54ce6cd`](https://github.com/oxidezap/whatsapp-rust/tree/54ce6cd9007f4361a07dbad50718973bbf56e2e9), not a crates.io release. Use the [current API guide](/guides/current-api) to select the matching dependency.
+</Note>
+
+The `Contacts` struct provides methods for checking WhatsApp registration status and retrieving profile pictures and user information.
 
 ## Access
 
@@ -101,10 +105,9 @@ for result in results {
 
 PN and LID queries use different wire protocols (matching WhatsApp Web's ExistsJob), so mixed inputs are automatically split into separate requests. LID-PN mappings discovered from results are persisted to the local cache.
 
+### Profile pictures
 
-### Picture lookup
-
-Use [`client.pictures().lookup(ProfilePictureRequest)`](/api/pictures) for user, bot, group, and community images. Contacts retains registration checks, user info, and username lookup; picture reads have one neutral facade.
+Use the [pictures facade](/api/pictures) for single contact, group or community lookups. Choose an explicit route and size and preserve unchanged, missing, unauthorized and error outcomes.
 
 ### get_user_info
 
@@ -251,11 +254,6 @@ match client.contacts().find_by_username("example.handle", None).await? {
 
 ## Types
 
-
-### Picture types
-
-`ProfilePicture`, `ProfilePictureLookup`, and `ProfilePictureType` are documented with the [pictures API](/api/pictures). Choose an explicit target and picture type for each request.
-
 ## Privacy & TC tokens
 
 For user JIDs (not groups/newsletters), the library automatically includes TC tokens when fetching profile pictures. TC tokens are used for privacy-gated operations.
@@ -364,3 +362,17 @@ let empty: Vec<Jid> = vec![];
 let results = client.contacts().is_on_whatsapp(&empty).await?;
 assert!(results.is_empty());
 ```
+
+## Migration from previous versions
+
+The `is_on_whatsapp` method previously accepted `&[&str]` (phone number strings). It now takes `&[Jid]`:
+
+```rust
+// Before
+let results = client.contacts().is_on_whatsapp(&["1234567890"]).await?;
+
+// After
+let results = client.contacts().is_on_whatsapp(&[Jid::pn("1234567890")]).await?;
+```
+
+The `get_info` method and `ContactInfo` type have been removed. Use `is_on_whatsapp` for registration checks (now includes `lid`, `pn_jid`, and `is_business` fields) or `get_user_info` for detailed profile data (status, picture ID).
