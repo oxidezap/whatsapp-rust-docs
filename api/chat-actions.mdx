@@ -432,7 +432,7 @@ async fn delete_local(client: &Client, target: &MessageRef<'_>) -> Result<(), Ap
 }
 ```
 
-The reference preserves the author, PN/LID namespace, and `from_me` direction. The app-state message index retains its existing format.
+The reference preserves the author, PN/LID namespace, and `from_me` direction. The app-state projection strips a received group author's device ID while keeping the account namespace. Direct-chat and own-message indices omit the participant. The index format is unchanged.
 
 <Note>
 This only removes the message from your own devices. The other party can still see the message. To delete for everyone, use `client.revoke_message()` instead.
