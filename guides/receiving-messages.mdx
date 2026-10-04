@@ -525,7 +525,7 @@ pub async fn retransmit_message(
 ) -> Result<(), SendError>
 ```
 
-The client derives the wire stanza from the native `wa::Message` and keeps ownership of routing, encryption, session/sender-key state, persistence, and transport — `MessageRetransmission` never accepts a pre-built stanza. `MessageRetransmission` is a small builder:
+The client derives the wire stanza from the native `wa::Message` and keeps ownership of routing, encryption, session/sender-key state, persistence, and transport; `MessageRetransmission` never accepts a pre-built stanza. `MessageRetransmission` is a small builder. Its constructor takes the original typed `MessageId`, and `message_id()` returns `&MessageId`. Use `MessageId::new` to validate a stored raw ID; preserve `StanzaId` for separate operations:
 
 ```rust
 MessageRetransmission::new(chat, requester, message, message_id, retry_count)
@@ -547,18 +547,21 @@ For a status retransmission, the client rebuilds the sender key immediately, but
 
 **Example:**
 ```rust
-use whatsapp_rust::{Freshness, MessageRetransmission};
+use whatsapp_rust::{Client, MessageId, MessageRetransmission, SendError, wacore_binary::Jid, waproto::whatsapp as wa};
 
-// requester is the device JID from an intercepted <receipt type="retry"> stanza
-let request = MessageRetransmission::new(
-    chat_jid.clone(),
-    requester_jid,
-    original_message.clone(),
-    original_message_id.clone(),
-    retry_count,
-);
-
-client.retransmit_message(request).await?;
+async fn retransmit(
+    client: &Client,
+    chat: Jid,
+    requester: Jid,
+    original_message: wa::Message,
+    original_message_id: MessageId,
+    retry_count: u8,
+) -> Result<(), SendError> {
+    let request = MessageRetransmission::new(
+        chat, requester, original_message, original_message_id, retry_count,
+    );
+    client.retransmit_message(request).await
+}
 ```
 
 <Note>

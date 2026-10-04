@@ -122,3 +122,15 @@ The send pipeline derives stanza metadata for polls, events, pins, media and bus
 ## Decrypt-fail suppression
 
 The send pipeline derives `decrypt-fail="hide"` for eligible add-ons and infrastructure content. It unwraps content before classification and attaches the attribute to encrypted nodes. Revokes are excluded from the edit-based rule. See the pinned send source for the complete predicate; callers do not need a second copied list of protobuf variants.
+
+## Generate a content ID
+
+```rust
+use whatsapp_rust::{Client, SendOptions};
+
+fn send_options(client: &Client) -> SendOptions {
+    SendOptions::default().with_message_id(client.generate_message_id())
+}
+```
+
+The generator returns `MessageId`, ready for `SendOptions`. Retransmission keeps the original content ID. A new edit or ACK-correlated operation uses its own `StanzaId`.

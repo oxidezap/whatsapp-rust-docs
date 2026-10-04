@@ -595,3 +595,20 @@ if message_info.source.is_group {
     ).await?;
 }
 ```
+
+### JSON persistence
+
+Serde preserves the enum representation: `ReadSelf` serializes as `"ReadSelf"`, `Delivered` as `"Delivered"`, and `Other(value)` as `{ "Other": value }`. Deserializing those representations restores the same variant, including empty strings and known-name collisions inside `Other`.
+
+```rust
+use whatsapp_rust::{serde_json, wacore::types::presence::ReceiptType};
+
+fn receipt_roundtrip() -> Result<(), serde_json::Error> {
+    let receipt = ReceiptType::Other("ReadSelf".into());
+    let json = serde_json::to_string(&receipt)?;
+    assert_eq!(serde_json::from_str::<ReceiptType>(&json)?, receipt);
+    Ok(())
+}
+```
+
+Use `parse` and `as_wire_str` for protocol values such as `read-self` and `delivery`. Protocol parsing can normalize an `Other` payload into a known variant; use Serde for exact persistence.

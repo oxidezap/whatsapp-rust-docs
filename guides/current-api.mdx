@@ -17,7 +17,21 @@ Pass `EditRequest::new(target, replacement)` to `edit_message`. Encrypted edits 
 
 Obtain `MessageRef` from `InboundMessage`, `MessageContext` or `SendResult`. For stored addressing, validate `MessageRef::new(chat, MessageId, original_sender, from_me)?`. Group and status references retain the original author. Construction validates shape and does not grant server permissions.
 
-Reactions, revokes, pins and keeps take that reference. Channel actions take `NewsletterMessageRef`: edits and revokes require the client `MessageId`; reactions and poll votes require the observed `ServerMessageId`. An outer `StanzaId` identifies the operation for ACK correlation. These IDs have separate purposes.
+Reactions, revokes, pins, keeps, stars and local message deletion take that reference. Message labels take the reference's chat and typed `MessageId`. Channel actions take `NewsletterMessageRef`: edits and revokes require the client `MessageId`; reactions and poll votes require the observed `ServerMessageId`. An outer `StanzaId` identifies the operation for ACK correlation. These IDs have separate purposes.
+
+## Waiters, activity, and media
+
+Keep the `NodeWaiter` returned by `wait_for_node` or `wait_for_sent_node` until completion. Dropping it removes its subscription even without traffic. An active incoming waiter can survive reconnect.
+
+Global availability uses `PresenceStatus`; chat activity uses `ChatActivity` in both outgoing calls and events. See [chatstate](/api/chatstate) and [receipt JSON persistence](/api/receipt#json-persistence).
+
+Reupload requests contain a `MessageRef` and a 32-byte media key. Identical concurrent requests share a recovery; conflicting uses of the same ID return an error. See [media reupload](/api/media-reupload).
+
+Download routes contain only hosts. Use `MediaRoute::new(hosts)` or `default_hosts()`. Downloadable values and writers follow platform send bounds. See [download](/api/download).
+
+## Push-name completion
+
+Inspect `PushNameOutcome`: `SyncPending` retains an app-state failure even though presence was sent and the local name updated. Retain the desired name and retry only synchronization with `sync_push_name` when appropriate. See [profile](/api/profile).
 
 ## Polls and events
 

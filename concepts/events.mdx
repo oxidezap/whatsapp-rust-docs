@@ -1281,6 +1281,8 @@ pub enum ReceiptType {
 ```
 
 <Note>
+For exact event persistence, use the [ReceiptType JSON representation](/api/receipt#json-persistence), which is separate from wire values.
+
 `ReceiptType` is `#[non_exhaustive]`. Server-driven sets like this grow over time (recent additions include `EncRekeyRetry`, `ReadSelf`, `PlayedSelf`, `PeerMsg`, and `HistorySync`), so your `match` arms must always include a wildcard (`_ => …`). New variants can be added in minor releases without a breaking change.
 </Note>
 
@@ -1440,46 +1442,24 @@ Event::ServerAck(ack) => {
 
 ### ChatPresence
 
-**Emitted:** For typing indicators and recording states
+Emitted for typing and recording activity. `ChatPresenceUpdate` has `source: MessageSource` and `state: ChatActivity`.
 
 ```rust
-#[derive(Debug, Clone, Serialize, bon::Builder)]
-#[non_exhaustive]
-pub struct ChatPresenceUpdate {
-    pub source: MessageSource,
-    pub state: ChatPresence,
-    pub media: ChatPresenceMedia,
-}
+use whatsapp_rust::{ChatActivity, wacore::types::events::Event};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-pub enum ChatPresence {
-    Composing,
-    Paused,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-pub enum ChatPresenceMedia {
-    Text,
-    Audio,
-}
-```
-
-**Example:**
-```rust
-Event::ChatPresence(update) => {
-    match (update.state, update.media) {
-        (ChatPresence::Composing, ChatPresenceMedia::Text) => {
-            println!("{} is typing...", update.source.sender);
-        }
-        (ChatPresence::Composing, ChatPresenceMedia::Audio) => {
-            println!("{} is recording audio...", update.source.sender);
-        }
-        (ChatPresence::Paused, _) => {
-            println!("{} stopped typing", update.source.sender);
+fn show_activity(event: &Event) {
+    if let Event::ChatPresence(update) = event {
+        match update.state {
+            ChatActivity::Typing => println!("{} is typing", update.source.sender),
+            ChatActivity::RecordingAudio => println!("{} is recording audio", update.source.sender),
+            ChatActivity::Idle => println!("{} stopped typing", update.source.sender),
+            _ => {}
         }
     }
 }
 ```
+
+Use this same semantic activity with `client.chatstate().send`. See [chatstate](/api/chatstate#activity-representation) for JSON and protocol projections.
 
 ### Presence
 
@@ -1490,7 +1470,7 @@ Event::ChatPresence(update) => {
 #[non_exhaustive]
 pub struct PresenceUpdate {
     pub from: Jid,
-    pub unavailable: bool,
+    pub status: PresenceStatus,
     pub last_seen: Option<DateTime<Utc>>,
 }
 ```
@@ -1498,7 +1478,7 @@ pub struct PresenceUpdate {
 **Example:**
 ```rust
 Event::Presence(update) => {
-    if update.unavailable {
+    if update.status == PresenceStatus::Unavailable {
         println!("{} is offline", update.from);
         if let Some(last_seen) = update.last_seen {
             println!("Last seen: {}", last_seen);

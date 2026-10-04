@@ -358,7 +358,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ## Complete example with logging
 
-Here's a production-ready example with proper logging, reactions, message editing, and media CDN reuse:
+Add the logging dependencies alongside the pinned `whatsapp-rust` and Tokio dependencies above:
+
+```toml
+log = "0.4"
+env_logger = "0.11"
+```
+
+This example logs events and responds with text or reused media:
 
 ```rust src/main.rs
 use log::{error, info};
@@ -377,7 +384,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             writeln!(
                 buf,
                 "{} [{:<5}] [{}] - {}",
-                wacore::time::now_utc().format("%H:%M:%S"),
+                whatsapp_rust::wacore::time::now_utc().format("%H:%M:%S"),
                 record.level(),
                 record.target(),
                 record.args()

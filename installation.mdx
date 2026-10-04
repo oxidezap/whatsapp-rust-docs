@@ -41,7 +41,7 @@ Every sub-crate path is reachable through the main crate:
 - `whatsapp_rust::async_trait` — the macro required to implement those traits
 - `whatsapp_rust::bytes` — `Transport::send` payloads
 - `whatsapp_rust::chrono` — timestamps returned by `wacore::time` and message metadata
-- `whatsapp_rust::futures` — the `oneshot::Receiver` returned by response-waiting accessors
+- `whatsapp_rust::futures`; future utilities and the cancellation error used by node waiters
 - `whatsapp_rust::serde`, `whatsapp_rust::serde_json`, `whatsapp_rust::async_channel`
 
 <Note>

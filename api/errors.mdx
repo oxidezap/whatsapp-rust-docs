@@ -469,21 +469,7 @@ pub enum TcTokenError {
 
 ### MediaReuploadError
 
-```rust
-#[non_exhaustive]
-pub enum MediaReuploadError {
-    #[error("{0}")]
-    Client(#[from] ClientError),
-    #[error("client is not logged in")]
-    NotLoggedIn,
-    #[error("invalid media reupload request: {0}")]
-    InvalidRequest(String),
-    #[error("media retry notification timed out")]
-    Timeout,
-    #[error("{0}")]
-    Internal(#[from] anyhow::Error),
-}
-```
+Reupload errors distinguish missing local LID, conflicting requests, receipt ACK timeout or rejection, and notification timeout. Client and internal causes use `Arc` so coalesced callers retain the same cause. See [reupload errors](/api/media-reupload#error-handling).
 
 ### PresenceError
 
