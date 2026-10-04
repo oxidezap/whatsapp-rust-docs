@@ -10,12 +10,12 @@
   "navbar": {
     "primary": {
       "type": "github",
-      "href": "https://github.com/jlucaso1/whatsapp-rust"
+      "href": "https://github.com/oxidezap/whatsapp-rust"
     }
   },
   "footer": {
     "socials": {
-      "github": "https://github.com/jlucaso1/whatsapp-rust"
+      "github": "https://github.com/oxidezap/whatsapp-rust"
     }
   },
   "navigation": {
@@ -47,6 +47,7 @@
               {
                 "group": "Guides",
                 "pages": [
+                  "guides/current-api",
                   "guides/sending-messages",
                   "guides/receiving-messages",
                   "guides/media-handling",
@@ -103,6 +104,7 @@
                 "pages": [
                   "api/groups",
                   "api/contacts",
+                  "api/pictures",
                   "api/presence",
                   "api/chatstate",
                   "api/blocking",
@@ -141,62 +143,6 @@
                 ]
               }
             ]
-          },
-          {
-            "tab": "Changelog",
-            "groups": [
-              {
-                "group": "Changelog",
-                "pages": [
-                  "changelog/overview",
-                  "changelog/2026-09-24-appstate-baseline-bootstrapped",
-                  "changelog/2026-09-23-favorites-sync-event",
-                  "changelog/2026-09-23-media-download-hash-verification",
-                  "changelog/2026-09-23-sticker-sync-events",
-                  "changelog/2026-09-23-abprops-public-read",
-                  "changelog/2026-09-22-community-hidden-subgroups",
-                  "changelog/2026-09-20-groups-public-surface-redesign",
-                  "changelog/2026-09-18-voip-pluggable-media-backend",
-                  "changelog/2026-09-13-history-sync-admission",
-                  "changelog/2026-09-09-autofix-rustfmt",
-                  "changelog/2026-08-07-release-0-7-0",
-                  "changelog/2026-06-15-token-tiny-map",
-                  "changelog/2026-06-14-drop-moka-portable-cache",
-                  "changelog/2026-06-12-binary-size-ci",
-                  "changelog/2026-06-11-bot-api-overhaul",
-                  "changelog/2026-06-11-dockerfile-share-generics",
-                  "changelog/2026-06-11-pdo-once-per-message",
-                  "changelog/2026-06-11-history-sync-secret-prescan",
-                  "changelog/2026-06-10-jid-into-api-convention",
-                  "changelog/2026-06-10-prekey-unupload-watermark",
-                  "changelog/2026-06-10-cag-enc-reactions-comments",
-                  "changelog/2026-06-10-hrtb-closures",
-                  "changelog/2026-06-10-server-aware-lookup-probe",
-                  "changelog/2026-06-10-phash-arena-sort",
-                  "changelog/2026-06-10-attrs-inline-smallvec",
-                  "changelog/2026-06-09-error-strictness",
-                  "changelog/2026-06-09-arc-device-snapshot",
-                  "changelog/2026-06-09-recv-zero-copy",
-                  "changelog/2026-06-09",
-                  "changelog/2026-06-09-non-exhaustive",
-                  "changelog/2026-06-09-device-list",
-                  "changelog/2026-06-09-device-list-remove",
-                  "changelog/2026-06-09-usync-empty-record",
-                  "changelog/2026-06-09-retry-resync",
-                  "changelog/2026-06-09-arc-session-cache",
-                  "changelog/2026-06-09-lid-pn-arc-str",
-                  "changelog/2026-06-09-group-send-perf",
-                  "changelog/2026-06-09-groupinfo-lid-pn-maps",
-                  "changelog/2026-06-09-appstate-blocking-handoff",
-                  "changelog/2026-06-08",
-                  "changelog/2026-06-06",
-                  "changelog/2026-06-05-abprops",
-                  "changelog/2026-06-05",
-                  "changelog/2026-06-04",
-                  "changelog/2026-06-02"
-                ]
-              }
-            ]
           }
         ]
       },
@@ -204,7 +150,7 @@
         "language": "pt",
         "tabs": [
           {
-            "tab": "Documentação",
+            "tab": "Documenta\u00e7\u00e3o",
             "groups": [
               {
                 "group": "Primeiros Passos",

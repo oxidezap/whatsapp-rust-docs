@@ -3,23 +3,11 @@ title: Error Types
 description: Typed error reference for all whatsapp-rust public APIs
 ---
 
-As of PR #893, all feature-domain APIs return a typed, domain-specific error instead of `anyhow::Error`. Use `?` to propagate errors into any `anyhow` context — all types implement `std::error::Error` and are `#[non_exhaustive]`, so your existing error-handling code compiles unchanged. Lower-level APIs such as media upload/download are not covered by this page and may still surface `anyhow::Error` directly.
+Public operations expose typed errors with their source chains. Match extensible errors with a fallback arm. Use `?` to propagate into an erased `anyhow` return boundary when needed.
 
-As of PR #1090, the connect/lifecycle surface (`Client::connect`, `wait_for_socket`, `wait_for_connected`), the background Signal maintenance surface (`Client::rotate_signed_pre_key`, `Client::flush_pending_signal_state`), and the message-edit target-key resolvers (`EncryptedEdit::original_sender_jid`, `SecretEncrypted::original_sender_jid`/`original_sender_for_dispatch`) also return typed errors — see [`ConnectError`](#connecterror), [`SignalMaintenanceError`](#signalmaintenanceerror), and [`MessageEditError`](#messageediterror) below. `Client::logout()` is now infallible (`()`, not `Result<(), _>`): the deregistration IQ it sends is best-effort, so there was nothing for a caller to branch on.
+`Client::download` and `download_to_writer` return `ClientDownloadError`; upload currently returns `anyhow::Error`. `logout()` returns `LogoutReport` with separate deregistration and shutdown outcomes. See [lifecycle reports](/api/client#logout) and [download outcomes](/api/download#clientdownloaderror).
 
-As of PR #1100, every wrapping variant that used to be `#[error(transparent)]` is `#[error("{0}")]` instead — same `Display` output, but the wrapped error is now reachable via `std::error::Error::source()` instead of being erased. [`ErrorChainExt`](#error-chain-recovery) is a new extension trait, implemented for every `std::error::Error`, that walks that chain for you: `server_rejection()`, `is_timeout()`, `is_transport_unavailable()`, and `store_failure()` answer type-agnostically across every error on this page, without downcasting or string-matching. See [Error chain recovery](#error-chain-recovery) below.
-
-As of PR #1195, `ErrorChainExt` also answers `http_status()` — the HTTP status code behind a refused download, upload, sticker-pack fetch, or app-version fetch, recovered from a [`HttpStatusError`](#httpstatuserror) node the same way `server_rejection()` recovers an IQ rejection. This is the one place the "lower-level APIs … may still surface `anyhow::Error` directly" caveat above gets a typed escape hatch: `download`/`upload` still return `anyhow::Error`, but the status inside that error is now recoverable by type instead of by parsing `Display` text. See [Error chain recovery](#error-chain-recovery) below.
-
-As of PR #1257, `IqError::ServerError` also carries `response: RejectionStanza` — the `type="error"` stanza itself, handed over whole the same way a `type="result"` response already was, alongside the four fields this crate parses off it (`code`, `text`, `error_type`, `backoff`). See [`RejectionStanza`](#rejectionstanza) below.
-
-As of PR #1261, `wacore::bot_message::decrypt_bot_message` (and its private decryption helper) return `Result<T, BotMessageError>` instead of `anyhow::Result<T>`. Unlike the entries above, this is **a breaking change to `wacore`'s public API**, not an additive one — a caller matching on the previous `anyhow::Error` needs to switch to the typed enum. See [`BotMessageError`](#botmessageerror) below.
-
-As of PR #1299, a DM send that reaches no device of its recipient now fails instead of silently succeeding. A DM's recipient devices and the sender's own companion devices used to share one participant list, and the old guard only checked whether that list was empty. That missed one shape: every recipient device fails to encrypt (no session, a refused pre-key bundle), but a sender's own companion still succeeds. The stanza then went out carrying only the sender's own devices. The server acked it, and `send_message` returned `Ok` even though the recipient received nothing. Two conditions now surface as `SendError::NoRecipientDevice(wacore::send::NoRecipientDeviceError)` instead of `Ok` or the `Internal` catch-all: every resolved recipient device failing to encrypt, and the fan-out resolving no recipient device at all for a destination that isn't one of the sender's own identities. See [`NoRecipientDeviceError`](#norecipientdeviceerror) below.
-
-As of PR #1360, `ConnectError::Version` no longer follows from every version-source failure on the `wasm32` target. That target fetches the version from the Facebook JS SDK bundle at `connect.facebook.net`, which sits on common tracker blocklists. A client blocked from reaching it now connects anyway, on the version the device already holds, and reports the fallback on [`Event::Connected`](/concepts/events#connected) via `app_version_fallback` instead of failing `connect()`. The native target's source (`sw.js`) is unchanged — a client that can't reach it still fails with `ConnectError::Version`, since that host serves WhatsApp Web itself and an unreachable `sw.js` is a real break. See [Connected](/concepts/events#connected) for the fallback payload.
-
-This is also **a breaking change** for a direct caller of `whatsapp_rust::version::resolve_and_update_version` (most callers only go through `Client::connect`, which absorbs it): its return type changed from `Result<()>` to `Result<Option<wacore::types::events::AppVersionFallback>>`. A caller discarding the result (`resolve_and_update_version(...).await?;`) keeps compiling unchanged; one that named the `Ok` type as `()` needs to switch to `Option<AppVersionFallback>`.
+`ErrorChainExt` recovers `server_rejection()`, `http_status()`, `is_timeout()`, `is_transport_unavailable()`, and `store_failure()` from typed source chains without parsing display strings. See [error chain recovery](#error-chain-recovery).
 
 ## Error hierarchy
 
@@ -32,7 +20,7 @@ ClientError          (transport/connection base — embedded by select domain er
   ├── Iq(IqError)
   └── Internal(anyhow::Error)
 
-ConnectError          (Client::connect, wait_for_socket, wait_for_connected)
+ConnectError          (Client::connect, wait_for_socket_ready, wait_for_session_ready)
   ├── AlreadyConnected
   ├── NotActivated
   ├── Shutdown
@@ -101,7 +89,7 @@ pub trait ErrorChainExt {
 
 - `sources()` — an iterator over the error and everything reachable from it via `source()`, nearest first. Use this to recover a domain type the other methods don't model.
 - `server_rejection()` — the [`ServerRejection`](#serverrejection) behind this error, if any of the three types that can carry one (`wacore::request::IqError`, `crate::request::IqError`, or the crate-boundary `ServerErrorCode`) appear anywhere in the chain. Reports IQ-level rejections only — `MexError::ExtensionError`'s `code` is a GraphQL extension code, a different space from the IQ `code` attribute, so it is deliberately not reported here.
-- `http_status()` — added in PR #1195. Recovers the HTTP status code behind this error, if any, from a [`HttpStatusError`](#httpstatuserror) node anywhere in the chain. Populated by `Client::download`/`download_to_writer`/`download_from_params*`, `Client::upload`/`upload_stream`, `Client::fetch_sticker_pack`, and the internal app-version fetch behind `Client::connect` (`sw.js`, or the Facebook JS SDK bundle on `wasm32`; see [HTTP Client](/api/http-client#the-version-fetch-does-not-pool-a-connection)). Each of those attaches the status only when the client refused a *completed* HTTP exchange. `None` does not mean no HTTP exchange happened — a body that downloaded fine and then failed decryption or hash validation also reports `None`, since no refused status was ever attached. Treat `None` as "no typed refusal is on the chain," not as "nothing came back from the CDN," and inspect the underlying cause instead of assuming it is always the caller's own bug. Kept separate from `server_rejection()` — a CDN refusing a byte range and the chat server refusing a stanza are different layers with different remedies, so one accessor answering for both would report a number while hiding which thing to retry.
+- `http_status()` — added in PR #1195. Recovers the HTTP status code behind this error, if any, from a [`HttpStatusError`](#httpstatuserror) node anywhere in the chain. Populated by `Client::download`/`download_to_writer`/`download*`, `Client::upload`/`upload_stream`, `Client::fetch_sticker_pack`, and the internal app-version fetch behind `Client::connect` (`sw.js`, or the Facebook JS SDK bundle on `wasm32`; see [HTTP Client](/api/http-client#the-version-fetch-does-not-pool-a-connection)). Each of those attaches the status only when the client refused a *completed* HTTP exchange. `None` does not mean no HTTP exchange happened — a body that downloaded fine and then failed decryption or hash validation also reports `None`, since no refused status was ever attached. Treat `None` as "no typed refusal is on the chain," not as "nothing came back from the CDN," and inspect the underlying cause instead of assuming it is always the caller's own bug. Kept separate from `server_rejection()` — a CDN refusing a byte range and the chat server refusing a stanza are different layers with different remedies, so one accessor answering for both would report a number while hiding which thing to retry.
 - `is_timeout()` — whether the operation ran out of time: a request that got no answer, or a connect/handshake step that never completed.
 - `is_transport_unavailable()` — whether the failure was the transport being gone (disconnected, socket/channel closed) rather than the operation being refused. Mirrors the judgement the send and receive paths already make internally when deciding whether a failure is worth retrying.
 - `store_failure()` — the `StoreError` behind this error, if a persistence backend failed anywhere in the chain.
@@ -129,7 +117,7 @@ let cause: &(dyn std::error::Error + 'static) = err.as_ref();
 if cause.is_timeout() { /* ... */ }
 ```
 
-`http_status()` follows the same pattern — useful for `download`/`upload`, which still return bare `anyhow::Error`:
+Call `http_status()` directly on typed download errors. An upload error returned as `anyhow::Error` uses the annotated `as_ref()` projection above:
 
 ```rust
 use whatsapp_rust::ErrorChainExt;
@@ -137,8 +125,7 @@ use whatsapp_rust::ErrorChainExt;
 match client.download(downloadable).await {
     Ok(bytes) => { /* ... */ }
     Err(e) => {
-        let cause: &(dyn std::error::Error + 'static) = e.as_ref();
-        match cause.http_status() {
+        match e.http_status() {
             // 500/502/503/504 are the CDN statuses normally worth a retry;
             // 501/505 mean the request itself is unsupported and won't
             // succeed on a resend. Apply your own policy per status.
@@ -205,7 +192,7 @@ pub struct HttpStatusError {
 }
 ```
 
-The download and upload paths attach this as the `source` of the `anyhow::Error` they return — `anyhow::Error::new(HttpStatusError { status }).context("Download failed with status: 403")` — so the message a caller logs is unchanged while the status becomes reachable by type via `http_status()` instead of only by parsing that message. Re-exported as `whatsapp_rust::http::HttpStatusError`.
+The download and upload paths retain `HttpStatusError` in their error source chains. Typed `ClientDownloadError` and erased upload errors both expose that status through `ErrorChainExt::http_status()`. Re-exported as `whatsapp_rust::http::HttpStatusError`.
 
 <Note>
 Rendering changed alongside the `source()` fix: a wrapping variant's `Display` still prints exactly what it wraps, so code that concatenates every node in a chain (a logging layer, a `display_chain` helper) now sees the same sentence repeated once per wrapping variant — e.g. `CommunityError::Group(GroupError::Iq(..))` is three nodes rendering one sentence three times. That repetition is the cost of keeping the wrapped error downcastable. Print the innermost cause, or collapse equal neighbours, rather than joining every node in the chain.
@@ -232,7 +219,7 @@ Rendering changed alongside the `source()` fix: a wrapping variant's `Display` s
 | `TcTokenError` | All `TcToken::*` methods | `whatsapp_rust` |
 | `MediaReuploadError` | `MediaReupload::request` | `whatsapp_rust` |
 | `PresenceError` | All `Presence::*` methods | `whatsapp_rust` |
-| `ConnectError` | `Client::connect`, `Client::wait_for_socket`, `Client::wait_for_connected` | `whatsapp_rust` |
+| `ConnectError` | `Client::connect`, `Client::wait_for_socket_ready`, `Client::wait_for_session_ready` | `whatsapp_rust` |
 | `SignalMaintenanceError` | `Client::rotate_signed_pre_key`, `Client::flush_pending_signal_state` | `whatsapp_rust` |
 | `MessageEditError` | `EncryptedEdit::original_sender_jid`, `SecretEncrypted::original_sender_jid`, `SecretEncrypted::original_sender_for_dispatch` | `whatsapp_rust` |
 | `BotMessageError` | `wacore::bot_message::decrypt_bot_message` | `wacore` |
@@ -261,7 +248,7 @@ pub enum SendError {
 }
 ```
 
-`NoRecipientDevice` — added in PR #1299. A DM had no recipient device available: every resolved recipient device failed encryption, or no recipient device resolved for a non-self destination, so nothing was sent. Distinct from a transport failure: the connection is fine and the message id was never on the wire. The useful retry is `SendOptions::default().with_device_freshness(Freshness::Refresh)` passed to [`send_message_with_options`](/api/send#send_message_with_options), which forces the recipient's device list to re-resolve instead of reading the cached one. An immediate resend with the same (cached) options would hit the same empty result. Wraps [`NoRecipientDeviceError`](#norecipientdeviceerror), the typed cause from `wacore`, reachable via `source()`.
+`NoRecipientDevice` — added in PR #1299. A DM had no recipient device available: every resolved recipient device failed encryption, or no recipient device resolved for a non-self destination, so nothing was sent. Distinct from a transport failure: the connection is fine and the message id was never on the wire. The useful retry is `SendOptions::default().with_device_freshness(Freshness::Refresh)` passed to [`send(SendRequest)`](/api/send#send), which forces the recipient's device list to re-resolve instead of reading the cached one. An immediate resend with the same (cached) options would hit the same empty result. Wraps [`NoRecipientDeviceError`](#norecipientdeviceerror), the typed cause from `wacore`, reachable via `source()`.
 
 `PrimaryDeviceRejected` — added in [PR #1362](https://github.com/oxidezap/whatsapp-rust/pull/1362). The pre-key fetch that establishes sessions ahead of a DM send got back a `406` naming a primary device (device 0), either the recipient's or the sender's own, so nothing was built or sent. This mirrors WA Web's `ensureE2ESessions`, which throws on a named rejection unless every rejected device is a companion (`device != null && device !== DEFAULT_DEVICE_ID`). A companion's `406`, and any non-406 rejection code even on a primary, behave as before: refreshed and skipped, not fatal. The device lists the fetch named are already refreshed by the time this returns, so retry immediately — the retry re-resolves them instead of repeating the same question. This is distinct from `NoRecipientDevice`: that variant means encryption was attempted and failed, or had nothing to attempt, while `PrimaryDeviceRejected` means the fetch that would have supplied key material was refused outright, before encryption started.
 
@@ -514,7 +501,7 @@ pub enum PresenceError {
 
 ### ConnectError
 
-Returned by [`Client::connect`](/api/client#connect), [`Client::wait_for_socket`](/api/client#wait_for_socket), and [`Client::wait_for_connected`](/api/client#wait_for_connected). Added in PR #1090, replacing bare `anyhow::Error` on all three methods. As of PR #1258, `connect()`'s success case changed too — it resolves to `Result<Connection<'_>, ConnectError>` rather than `Result<(), ConnectError>`; see [`Connection`](/api/client#connection).
+Returned by [`Client::connect`](/api/client#connect), [`Client::wait_for_socket_ready`](/api/client#wait_for_socket_ready), and [`Client::wait_for_session_ready`](/api/client#wait_for_session_ready). Added in PR #1090, replacing bare `anyhow::Error` on all three methods. As of PR #1258, `connect()`'s success case changed too — it resolves to `Result<Connection<'_>, ConnectError>` rather than `Result<(), ConnectError>`; see [`Connection`](/api/client#connection).
 
 ```rust
 #[non_exhaustive]
@@ -544,9 +531,9 @@ pub enum ConnectError {
 **Variants:**
 - `AlreadyConnected` — a connection is already up, or another `connect()` attempt is already in flight. This is the old `ClientError::AlreadyConnected` case, moved here.
 - `NotActivated` — construction never completed (only reachable with the `client-lifecycle` feature), so the attempt was rejected before any I/O.
-- `Shutdown` — added in PR #1258. The client was already shut down (`disconnect()`, `logout()`, or `signal_shutdown_sync()`) before or during this `connect()` attempt. Shutdown is final and non-reversible, so this is refused rather than reviving a client the application was already told is gone — build a new client instead of reconnecting this one.
+- `Shutdown` — added in PR #1258. The client was already shut down (`shutdown()`, `logout()`, or `signal_shutdown_sync()`) before or during this `connect()` attempt. Shutdown is final and non-reversible, so this is refused rather than reviving a client the application was already told is gone — build a new client instead of reconnecting this one.
 - `Paused` — added in PR #1265. [`Client::pause`](/api/client#pause) is in effect. Unlike `Shutdown` this is not final: [`Client::resume`](/api/client#resume) lifts it and `connect()` works again. Re-checked at every step of the connect graph (version fetch, transport open, handshake, publish), so an attempt already in flight when `pause()` lands is retracted rather than published, not just refused for attempts that start after.
-- `Timeout` — a step of the connect flow ran out of time. `stage` says which one (see [`ConnectStage`](#connectstage) below); `wait_for_socket`/`wait_for_connected` always report `Socket`/`Ready` respectively.
+- `Timeout` — a step of the connect flow ran out of time. `stage` says which one (see [`ConnectStage`](#connectstage) below); `wait_for_socket_ready`/`wait_for_session_ready` always report `Socket`/`Ready` respectively.
 - `Version` / `Transport` — the app-version resolution or transport factory failed outright (not a timeout). As of PR #1195, if `Version` was caused by a non-2xx response fetching the app version (`sw.js`, or the Facebook JS SDK bundle on `wasm32`), the status is recoverable via `err.http_status()` ([`ErrorChainExt`](#error-chain-recovery)) instead of only appearing in the message. As of PR #1360, `Version` is no longer necessarily the outcome of a failed fetch on the `wasm32` target: that target's source is survivable, so a client blocked from reaching it connects on a fallback version instead — see [Connected](/concepts/events#connected). The native target's source stays fatal, so `Version` there is unchanged.
 - `Handshake` — the Noise handshake failed after the transport was up. Wraps `HandshakeError` (see [WebSocket & Noise Protocol](/advanced/websocket-handling#handshake-errors)) via `#[from]`, so `?` still works and `matches!(err, ConnectError::Handshake(e) if e.is_transient())` replaces the old `err.downcast_ref::<HandshakeError>()` pattern for deciding whether a failed reconnect attempt is worth retrying.
 
@@ -608,7 +595,7 @@ pub enum SignalMaintenanceError {
 
 ### MessageEditError
 
-Returned by `EncryptedEdit::original_sender_jid`, `SecretEncrypted::original_sender_jid`, and `SecretEncrypted::original_sender_for_dispatch` — the target-key sender resolvers used when decrypting `secret_encrypted_message` envelopes (message edits, poll edits/add-option, event edits). Added in PR #1090, replacing bare `anyhow::Error`. See [Decrypting secret-encrypted envelopes](/api/polls#decrypting-secret-encrypted-envelopes) for how these methods are used.
+Returned by `EncryptedEdit::original_sender_jid`, `SecretEncrypted::original_sender_jid`, and `SecretEncrypted::original_sender_for_dispatch` — the target-key sender resolvers used when decrypting `secret_encrypted_message` envelopes (message edits, poll edits/add-option, event edits). Added in PR #1090, replacing bare `anyhow::Error`. Read the [pinned target-key resolvers](https://github.com/oxidezap/whatsapp-rust/blob/54ce6cd9007f4361a07dbad50718973bbf56e2e9/wacore/src/proto_helpers.rs) when handling an encrypted add-on.
 
 ```rust
 #[non_exhaustive]
@@ -736,326 +723,16 @@ pub enum IqError {
 
 Added in PR #1100: `wacore::request::IqError` gained public `is_timeout()` (`true` only for `Timeout`) and `is_transport_unavailable()` (`true` for `NotConnected`, `Disconnected`, and `InternalChannelClosed`) methods, each an exhaustive match so a future variant has to be classified rather than silently defaulting to `false`. `whatsapp_rust::request::IqError` (the crate-level type shown above, with the extra `Socket`/`EncryptSend`/`ClientState`/`EncodeError`/`ParseError` variants) makes the same judgement internally but does not expose it publicly — go through [`ErrorChainExt`](#error-chain-recovery) instead, which handles both types.
 
-Added in PR #1257: `ServerError` carries `response: RejectionStanza` — see [`RejectionStanza`](#rejectionstanza) above and the [migration note](#from-pr-1257-servererror-carries-the-rejection-stanza) below. Matching with `..` is unaffected by this field. A match that already names all four former fields without `..` needs `..` added (or `response` bound too) — Rust rejects a struct pattern missing a field with `E0027`. Constructing the variant by hand (mainly test fixtures) needs updating the same way.
+Added in PR #1257: `ServerError` carries `response: RejectionStanza` — see [`RejectionStanza`](#rejectionstanza) above for the preserved node. Matching with `..` is unaffected by this field. A match that already names all four former fields without `..` needs `..` added (or `response` bound too) — Rust rejects a struct pattern missing a field with `E0027`. Constructing the variant by hand (mainly test fixtures) needs updating the same way.
 
-## Migration guide
+## Handling current errors
 
-### From `anyhow::Error`
+Match the operation's typed error and retain its source chain. For example, an IQ `ServerError` retains the original rejection node and its optional `backoff`; an HTTP adapter preserves typed status failures. Avoid parsing display strings to recover status codes.
 
-If your handler used `?` into `anyhow`:
+`ClientDownloadError` wraps the final outcome after any media refresh/retry. A writer download may have already changed the sink when it fails; consult the [download contract](/api/download) before reusing it.
 
-```rust
-// Before — still compiles unchanged
-async fn my_fn() -> anyhow::Result<()> {
-    client.send_message(jid, msg).await?;  // SendError: Into<anyhow::Error>
-    Ok(())
-}
-```
+A successful send returns `SendResult`, including the constructed message and optional `recipient_fanout`. Inspect partial fanout when your application needs to report devices the send skipped. It does not confirm recipient delivery. `PrimaryDeviceRejected` is an error for a named primary-device pre-key rejection, rather than a successful send to no established session.
 
-If you were matching on `anyhow::Error` downcasts, switch to typed matching:
+Edits, revokes, pins, and keeps also return `SendResult`. Construct an `EditRequest` or use a typed `MessageRef` as shown in [message actions](/api/send). Channel actions use `NewsletterMessageRef` and return the outcome documented by the [newsletter API](/api/newsletter).
 
-```rust
-// Before
-match client.send_message(jid, msg).await {
-    Ok(r) => { /* ... */ }
-    Err(e) => eprintln!("send failed: {e}"),
-}
-
-// After — match specific variants
-use whatsapp_rust::SendError;
-match client.send_message(jid, msg).await {
-    Ok(r) => { /* ... */ }
-    Err(SendError::NotLoggedIn) => eprintln!("not authenticated"),
-    Err(SendError::Iq(e)) => eprintln!("IQ failed: {e}"),
-    Err(SendError::InvalidRequest(msg)) => eprintln!("bad request: {msg}"),
-    Err(e) => eprintln!("send failed: {e}"),
-}
-```
-
-### IqError::ClientState boxing
-
-```rust
-// Before
-Err(IqError::ClientState(e)) => { /* e: ClientError */ }
-
-// After — dereference the box
-Err(IqError::ClientState(e)) => { /* *e: ClientError */ }
-```
-
-### From PR #1090: `connect()`/`logout()`/Signal maintenance
-
-```rust
-// Before
-if let Err(e) = client.connect().await {
-    if e.downcast_ref::<ClientError>().is_some_and(|e| matches!(e, ClientError::AlreadyConnected)) {
-        // ...
-    }
-}
-client.logout().await?;
-
-// After
-use whatsapp_rust::ConnectError;
-if let Err(e) = client.connect().await {
-    if matches!(e, ConnectError::AlreadyConnected) {
-        // ...
-    }
-}
-client.logout().await; // infallible — no `?` needed anymore
-```
-
-<Note>
-As of PR #1258, `connect()`'s `Ok` case changed too — this snippet only shows the error-matching migration, so it still discards a successful connection. See the [`connect()` migration](/api/client#connect) for the full picture:
-
-```rust
-use whatsapp_rust::ConnectError;
-match client.connect().await {
-    Ok(connection) => {
-        connection.read_until_disconnected().await;
-    }
-    Err(ConnectError::AlreadyConnected) => {
-        // ...
-    }
-    Err(e) => { /* ... */ }
-}
-client.logout().await;
-```
-</Note>
-
-### From PR #1100: error chain recovery
-
-If you were walking `source()` by hand to recover a server rejection or classify a failure, switch to [`ErrorChainExt`](#error-chain-recovery). This is the shape the crate's own internal helper had before PR #1100 (`ClientError::is_transport_unavailable` is public; the `IqError` half required a call this crate could make on its own type but a downstream consumer could not, since it wasn't exposed):
-
-```rust
-// Before (internal to this crate — the IqError check isn't public API)
-fn is_transport_unavailable(err: &anyhow::Error) -> bool {
-    err.chain().any(|cause| {
-        cause
-            .downcast_ref::<ClientError>()
-            .is_some_and(ClientError::is_transport_unavailable)
-            || cause
-                .downcast_ref::<IqError>()
-                .is_some_and(|iq| matches!(iq, IqError::NotConnected | IqError::Disconnected(_) | IqError::InternalChannelClosed))
-    })
-}
-
-// After — works the same from inside or outside the crate
-use whatsapp_rust::ErrorChainExt;
-fn is_transport_unavailable(err: &anyhow::Error) -> bool {
-    let cause: &(dyn std::error::Error + 'static) = err.as_ref();
-    cause.is_transport_unavailable()
-}
-```
-
-If you concatenated an error's full chain (e.g. a logging layer joining every `source()` node into one string), be aware the text changed: a wrapping variant still renders exactly what it wraps, so `#[error(transparent)]` becoming `#[error("{0}")]` means a chain like `CommunityError::Group(GroupError::Iq(..))` now repeats the same sentence once per wrapping node instead of once. Each error's own `Display` output — what you get from `{e}` on a single error value — is unchanged. Print the innermost cause, or collapse equal neighbours, rather than joining every node.
-
-`#[non_exhaustive]` was added to four error enums that were missing it: `wacore::pair_code::PairCodeError`, `wacore::shortcake::ShortcakeError`, `wacore::iq::chatstate::ChatstateParseError`, and `wacore::iq::dirty::DirtyBitParseError`. An exhaustive `match` on any of these from outside their defining crate now fails with `E0004`; add a `_ => {}` arm.
-
-### From PR #1195: recovering an HTTP status by type
-
-If you were matching on the text of a download/upload error to classify it (e.g. `e.to_string().contains("403")`), switch to [`ErrorChainExt::http_status()`](#error-chain-recovery):
-
-```rust
-// Before — fragile string matching
-match client.download(downloadable).await {
-    Err(e) if e.to_string().contains("401") || e.to_string().contains("403") => {
-        // ...
-    }
-    Err(e) => eprintln!("download failed: {e}"),
-    Ok(bytes) => { /* ... */ }
-}
-
-// After
-use whatsapp_rust::ErrorChainExt;
-match client.download(downloadable).await {
-    Err(e) => {
-        let cause: &(dyn std::error::Error + 'static) = e.as_ref();
-        match cause.http_status() {
-            Some(401) | Some(403) => { /* ... */ }
-            Some(status) => eprintln!("download refused with {status}: {e}"),
-            None => eprintln!("download failed: {e}"),
-        }
-    }
-    Ok(bytes) => { /* ... */ }
-}
-```
-
-Messages are unchanged either way — `http_status()` is purely additive, recovering a fact that was already in the text but previously reachable only by parsing it.
-
-### From PR #1257: `ServerError` carries the rejection stanza
-
-`IqError::ServerError` gained a `response: RejectionStanza` field carrying the `type="error"` stanza verbatim, alongside the four fields it already parsed off it. Matching with `..` is unaffected — this is the common case, and nearly every match in the codebase already used it:
-
-```rust
-// Still works unchanged
-match err {
-    IqError::ServerError { code, text, .. } => { /* ... */ }
-    // ...
-}
-```
-
-If you matched all four former fields by name without `..`, the pattern now fails to compile with `E0027` ("pattern does not mention field `response`") — add `..`, or bind `response` too:
-
-```rust
-// Before — breaks with E0027 once `response` is added
-IqError::ServerError { code, text, error_type, backoff } => { /* ... */ }
-
-// After
-IqError::ServerError { code, text, error_type, backoff, .. } => { /* ... */ }
-```
-
-Constructing the variant by hand — mainly test fixtures — now needs the stanza it was rejected with:
-
-```rust
-// Before
-IqError::ServerError {
-    code,
-    text,
-    error_type,
-    backoff,
-}
-
-// After — pass the response the rejection came with
-IqError::ServerError {
-    code,
-    text,
-    error_type,
-    backoff,
-    response: response.into(), // response: Arc<OwnedNodeRef>, RejectionStanza converts via `.into()`
-}
-```
-
-A fixture with no real wire response can build one directly, but `OwnedNodeRef::new` expects node bytes with the format byte already stripped, not the raw output of `marshal` — the same [`unpack`](/advanced/binary-protocol#the-format-byte) step the receive path runs ahead of every `OwnedNodeRef::new` call:
-
-```rust
-let node = wacore_binary::builder::NodeBuilder::new("iq")
-    .attr("type", "error")
-    .children([/* ... */])
-    .build();
-let packed = wacore_binary::marshal::marshal(&node).expect("marshals");
-let node_bytes = wacore_binary::util::unpack(&packed).expect("unpacks").into_owned();
-let response: Arc<OwnedNodeRef> = Arc::new(OwnedNodeRef::new(node_bytes).expect("decodes"));
-```
-
-`From<wacore::request::IqError> for whatsapp_rust::request::IqError` is also removed — a bare `From` conversion has no response available to attach, which is exactly the material this change stops discarding. Replace it with `IqError::from_response`:
-
-```rust
-// Before
-let err: IqError = wacore_err.into();
-
-// After — pass the response the classification failure was read from
-let err = IqError::from_response(wacore_err, &response);
-```
-
-### From PR #1261: `decrypt_bot_message` returns a typed error
-
-If you were matching on `anyhow::Error` from `wacore::bot_message::decrypt_bot_message`, switch to [`BotMessageError`](#botmessageerror):
-
-```rust
-// Before
-match decrypt_bot_message(message_secret, enc_iv, enc_payload, &ctx) {
-    Ok(plaintext) => { /* ... */ }
-    Err(e) => eprintln!("bot message decrypt failed: {e}"),
-}
-
-// After — match specific variants, or classify by stage
-use wacore::bot_message::{BotMessageError, BotMessageFailure};
-
-match decrypt_bot_message(message_secret, enc_iv, enc_payload, &ctx) {
-    Ok(plaintext) => { /* ... */ }
-    Err(e @ BotMessageError::AuthenticationFailed) => eprintln!("tampered or wrong secret: {e}"),
-    Err(e) => match e.stage() {
-        BotMessageFailure::Envelope => eprintln!("malformed envelope: {e}"),
-        BotMessageFailure::Secret => eprintln!("bad secret: {e}"),
-        BotMessageFailure::Authentication => eprintln!("authentication failed: {e}"),
-    },
-}
-```
-
-### From PR #1299: a DM with no recipient device now returns a typed error
-
-Previously, a DM where every recipient device failed to encrypt could still return `Ok` if one of the sender's own companion devices succeeded — the stanza went out carrying only the sender's own devices, the server acked it, and the caller had no way to tell the message never reached its recipient. That case, and the case where the fan-out resolved no recipient device at all (for a non-self destination), now return `Err(SendError::NoRecipientDevice(..))` instead:
-
-```rust
-// Before — `Ok` did not guarantee the recipient could read this message
-match client.send_message(to.clone(), message).await {
-    Ok(result) => { /* looked like success even with no recipient device reached */ }
-    Err(e) => eprintln!("send failed: {e}"),
-}
-
-// After — match the new variant to detect the specific failure
-use whatsapp_rust::{Freshness, SendError, send::SendOptions};
-match client.send_message(to.clone(), message.clone()).await {
-    Ok(result) => { /* ... */ }
-    Err(SendError::NoRecipientDevice(e)) => {
-        eprintln!("nothing reached the recipient: {e}");
-        // Force a device-list refresh before retrying — an immediate resend
-        // with the same (cached) options would hit the same empty result.
-        let options = SendOptions::default().with_device_freshness(Freshness::Refresh);
-        client.send_message_with_options(to.clone(), message, options).await?;
-    }
-    Err(e) => eprintln!("send failed: {e}"),
-}
-```
-
-`SendError` is `#[non_exhaustive]`, so this new variant does not break a `match` that already ends in a catch-all arm. See [`NoRecipientDeviceError`](#norecipientdeviceerror) for the two variants it can carry.
-
-### From PR #1362: a DM's partial fan-out is now visible, and a primary's 406 now fails the send
-
-Three related changes, all in [#1362](https://github.com/oxidezap/whatsapp-rust/pull/1362):
-
-`SendResult` gains `recipient_fanout: Option<RecipientFanout>` (see [`RecipientFanout`](/api/send#recipientfanout)), populated for a DM. A caller that treated `Ok` as full delivery can now check it instead of assuming:
-
-```rust
-// Before — Ok told you the stanza was sent, nothing about who got it
-// (send_message does not wait for the server's ack before returning)
-let result = client.send_message(to.clone(), message).await?;
-
-// After — inspect the DM fan-out when the caller's policy cares
-let result = client.send_message(to.clone(), message).await?;
-if result.recipient_fanout.as_ref().is_some_and(|f| f.is_partial()) {
-    eprintln!("message {} did not reach every device", result.message_id);
-}
-```
-
-`SendError` gains `PrimaryDeviceRejected` (see above). A pre-key fetch that gets a `406` naming a primary device now fails the send instead of silently continuing with zero established sessions for it:
-
-```rust
-match client.send_message(to.clone(), message).await {
-    Ok(result) => { /* ... */ }
-    Err(SendError::PrimaryDeviceRejected(e)) => {
-        // The named device lists are already refreshed — retry immediately.
-        eprintln!("a primary device was rejected fetching pre-keys: {e}");
-    }
-    Err(e) => eprintln!("send failed: {e}"),
-}
-```
-
-Separately, a DM phash mismatch (see [Phash validation](/advanced/signal-protocol#phash-validation-for-stale-device-list-detection)) now re-resolves the peer's device list and resends the message, under the original message id, to any device that list holds and the original stanza did not cover. Previously a mismatch only invalidated caches. This has no `SendError`/`SendResult` shape to match on — it runs after the original `send_message` call has already returned. Each newly discovered device receives the message for the first time; a device the original stanza already covered is left untouched, so this never delivers a duplicate to the same device.
-
-Both new variants are additive at the type level: `SendError` and `SendResult` are `#[non_exhaustive]`, so a `match` or destructuring pattern written against the old shape still compiles. `recipient_fanout` is purely additive at runtime too — ignoring it changes nothing. `PrimaryDeviceRejected` is not: a caller whose `match` ends in a catch-all `Err` arm still compiles and still runs, but a named-primary `406` now takes that arm instead of the `Ok` path it took before, so this is a real behavior change for that one case, just not a breaking one.
-
-### From PR #1406: edit, revoke, and pin now return the `SendResult` they built
-
-[#1406](https://github.com/oxidezap/whatsapp-rust/pull/1406) is a real breaking change, not an additive one — it changes the `Ok` type of six methods so a caller that shares one `Client` between several consumers can see what a self-built send (an edit, a revoke, a pin, a poll) actually put in the chat. WhatsApp echoes a send to every device on the account except the one that sent it, so without this a consumer other than the sender had nothing to show for those sends but an id.
-
-`SendResult` gains `message: Arc<wa::Message>` (see [`SendResult`](/api/send#sendresult)) — the message exactly as the send pipeline encoded it. `edit_message`, `edit_message_with_options`, and `edit_message_encrypted` now return `SendResult` instead of `String`; `revoke_message`, `pin_message`, and `unpin_message` now return `SendResult` instead of `()`. `MessageContext::edit_message` and `MessageContext::revoke_message` follow the same change.
-
-```rust
-// Before
-let edit_id: String = client.edit_message(&chat_jid, &original_id, new_content).await?;
-client.revoke_message(&chat_jid, &message_id, RevokeType::Sender).await?;
-client.pin_message(chat_jid.clone(), key.clone(), PinDuration::Days7).await?;
-
-// After — the id moves onto `message_id`, and `message` is what this crate built
-let edit = client.edit_message(&chat_jid, &original_id, new_content).await?;
-let edit_id: &str = &edit.message_id;
-
-let revoke = client.revoke_message(&chat_jid, &message_id, RevokeType::Sender).await?;
-let pin = client.pin_message(chat_jid.clone(), key.clone(), PinDuration::Days7).await?;
-```
-
-A call site that used `?` without binding the `Ok` value (`client.revoke_message(...).await?;`) compiles unchanged — only code that named the previous `String` or `()` result needs to change. `SendResult` losing its `Eq` derive (`wa::Message` carries floats; `PartialEq` and `Clone` are unaffected) only matters to code that put a `SendResult` in a `HashSet`/`BTreeSet` key position or otherwise required `Eq`.
-
-Separately, `wacore::proto_helpers::MessageExt::prepare_for_forward` now returns `wa::Message` by value instead of `Box<wa::Message>` — see the [forwarding-preparation note](/guides/sending-messages#preparing-messages-for-forwarding). `prepare_for_quote` is unchanged.
-
-Newsletter `edit_message`/`revoke_message` (`client.newsletter().edit_message(...)`) are untouched and still return `()`: the plaintext channel path sends a node under the target's own id with the caller's body, so there is neither a fresh id nor a built message to report.
+Use fallback arms when matching extensible errors. Community creation may have succeeded before a configuration failure: `ConfigurationFailed` retains the created JID and operation so you can continue safely without creating a duplicate community.

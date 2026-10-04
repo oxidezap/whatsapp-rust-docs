@@ -85,7 +85,7 @@ Deletion sends the same `Set` mutation as `set_quick_reply`, with `deleted = tru
 You receive a quick reply change made on a linked device through the event bus. The event carries the underlying app state action, so read `action.deleted` first to tell a deletion apart from a create or edit.
 
 ```rust
-use wacore::types::events::Event;
+use whatsapp_rust::wacore::types::events::Event;
 
 .on_event(|event, _client| async move {
     match &*event {

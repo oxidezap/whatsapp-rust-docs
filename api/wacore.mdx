@@ -7,9 +7,11 @@ description: "Platform-agnostic WhatsApp protocol implementation"
 
 `wacore` is the core WhatsApp protocol implementation for whatsapp-rust. It's designed to be **platform-agnostic** with no runtime dependencies on Tokio or specific databases, making it portable across different async runtimes and storage backends.
 
+Examples use `wacore` through the main crate's re-export. Declare `whatsapp-rust` as shown; a standalone `wacore` dependency instead requires direct `wacore::` imports.
+
 ```toml
 [dependencies]
-wacore = "0.7"
+whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "54ce6cd9007f4361a07dbad50718973bbf56e2e9" }
 ```
 
 ## Philosophy
@@ -97,7 +99,7 @@ Type-safe IQ request/response specifications:
 - **`passive`** - Passive IQ handling
 - **`prekeys`** - Prekey distribution
 - **`privacy`** - Privacy settings
-- **`props`** - Server properties and A/B experiment configs. The companion [`abprops`](#a-b-props-registry) module ships the typed flag registry, and `props::WATCHED` lists the flags the library itself reads
+- **`props`** - Server properties and A/B experiment configs. The companion [`abprops`](#a/b-props-registry) module ships the typed flag registry, and `props::WATCHED` lists the flags the library itself reads
 - **`spam_report`** - Spam reporting
 - **`tctoken`** - Temporary client tokens
 - **`usync`** - User synchronization. Ships a typed query/response model (`UsyncQuery`, `UsyncProtocol`, `UsyncResponse`, ...) covering every USync subprotocol observed in WhatsApp Web (device lists, contact/LID/username lookup, status, bot profiles, features). See [USync](/api/usync)
@@ -116,7 +118,7 @@ See [Architecture](/concepts/architecture) for the IQ protocol pattern.
 Pass these constants to [`AbPropsCache`](/api/client#ab-props-cache) (`is_enabled`, `get`, `get_int`, `watch`, `watch_many`) instead of raw `u32` codes. The library only materializes the consts you reference, so the rest of the ~2,000-flag registry adds no binary weight.
 
 ```rust
-use wacore::iq::abprops::web;
+use whatsapp_rust::wacore::iq::abprops::web;
 
 let flag = web::ADMIN_REVOKE_RECEIVER;
 println!("{} (code {}) defaults to {:?}", flag.name, flag.code, flag.default);
@@ -150,7 +152,7 @@ pub mod store;
 - **`Device`** - Core device state structure
 - **`DeviceCommand`** - State mutation commands
 - **`traits`** - Backend trait definitions (`Backend`, `SessionStore`, etc.)
-- **`ab_props`** - In-memory A/B experiment property cache (`AbPropsCache`), populated from `fetch_props()` on each connection. Features query this cache using typed flag constants from the [`abprops` registry](#a-b-props-registry) (e.g., privacy token attachment on group operations).
+- **`ab_props`** - In-memory A/B experiment property cache (`AbPropsCache`), populated from `fetch_props()` on each connection. Features query this cache using typed flag constants from the [`abprops` registry](#a/b-props-registry) (e.g., privacy token attachment on group operations).
 
 See [State Management](/advanced/state-management) for the command pattern.
 
@@ -407,7 +409,7 @@ Each clock can be overridden globally — useful in environments where the stand
 Implement the `TimeProvider` trait and call `set_time_provider` before any time functions are used:
 
 ```rust
-use wacore::time::{TimeProvider, set_time_provider};
+use whatsapp_rust::wacore::time::{TimeProvider, set_time_provider};
 
 struct FixedTime;
 
@@ -428,7 +430,7 @@ set_time_provider(FixedTime).expect("provider already set");
 On `wasm32` targets the epoch fallback is not cached, so a later `set_time_provider` call still takes effect even if a timestamp was read during startup. A typical browser embedder wires `Date.now()` through `wasm-bindgen`:
 
 ```rust
-use wacore::time::{TimeProvider, set_time_provider};
+use whatsapp_rust::wacore::time::{TimeProvider, set_time_provider};
 
 struct JsDateProvider;
 
@@ -447,7 +449,7 @@ set_time_provider(JsDateProvider).expect("provider already set");
 `Instant` is a portable monotonic instant that replaces `std::time::Instant`, which is unavailable on `wasm32-unknown-unknown`. On native targets it wraps `std::time::Instant` via the default `MonotonicProvider` and exposes nanosecond resolution. The `Instant` type is `Copy` and supports `Add<Duration>` and `Sub<Instant>` (returning `Duration`), with saturating arithmetic to prevent overflow.
 
 ```rust
-use wacore::time::Instant;
+use whatsapp_rust::wacore::time::Instant;
 
 let start = Instant::now();
 // ... do work ...
@@ -459,7 +461,7 @@ let elapsed = start.elapsed(); // std::time::Duration
 Implement the `MonotonicProvider` trait and call `set_monotonic_provider` before any `Instant` is captured. The provider must return nanoseconds since an arbitrary fixed reference and never return a smaller value than a previous call.
 
 ```rust
-use wacore::time::{MonotonicProvider, set_monotonic_provider};
+use whatsapp_rust::wacore::time::{MonotonicProvider, set_monotonic_provider};
 
 struct PerfNowProvider;
 
@@ -540,7 +542,7 @@ wacore is split into several workspace crates:
 Binary protocol encoding/decoding using WhatsApp's custom format.
 
 ```rust
-use wacore_binary::{
+use whatsapp_rust::wacore_binary::{
     CompactString,
     jid::Jid,
     node::Node,
@@ -573,7 +575,7 @@ let decoded = unmarshal_ref(&bytes)?;
 Signal Protocol implementation for end-to-end encryption.
 
 ```rust
-use wacore::libsignal::{
+use whatsapp_rust::wacore::libsignal::{
     core::SessionCipher,
     protocol::{PreKeyBundle, PublicKey},
     store::SessionStore,
@@ -595,7 +597,7 @@ See [Signal Protocol](/advanced/signal-protocol) for encryption details.
 Noise Protocol implementation for handshake encryption. Supports the XX, IK, and XXfallback patterns to match WhatsApp Web's behavior on cold start, resumed reconnects, and server-driven recovery.
 
 ```rust
-use wacore::noise::{
+use whatsapp_rust::wacore::noise::{
     NoiseHandshake,
     HandshakeUtils,
     XxHandshakeState,
@@ -628,7 +630,7 @@ See [WebSocket & Noise Protocol — Noise Protocol Handshake](/advanced/websocke
 App state synchronization for contacts, settings, and metadata.
 
 ```rust
-use wacore::appstate::{
+use whatsapp_rust::wacore::appstate::{
     process_snapshot,
     process_patch,
     expand_app_state_keys,
@@ -650,7 +652,7 @@ use wacore::appstate::{
 Procedural macros for protocol node generation.
 
 ```rust
-use wacore::{EmptyNode, ProtocolNode, StringEnum};
+use whatsapp_rust::wacore::{EmptyNode, ProtocolNode, StringEnum};
 
 #[derive(EmptyNode)]
 #[protocol(tag = "participants")]
@@ -678,27 +680,27 @@ The main `whatsapp-rust` crate uses wacore modules throughout:
 
 ```rust
 // Binary protocol
-use wacore_binary::jid::Jid;
-use wacore_binary::builder::NodeBuilder;
+use whatsapp_rust::wacore_binary::jid::Jid;
+use whatsapp_rust::wacore_binary::builder::NodeBuilder;
 
 // Signal Protocol
-use wacore::libsignal::store::SessionStore;
-use wacore::libsignal::protocol::PreKeyBundle;
+use whatsapp_rust::wacore::libsignal::store::SessionStore;
+use whatsapp_rust::wacore::libsignal::protocol::PreKeyBundle;
 
 // App state
-use wacore::appstate::{
+use whatsapp_rust::wacore::appstate::{
     process_snapshot,
     Mutation,
 };
 
 // IQ specs
-use wacore::iq::privacy as privacy_settings;
+use whatsapp_rust::wacore::iq::privacy as privacy_settings;
 
 // Store traits
-use wacore::store::traits::Backend;
+use whatsapp_rust::wacore::store::traits::Backend;
 
 // Protobuf helpers
-use wacore::proto_helpers;
+use whatsapp_rust::wacore::proto_helpers;
 ```
 
 ## Design Principles

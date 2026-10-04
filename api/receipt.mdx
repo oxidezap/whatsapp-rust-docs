@@ -3,6 +3,19 @@ title: "receipt"
 description: "Send read receipts, delivery receipts, and played receipts"
 ---
 
+## Typed receipts
+
+Use `client.mark_message_read(&MessageRef)` or `client.mark_message_played(&MessageRef)` for one observed incoming message. Build the reference from `InboundMessage::message_ref()` or `MessageContext::message_ref()`, retaining group/status author metadata. Own-message references are rejected before a receipt is sent.
+
+```rust
+let target = inbound.message_ref()?;
+client.mark_message_read(&target).await?;
+```
+
+The raw batch methods below remain available when you explicitly own the addressing fields and several message IDs.
+
+During offline resume, ordinary chat delivery receipts can be buffered and aggregated. Peer receipts are flushed individually: each needs its own ID and sender addressing, and cannot be represented by a chat receipt's list of child IDs.
+
 ## mark_as_read
 
 Send read receipts for one or more messages.
@@ -44,7 +57,7 @@ pub async fn mark_as_read(
 ### Example: mark DM as read
 
 ```rust
-use wacore_binary::jid::Jid;
+use whatsapp_rust::wacore_binary::jid::Jid;
 
 let chat_jid: Jid = "15551234567@s.whatsapp.net".parse()?;
 
@@ -126,7 +139,7 @@ pub async fn mark_as_played(
 ### Example: mark a DM voice note as played
 
 ```rust
-use wacore_binary::jid::Jid;
+use whatsapp_rust::wacore_binary::jid::Jid;
 
 let chat_jid: Jid = "15551234567@s.whatsapp.net".parse()?;
 
@@ -324,6 +337,7 @@ See [Requesting a retry manually](/guides/receiving-messages#requesting-a-retry-
 WhatsApp supports multiple receipt types:
 
 ```rust
+#[non_exhaustive]
 pub enum ReceiptType {
     Delivered,      // Message delivered to device
     Sender,         // Sender receipt
@@ -384,7 +398,7 @@ pub enum ReceiptType {
 You can listen for receipt events to track message delivery and read status using the Bot event handler:
 
 ```rust
-use wacore::types::events::Event;
+use whatsapp_rust::wacore::types::events::Event;
 
 let mut bot = Bot::builder()
     .with_backend(backend)
@@ -420,7 +434,7 @@ let mut bot = Bot::builder()
 #[non_exhaustive]
 pub struct Receipt {
     pub source: MessageSource,
-    pub message_ids: Vec<String>,
+    pub message_ids: Vec<MessageId>,
     pub timestamp: DateTime<Utc>,
     pub r#type: ReceiptType,
     pub offline: bool,
@@ -442,7 +456,7 @@ pub struct Receipt {
   `true` when the receipt carried the `offline` attribute. That means it was drained from the server's offline queue on reconnect rather than delivered live. Use it to tell a backlog of receipts received at login apart from real-time ones.
 </ParamField>
 
-<ParamField path="message_ids" type="Vec<String>">
+<ParamField path="message_ids" type="Vec<MessageId>">
   List of message IDs this receipt applies to. Usually contains a single ID, but can have multiple.
 </ParamField>
 
@@ -462,7 +476,7 @@ Track message delivery and read status:
 
 ```rust
 use std::collections::HashMap;
-use wacore::types::events::{Event, ReceiptType};
+use whatsapp_rust::wacore::types::events::{Event, ReceiptType};
 
 #[derive(Default)]
 struct MessageTracker {
@@ -475,10 +489,10 @@ impl MessageTracker {
         for msg_id in &receipt.message_ids {
             match receipt.r#type {
                 ReceiptType::Delivered => {
-                    self.delivered.insert(msg_id.clone(), true);
+                    self.delivered.insert(msg_id.to_string(), true);
                 }
                 ReceiptType::Read => {
-                    self.read.insert(msg_id.clone(), true);
+                    self.read.insert(msg_id.to_string(), true);
                 }
                 _ => {}
             }

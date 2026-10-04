@@ -285,6 +285,7 @@ Both XX and IK send their first handshake message through `send_first_handshake_
 ### Handshake Errors
 
 ```rust
+#[non_exhaustive]
 pub enum HandshakeError {
     Transport(#[from] anyhow::Error),
     Core(#[from] CoreHandshakeError),
@@ -1017,6 +1018,7 @@ This is critical for the keepalive loop and stanza acknowledgment, both of which
 ### Socket Errors
 
 ```rust
+#[non_exhaustive]
 pub enum SocketError {
     SocketClosed,
     Io(#[from] std::io::Error),
@@ -1024,6 +1026,7 @@ pub enum SocketError {
     Marshal(#[source] BinaryError),
 }
 
+#[non_exhaustive]
 pub enum EncryptSendErrorKind {
     Crypto,
     Framing,
@@ -1036,6 +1039,7 @@ pub enum EncryptSendErrorKind {
     Poisoned,
 }
 
+#[non_exhaustive]
 pub struct EncryptSendError {
     pub kind: EncryptSendErrorKind,
     pub source: anyhow::Error,

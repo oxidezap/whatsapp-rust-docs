@@ -221,7 +221,9 @@ The library automatically includes privacy tokens in outgoing 1:1 message stanza
 client.send_message(jid, message).await?;
 
 // And when fetching profile pictures
-let picture = client.contacts().get_profile_picture(&jid, true).await?;
+let picture = client.pictures().lookup(
+    ProfilePictureRequest::new(ProfilePictureTarget::Contact(&jid), ProfilePictureType::Preview),
+).await?;
 ```
 
 The tctoken (no cstoken fallback) is also attached automatically at three other call sites that use privacy tokens, matching WA Web's `USyncStatusProtocol`/`OutSpamTCTokenMixin`/`StartCall.js`:
@@ -298,7 +300,7 @@ A byte-less placeholder (written by post-send issuance before any real token has
 
 Tokens can arrive keyed by phone number before a contact's LID is known — for example, a token received while the peer was still PN-only. `resolve_tc_token_key` keys token lookups: it returns the LID as soon as a PN↔LID mapping exists for that contact, and the PN before that. So the moment the client learns a mapping, a token still filed under the PN becomes unreachable through this lookup — the send path then behaves as if no token had ever arrived, even though one is stored.
 
-To prevent that, the client migrates a PN-keyed token to the LID key as part of LID discovery, alongside the device-registry and Signal-session re-keying that already happens there (see [LID-PN mappings](/concepts/storage#lid-pn-mappings)):
+To prevent that, the client migrates a PN-keyed token to the LID key as part of LID discovery, alongside the device-registry and Signal-session re-keying that already happens there (see [LID-PN mappings](/concepts/storage#cache-coherence)):
 
 1. Read any token stored under the phone number
 2. If found, write it under the LID — **newer-wins**, so a token already stored under the LID (e.g. from a message that arrived after the mapping was learned) is never regressed by the older PN-keyed one
@@ -431,7 +433,7 @@ Bucket durations are capped at 180 days. The expiration cutoff is bucket-aligned
 Pruning evaluates the received-token cutoff and the sender-bucket cutoff independently: a row is only removed once its received token is expired-or-absent **and** its sender bucket is expired-or-absent, so recent sender-side rate-limit state is never dropped just because the received token expired (and vice versa).
 
 ```rust
-use wacore::iq::tctoken::{tc_token_expiration_cutoff, is_tc_token_expired};
+use whatsapp_rust::wacore::iq::tctoken::{tc_token_expiration_cutoff, is_tc_token_expired};
 
 // Get the cutoff timestamp for expired received tokens (using defaults)
 let cutoff = tc_token_expiration_cutoff();

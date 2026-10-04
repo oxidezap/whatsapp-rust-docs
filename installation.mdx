@@ -3,6 +3,10 @@ title: Installation
 description: Add whatsapp-rust to your Rust project
 ---
 
+<Note>
+These pages describe the current source API. Use the audited Git revision below for these examples; the published crate may expose earlier contracts.
+</Note>
+
 ## Prerequisites
 
 Before installing whatsapp-rust, ensure you have:
@@ -20,7 +24,7 @@ Before installing whatsapp-rust, ensure you have:
 
 ```toml Cargo.toml
 [dependencies]
-whatsapp-rust = "0.7"
+whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "54ce6cd9007f4361a07dbad50718973bbf56e2e9" }
 tokio = { version = "1.53", features = ["macros", "rt-multi-thread"] }
 ```
 
@@ -48,7 +52,7 @@ The same holds for git consumers — no need to pin every sibling crate:
 
 ```toml Cargo.toml
 [dependencies]
-whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "<commit>" }
+whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "54ce6cd9007f4361a07dbad50718973bbf56e2e9" }
 tokio = { version = "1.53", features = ["macros", "rt-multi-thread"] }
 ```
 
@@ -56,13 +60,13 @@ If you need to declare a sibling crate explicitly (for example to enable a crate
 
 ```toml Cargo.toml
 [dependencies]
-whatsapp-rust = "0.7"
+whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "54ce6cd9007f4361a07dbad50718973bbf56e2e9" }
 # Only needed for crate-specific features not exposed through whatsapp-rust:
-# whatsapp-rust-sqlite-storage = "0.7"
-# whatsapp-rust-tokio-transport = "0.7"
-# whatsapp-rust-ureq-http-client = "0.7"
-# wacore = "0.7"
-# waproto = "0.7"
+# whatsapp-rust-sqlite-storage is re-exported by whatsapp-rust; add a direct Git dependency only if needed.
+# whatsapp-rust-tokio-transport is re-exported by whatsapp-rust; add a direct Git dependency only if needed.
+# whatsapp-rust-ureq-http-client is re-exported by whatsapp-rust; add a direct Git dependency only if needed.
+# wacore is re-exported by whatsapp-rust; add a direct Git dependency only if needed.
+# waproto is re-exported by whatsapp-rust; add a direct Git dependency only if needed.
 tokio = { version = "1.53", features = ["macros", "rt-multi-thread"] }
 ```
 
@@ -120,18 +124,18 @@ To use whatsapp-rust in a WASM browser environment, enable the `js` feature on `
 
 ```toml Cargo.toml
 [dependencies]
-wacore = { version = "0.7", default-features = false, features = ["js"] }
+wacore = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "54ce6cd9007f4361a07dbad50718973bbf56e2e9", default-features = false, features = ["js"] }
 ```
 
 <Note>
   `wacore` is not the only crate that builds for `wasm32` — as of [PR #1364](https://github.com/oxidezap/whatsapp-rust/pull/1364), `whatsapp-rust` itself does too, with `voip-mlow`, `voip-libopus`, or `voip-encoded` (never `voip-relay-native`, which needs a UDP socket the target doesn't have; also disable `whatsapp-rust`'s own defaults with `default-features = false` — see [VoIP Calls — Architecture](/guides/voip-calls#architecture-callengine)). Still enable `js` for random number generation, and install your own [`RelayTransportProvider`](/guides/voip-calls#custom-relay-transport) — an `RTCPeerConnection` in a browser — since none of those features link a way onto the media wire on their own.
 
-  While PR #1364 is unreleased, reaching it means depending on `whatsapp-rust` via `git`, as shown above — and `js` then has to be enabled on the *same* git-sourced `wacore`, not the crates.io one in the snippet above: Cargo treats a registry copy and a git copy of the same crate as different packages entirely and won't unify features across them, so `js` on the crates.io `wacore` never reaches the `wacore` your git-sourced `whatsapp-rust` actually links.
+  Enable `js` on the same git-sourced `wacore` revision used by `whatsapp-rust`, as in both snippets here. Cargo treats a registry copy and a git copy as different packages and does not unify features across them.
 
   ```toml Cargo.toml
   [dependencies]
-  whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "<commit>", default-features = false, features = ["voip-mlow"] }
-  wacore = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "<same commit>", default-features = false, features = ["js"] }
+  whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "54ce6cd9007f4361a07dbad50718973bbf56e2e9", default-features = false, features = ["voip-mlow"] }
+  wacore = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "54ce6cd9007f4361a07dbad50718973bbf56e2e9", default-features = false, features = ["js"] }
   ```
 </Note>
 
@@ -147,7 +151,7 @@ The `waproto` crate has its own feature flags:
 
 ```toml Cargo.toml
 [dependencies]
-waproto = { version = "0.7", features = ["serde-snake-case"] }
+waproto = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "54ce6cd9007f4361a07dbad50718973bbf56e2e9", features = ["serde-snake-case"] }
 ```
 
 The `whatsapp-rust-sqlite-storage` crate has its own feature flags:
@@ -164,7 +168,7 @@ To keep the `SqliteStore` while linking against your own SQLite, disable default
 
 ```toml Cargo.toml
 [dependencies]
-whatsapp-rust = { version = "0.7", default-features = false, features = [
+whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "54ce6cd9007f4361a07dbad50718973bbf56e2e9", default-features = false, features = [
     "sqlite-storage",
     "tokio-transport",
     "tokio-runtime",
@@ -180,7 +184,7 @@ If you depend on `whatsapp-rust-sqlite-storage` directly, the same rule applies 
 
 ```toml Cargo.toml
 [dependencies]
-whatsapp-rust-sqlite-storage = { version = "0.7", default-features = false }
+whatsapp-rust-sqlite-storage = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "54ce6cd9007f4361a07dbad50718973bbf56e2e9", default-features = false }
 ```
 
 <Note>
@@ -243,7 +247,7 @@ If you want to use only specific features:
 
 ```toml Cargo.toml
 [dependencies]
-whatsapp-rust = { version = "0.7", default-features = false, features = ["sqlite-storage", "tokio-transport"] }
+whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "54ce6cd9007f4361a07dbad50718973bbf56e2e9", default-features = false, features = ["sqlite-storage", "tokio-transport"] }
 ```
 
 ## Verify installation

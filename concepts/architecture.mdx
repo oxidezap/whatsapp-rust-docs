@@ -365,7 +365,7 @@ pub(crate) connection_publish: Mutex<()>,             // Serializes pause()'s te
 5. `resume()` is synchronous and deliberately does not wait on a `pause()` still in flight. That teardown ends in an untimed socket close, and queuing behind it would make "come back on my word" hostage to an unresponsive transport. `resume()` just clears `paused`, fires `pause_state_notifier`, and lets the run loop reconnect immediately.
 6. The `enable_auto_reconnect` check in `run()`'s post-connection logic runs *before* the `pause_teardown_pending`/`paused` check that would otherwise park the loop. So if `enable_auto_reconnect` was already `false` when `pause()` ended a connection (or interrupted an in-flight attempt), the loop takes the auto-reconnect-disabled branch instead: it calls `stop_supervision_loop()` and exits for good, the same as an ordinary auto-reconnect-disabled disconnect. `is_terminal()` reads that combination (`!enable_auto_reconnect && !is_running && !is_connected`) as terminal, so the "not terminal" guarantee in the overview above holds only while `enable_auto_reconnect` stays set.
 
-**What paused reachability means:** `pause()` publishes the `paused` flag *before* it flushes and closes the socket. `can_reach_server()`, `wait_for_socket()`, and `wait_for_connected()`/`is_fully_ready()` all treat a paused client as unreachable for that whole teardown window, not just once the socket is actually down — otherwise a caller could be handed the very connection the application just asked to close. `await_connection` is the one place that deliberately keeps waiting through a pause rather than giving up. It already waits out a 900s backoff the same way. Nothing on the next connection re-issues a consumer's task, so giving up early would drop the work instead of merely deferring it.
+**What paused reachability means:** `pause()` publishes the `paused` flag *before* it flushes and closes the socket. `can_reach_server()`, `wait_for_socket_ready()`, and `wait_for_session_ready()`/`is_fully_ready()` all treat a paused client as unreachable for that whole teardown window, not just once the socket is actually down — otherwise a caller could be handed the very connection the application just asked to close. `await_connection` is the one place that deliberately keeps waiting through a pause rather than giving up. It already waits out a 900s backoff the same way. Nothing on the next connection re-issues a consumer's task, so giving up early would drop the work instead of merely deferring it.
 
 `pause()` does **not** dispatch `Event::Disconnected` (same reasoning as `reconnect()` — the application asked for this, so it isn't news), and it is not a protocol-level presence change. Its interaction with `enable_auto_reconnect` (mechanics point 6 above) is the same ordering that lets `handle_stream_error` make a client terminal (409, 516) through that flag without a pause racing ahead of it.
 
@@ -391,7 +391,7 @@ When a connection is lost or `disconnect()` is called, `cleanup_connection_state
 | Transport | Closed via `Client::close_transport_bounded` (bounded by `TRANSPORT_CLOSE_TIMEOUT`, 2s) | An untimed close shares the transport's sink with every send and can be retried by the kernel for as long as `tcp_retries2` allows (~15 min on Linux); this runs on the caller's thread of control (the run loop, or `disconnect()`'s caller), so an unbounded close parks the whole client |
 
 <Note>
-**Bounded teardown ([whatsapp-rust#1410](https://github.com/oxidezap/whatsapp-rust/pull/1410)).** Every teardown path's transport close — `disconnect()`, `reconnect()`, `reconnect_immediately()`, `pause()`, and this cleanup routine — is now bounded by `TRANSPORT_CLOSE_TIMEOUT`. `abort_sender()` runs first, closing the sender task's job channel and aborting it outright; any send it cuts off (queued or already in flight) fails with `EncryptSendError::channel_closed()` rather than hanging — a send racing a teardown was going to fail once the socket closed anyway. See [WebSocket & Noise Protocol — Disconnect](/advanced/websocket-handling#4-disconnect) for the full mechanics.
+**Bounded teardown ([whatsapp-rust#1410](https://github.com/oxidezap/whatsapp-rust/pull/1410)).** Every teardown path's transport close — `disconnect()`, `reconnect()`, `reconnect_immediately()`, `pause()`, and this cleanup routine — is now bounded by `TRANSPORT_CLOSE_TIMEOUT`. `abort_sender()` runs first, closing the sender task's job channel and aborting it outright; any send it cuts off (queued or already in flight) fails with `EncryptSendError::channel_closed()` rather than hanging — a send racing a teardown was going to fail once the socket closed anyway. See [WebSocket & Noise Protocol — Disconnect](/advanced/websocket-handling#cleanup) for the full mechanics.
 </Note>
 
 <Note>
@@ -579,7 +579,7 @@ pub(crate) struct PendingDeviceSync {
 
 The `PendingDeviceSync` state is cleared on reconnect to prevent stale entries from leaking across connections.
 
-The `<devices><update hash="…"/></notification>` hash-only path described in [Storage → Granular cache patching](/concepts/storage#granular-cache-patching) resolves its target contact and joins this same `schedule_unknown_device_sync()` batching — offline resumes queue it here instead of firing an immediate usync mid-drain.
+The `<devices><update hash="…"/></notification>` hash-only path described in [Storage → Granular cache patching](/concepts/storage#cache-coherence) resolves its target contact and joins this same `schedule_unknown_device_sync()` batching — offline resumes queue it here instead of firing an immediate usync mid-drain.
 
 Location: `src/pending_device_sync.rs`, `src/handlers/ib.rs`, `src/usync.rs`
 
@@ -758,16 +758,12 @@ sequenceDiagram
 <CodeGroup>
 ```rust ✅ Correct
 // Use DeviceCommand for state changes
-client.persistence_manager
+persistence_manager
     .process_command(DeviceCommand::SetPushName(name))
     .await;
 ```
 
-```rust ❌ Wrong
-// Never modify Device directly
-let mut device = client.device.write().await;
-device.push_name = name; // DON'T DO THIS
-```
+The client's private device lock is not a mutation API. Use the persistence manager you supplied at construction.
 </CodeGroup>
 
 ### Async Operations
@@ -781,10 +777,7 @@ let result = tokio::task::spawn_blocking(move || {
 }).await?;
 ```
 
-```rust ❌ Wrong
-// Never block the async runtime
-let result = expensive_operation(); // Stalls all tasks
-```
+Do not run blocking I/O or long CPU work directly inside async callbacks: it blocks the executor thread. Move that work to `spawn_blocking` or a host worker pool.
 </CodeGroup>
 
 ### Error Handling
@@ -794,6 +787,7 @@ use thiserror::Error;
 use anyhow::Result;
 
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum SocketError {
     #[error("socket is closed")]
     SocketClosed,

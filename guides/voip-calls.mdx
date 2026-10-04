@@ -23,14 +23,14 @@ Video is **codec-neutral**: you hand the library complete H.264 Annex-B access u
 
 ```toml
 [dependencies]
-whatsapp-rust = { version = "0.7", features = ["voip"] }
+whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "54ce6cd9007f4361a07dbad50718973bbf56e2e9", features = ["voip"] }
 tokio = { version = "1.53", features = ["macros", "rt-multi-thread"] }
 ```
 
 `AudioSource` / `AudioSink` / `VideoSource` / `VideoSink` are channel-based, and the examples below build those channels through `whatsapp_rust::async_channel` — the re-export, so you don't have to add or version-pin `async-channel` yourself.
 
 <Warning>
-  [PR #1051](https://github.com/oxidezap/whatsapp-rust/pull/1051) changed `CallHandle::accept_video`'s signature and the shape of `CallEvent::VideoStateChanged` to close a race where a cancelled or superseded video-upgrade request could still attach a camera. If you're upgrading from before this PR, see [Peer initiates](#video-io) below and the `VideoUpgradeToken` field on the event.
+  [PR #1051](https://github.com/oxidezap/whatsapp-rust/pull/1051) changed `CallHandle::accept_video`'s signature and the shape of `CallEvent::PeerVideoStateChanged` to close a race where a cancelled or superseded video-upgrade request could still attach a camera. If you're upgrading from before this PR, see [Peer initiates](#video-i/o) below and the `VideoUpgradeToken` field on the event.
 </Warning>
 
 <Warning>
@@ -42,11 +42,11 @@ tokio = { version = "1.53", features = ["macros", "rt-multi-thread"] }
 </Warning>
 
 <Note>
-  [PR #1385](https://github.com/oxidezap/whatsapp-rust/pull/1385) added `CallHandle::request_peer_keyframe(urgency)`, so a 1:1 call can ask the peer to recover a dropped inbound access unit instead of waiting on its next scheduled keyframe — see [H.264 video plane](#h264-video-plane) below.
+  [PR #1385](https://github.com/oxidezap/whatsapp-rust/pull/1385) added `CallHandle::request_peer_keyframe(urgency)`, so a 1:1 call can ask the peer to recover a dropped inbound access unit instead of waiting on its next scheduled keyframe — see [H.264 video plane](#h-264-video-plane) below.
 </Note>
 
 <Note>
-  [PR #1498](https://github.com/oxidezap/whatsapp-rust/pull/1498) added `CallHandle::resume_video(source, sink)` and `CallHandle::video_states()`, and made `start_video`'s 5-second timeout direction-aware: an unanswerable request against a peer that's already video now stands only our direction down instead of killing the call. The exact timeout is also published as `voip::VIDEO_UPGRADE_TIMEOUT`. See [Video I/O](#video-io) below.
+  [PR #1498](https://github.com/oxidezap/whatsapp-rust/pull/1498) added `CallHandle::resume_video(source, sink)` and `CallHandle::video_states()`, and made `start_video`'s 5-second timeout direction-aware: an unanswerable request against a peer that's already video now stands only our direction down instead of killing the call. The exact timeout is also published as `voip::VIDEO_UPGRADE_TIMEOUT`. See [Video I/O](#video-i/o) below.
 </Note>
 
 <Note>
@@ -121,7 +121,7 @@ async fn on_event(client: &Client, event: Event) -> anyhow::Result<()> {
 </Note>
 
 <Note>
-  `start()` can fail with two errors specific to this flow. `CallError::VideoNotOffered` is returned if you call `.video(...)` but the incoming offer's `is_video` was `false` — add video later with `CallHandle::start_video` instead (see [Video I/O](#video-io)). `CallError::CallEndedDuringSetup` is returned if the peer terminates or supersedes the call while `start()` is still decrypting the callKey or connecting the relay.
+  `start()` can fail with two errors specific to this flow. `CallError::VideoNotOffered` is returned if you call `.video(...)` but the incoming offer's `is_video` was `false` — add video later with `CallHandle::start_video` instead (see [Video I/O](#video-i/o)). `CallError::CallEndedDuringSetup` is returned if the peer terminates or supersedes the call while `start()` is still decrypting the callKey or connecting the relay.
 </Note>
 
 ## Placing an Outgoing Call
@@ -341,11 +341,11 @@ WA_AUDIO_CODEC=opus WA_AUDIO_PROFILE=pt111 cargo run -p whatsapp-rust-voip-cli -
 
 [PR #1111](https://github.com/oxidezap/whatsapp-rust/pull/1111) added a per-call counters surface because every discard on the audio receive path used to be silent — a wrong payload type, an SRTP tag that didn't verify, a frame the decoder refused, a jitter buffer trimming its own head all returned with nothing logged, so a call carrying no audio and a call where nobody was talking looked identical.
 
-`handle.media_stats()` returns a `wacore::voip::CallMediaStats` (`#[non_exhaustive]`) snapshot of named counters — `rtp_received`, `srtp_unprotect_failed`, `audio_frames_decoded`, `mlow_off_point_dropped`, `playout_trimmed_samples`, and others, one per discard reason. `CallMediaStats::audio_produced()` sums the three "a consumer actually got a frame" counters (`audio_frames_decoded`, `audio_frames_delivered`, `foreign_frames_decoded`) regardless of which audio path the call uses. This is a separate, per-call surface from the app-wide [`wa_*` metrics](/advanced/metrics) and [tracing spans](/advanced/observability) — it dies with the call and isn't in `Client::stats()`.
+`handle.media_stats()` returns a `whatsapp_rust::voip::CallMediaStats` (`#[non_exhaustive]`) snapshot of named counters — `rtp_received`, `srtp_unprotect_failed`, `audio_frames_decoded`, `mlow_off_point_dropped`, `playout_trimmed_samples`, and others, one per discard reason. `CallMediaStats::audio_produced()` sums the three "a consumer actually got a frame" counters (`audio_frames_decoded`, `audio_frames_delivered`, `foreign_frames_decoded`) regardless of which audio path the call uses. This is a separate, per-call surface from the app-wide [`wa_*` metrics](/advanced/metrics) and [tracing spans](/advanced/observability) — it dies with the call and isn't in `Client::stats()`.
 
 [PR #1385](https://github.com/oxidezap/whatsapp-rust/pull/1385) added the video-side counterparts: `video_sink_dropped` (a reassembled access unit your `VideoSink` refused, mirroring `audio_sink_dropped`) and `peer_keyframe_requests` (RTCP PLIs that reached the outbox after the throttle — the engine sends these on its own initiative as well as yours, so a count is the only way to tell a recovering call from one asking in a loop).
 
-Two events on `handle.events()` turn the counters into an alarm:
+Two events on `handle.take_events()` turn the counters into an alarm:
 
 | `CallEvent` variant | Fires when |
 |---|---|
@@ -408,15 +408,15 @@ handle.start_video(camera_source, video_sink).await?;
 <Note>
   Once the peer accepts, `whatsapp-rust`'s `<call>` stanza handler sends the standalone `Enabled` stanza and ungates your local video plane automatically. No further call is required.
 
-  `handle.events()` still emits `CallEvent::VideoStateChanged { state: VideoState::UpgradeAccept, .. }` as a notification. Use it to update your UI if needed.
+  `handle.take_events()` still emits `CallEvent::PeerVideoStateChanged { state: VideoState::UpgradeAccept, .. }` as a notification. Use it to update your UI if needed.
 
   Don't call `handle.announce_video_enabled()` in response because that sends a redundant second `Enabled`. Only use that method when you drive call signaling outside the standard handler.
 </Note>
 
-**Peer initiates** — respond to a `CallEvent::VideoStateChanged { state, upgrade_token, .. }` event where `state` is `VideoState::UpgradeRequest` (legacy) or `VideoState::UpgradeRequestV2`. Pass the event's `upgrade_token` straight to `accept_video` — it binds the accept to that exact peer request so a cancelled or superseded upgrade can't attach your camera:
+**Peer initiates** — respond to a `CallEvent::PeerVideoStateChanged { state, upgrade_token, .. }` event where `state` is `VideoState::UpgradeRequest` (legacy) or `VideoState::UpgradeRequestV2`. Pass the event's `upgrade_token` straight to `accept_video` — it binds the accept to that exact peer request so a cancelled or superseded upgrade can't attach your camera:
 
 ```rust
-CallEvent::VideoStateChanged { state, upgrade_token: Some(token), .. } if state.is_upgrade_request() => {
+CallEvent::PeerVideoStateChanged { state, upgrade_token: Some(token), .. } if state.is_upgrade_request() => {
     // Sends both the accept and the Enabled stanza in one call — no extra step needed on this side.
     handle.accept_video(token, camera_source, video_sink).await?;
 }
@@ -464,7 +464,7 @@ handle.resume_video(camera_source, video_sink).await?;
 </Tip>
 
 <Tip>
-  `handle.events()` clones share one underlying queue — they're competing consumers, not a broadcast. If your app already drains events on one loop (for relay/RTCP/audio events, say), react to `VideoStateChanged` there rather than spawning a second `handle.events()` consumer, or the two loops will race for the same messages.
+  Acquire one `CallEvents` with `let Some(mut events) = handle.take_events() else { return };`. Acquisition succeeds once across all handle clones. The queue is not clonable and `recv` requires mutable access. Handle peer-video transitions on this one consumer, using `PeerVideoStateChanged` source, orientation, and state.
 </Tip>
 
 <Note>
@@ -485,13 +485,13 @@ handle.resume_video(camera_source, video_sink).await?;
 | `handle.call_creator()` | The call creator's JID |
 | `handle.set_muted(true).await?` | Mute or unmute the local microphone and announce the new state to the peer. Async, returns `Result<(), CallError>`. An outgoing call nobody has answered yet is muted locally only — call it again once the call is up to announce a state chosen while it rang |
 | `handle.start_video(source, sink).await` | Upgrade to video (we initiate); sends the video-upgrade offer and returns immediately. The media plane enables once the peer accepts — see Video I/O above. Auto-cancels after 5s if unanswered |
-| `handle.accept_video(token, source, sink).await` | Accept the peer's pending video-upgrade request. `token` is the `VideoUpgradeToken` from that request's `CallEvent::VideoStateChanged`; a stale token returns `CallError::VideoUpgradeExpired` |
+| `handle.accept_video(token, source, sink).await` | Accept the peer's pending video-upgrade request. `token` is the `VideoUpgradeToken` from that request's `CallEvent::PeerVideoStateChanged`; a stale token returns `CallError::VideoUpgradeExpired` |
 | `handle.announce_video_enabled().await` | Send the standalone `Enabled` stanza that completes a `start_video` upgrade. `whatsapp-rust`'s standard `<call>` handler already does this automatically on the peer's `UpgradeAccept` — only call it yourself if you're driving call signaling outside that handler |
 | `handle.stop_video().await` | Stop our own outbound video; idempotent. The peer's video plane is unaffected if they keep sending — see Video I/O above |
 | `handle.resume_video(source, sink).await` | Re-add our video direction inside an already-video call: re-attaches endpoints, ungates the plane, and announces a bare `Enabled`. No handshake, no timeout. Refuses unless our direction is stopped with no upgrade outstanding either way — see Video I/O above |
 | `handle.video_states()` | Read back this call's `(self, peer)` `VideoState` pair, or `None` when the call is gone. Diagnostics for clients driving upgrades from outside |
-| `handle.request_peer_keyframe(urgency)` | Ask the peer to send a video keyframe, by RTCP PLI — call it when your decoder loses or discards an access unit. `urgency` is a `KeyframeUrgency`: `Coalesced` for an ordinary gap, `Immediate` for a decoder that has already failed and reset. Fire-and-forget, throttled in the engine, does nothing in a group call — see [H.264 video plane](#h264-video-plane) below |
-| `handle.events()` | Subscribe to engine events (relay allocate, audio/video state changes, RTCP, failures) |
+| `handle.request_peer_keyframe(urgency)` | Ask the peer to send a video keyframe, by RTCP PLI — call it when your decoder loses or discards an access unit. `urgency` is a `KeyframeUrgency`: `Coalesced` for an ordinary gap, `Immediate` for a decoder that has already failed and reset. Fire-and-forget, throttled in the engine, does nothing in a group call — see [H.264 video plane](#h-264-video-plane) below |
+| `handle.take_events()` | Acquire the owned, single-reader `CallEvents` once |
 | `handle.media_stats()` | Snapshot of per-call audio- and video-path counters (`CallMediaStats`) — see [Media stats and silence detection](#media-stats-and-silence-detection) |
 | `handle.group_state()` | Roster/relay/waiting-room snapshot for a group or call-link call, `None` on a plain 1:1 call — see [Group calls](#group-calls) |
 | `handle.invite_participant(&jid).await` | Add a participant who isn't in the call yet, including promoting a 1:1 call to a group call — see [Promoting a 1:1 call to a group call](#promoting-a-11-call-to-a-group-call) |
@@ -684,7 +684,7 @@ handle.stop_screen_share().await?;
   `start_screen_share` reuses your call's active local **video** plane — it requires a video group call that's already sending video, and fails with `CallError::Media("screen sharing requires an active local video plane")` otherwise.
 </Note>
 
-Other participants' state surfaces on `handle.events()`, alongside the 1:1 `CallEvent` variants already covered in [Call Handle](#call-handle) (`RelayAllocated`, `VideoStateChanged`, RTCP, failures, …), which fire the same way in a group call:
+Other participants' state surfaces on `handle.take_events()`, alongside the 1:1 `CallEvent` variants already covered in [Call Handle](#call-handle) (`RelayAllocated`, `PeerVideoStateChanged`, RTCP, failures, …), which fire the same way in a group call:
 
 | `CallEvent` variant | Fires when |
 |---|---|
@@ -726,7 +726,7 @@ The core `CallEngine` lives in `wacore` and is **sans-IO** — it owns no socket
 | Embedded (esp32) | `wacore` with `voip` (+ `voip-mlow` for the bundled codec), sans-IO only, or `whatsapp-rust` with the same feature split as WebAssembly above |
 
 <Note>
-  Building `whatsapp-rust` itself (not just `wacore`) for `wasm32` also needs `default-features = false`: the crate's defaults (`tokio-native`, `sqlite-storage`, `tokio-transport`, `ureq-client`, `signal`) assume a native multi-threaded runtime, SQLite storage, and a native HTTP client, none of which build on `wasm32-unknown-unknown`. `cargo check -p whatsapp-rust --lib --target wasm32-unknown-unknown --no-default-features --features voip-mlow` is exactly the check this PR added to CI — mirror both flags in your own `Cargo.toml`, e.g. `whatsapp-rust = { version = "0.7", default-features = false, features = ["voip-mlow"] }`, and supply your own storage/transport/HTTP implementations in their place.
+  Building `whatsapp-rust` itself (not just `wacore`) for `wasm32` also needs `default-features = false`: the crate's defaults (`tokio-native`, `sqlite-storage`, `tokio-transport`, `ureq-client`, `signal`) assume a native multi-threaded runtime, SQLite storage, and a native HTTP client, none of which build on `wasm32-unknown-unknown`. `cargo check -p whatsapp-rust --lib --target wasm32-unknown-unknown --no-default-features --features voip-mlow` is exactly the check this PR added to CI — mirror both flags in your own `Cargo.toml`, e.g. `whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "54ce6cd9007f4361a07dbad50718973bbf56e2e9", default-features = false, features = ["voip-mlow"] }`, and supply your own storage/transport/HTTP implementations in their place.
 </Note>
 
 ### Pluggable media backend
@@ -815,7 +815,7 @@ client.set_relay_transport_provider(Arc::new(MyProvider { /* ... */ }));
 </Note>
 
 <Note>
-  A native build with no provider installed falls back to its own dialer exactly as before — installing one always takes priority over the default. A build with neither a provider nor `voip-relay-native` fails each call at setup rather than failing to compile. Because `handle.wait_ended()` resolving means the call is *over*, not that it never started, that failure surfaces as `CallEvent::MediaSetupFailed(reason)` on `handle.events()` — distinct from `CallEvent::RelayAllocateFailed`, which carries a STUN error code from a relay that *did* answer. The provider call itself is bounded at 15 seconds, so a provider that never answers fails the call instead of leaving its setup parked forever.
+  A native build with no provider installed falls back to its own dialer exactly as before — installing one always takes priority over the default. A build with neither a provider nor `voip-relay-native` fails each call at setup rather than failing to compile. Because `handle.wait_ended()` resolving means the call is *over*, not that it never started, that failure surfaces as `CallEvent::MediaSetupFailed(reason)` on `handle.take_events()` — distinct from `CallEvent::RelayAllocateFailed`, which carries a STUN error code from a relay that *did* answer. The provider call itself is bounded at 15 seconds, so a provider that never answers fails the call instead of leaving its setup parked forever.
 </Note>
 
 ## MLow Codec
@@ -839,17 +839,6 @@ The decoder operates at a single fixed point:
 The encoder runs two perceptual/LPC-analysis FFTs: a 512-point transform and a 576-point transform. Both take real-valued input on the forward pass and Hermitian input on the inverse pass. Each now packs its own input into its own half-length complex transform, instead of running a full-length complex transform on data that's half redundant. This roughly halves the butterflies each FFT needs. It also needs no separate encoder-side heap arena to hold a second, full-length plan. In [PR #1330](https://github.com/oxidezap/whatsapp-rust/pull/1330)'s own benchmark — five runs pinned to a P-core over 486 s of audio — this cut whole-encode CPU by about 21%.
 
 This is the encoder's only analysis-FFT path in current source. There is no feature flag and no full-length fallback to opt into. PR #1330 removed the earlier opt-in `mlow-fast-fft` feature that gated this transform. That change established perceptual equivalence with the reference encoder it replaced — measured with PESQ-WB, ESTOI, segSNR, and LSD over 991 s of clean and noisy speech. It also confirmed that every one of the 8,106 frames in that validation corpus keeps the same TOC byte and packet-size envelope as before. The half-length technique turns out to be what the `smpl` C reference implementation this codec was validated against already uses.
-
-<Warning>
-  This landed after the published **0.7.0** release, so it needs a git dependency until a later version ships it:
-
-  ```toml Cargo.toml
-  [dependencies]
-  whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "<commit>", features = ["voip"] }
-  ```
-
-  The published `0.7.0` crate still runs the previous full-length transform unconditionally — there was never a feature flag to select between the two in a release.
-</Warning>
 
 ## H.264 video plane
 
@@ -911,3 +900,21 @@ The implementation is tested at multiple levels:
 
 - [Installation](/installation) — enable the `voip` feature flag
 - [Advanced: Signal Protocol](/advanced/signal-protocol) — how call keys are derived from Signal sessions
+## Call event ownership
+
+```rust
+let Some(mut events) = handle.take_events() else { return };
+while let Ok(event) = events.recv().await {
+    // Process in this single task, or consume CallEvents as a futures Stream.
+}
+```
+
+`CallEvents` is not `Clone` and does not expose a raw receiver. Cancelling a receive consumes no event. Dropping the queue neither hangs up nor restores acquisition; closed queues can drain buffered events. Backend overflow still applies, with no broadcast, exactly-once, or redelivery guarantee. `wait_ended()` provides sticky completion independently.
+
+Peer video observations use `PeerVideoStateChanged`, carrying `source`, `call_creator`, `state`, optional `orientation`, and optional `upgrade_token`. Consume them from the owning call handle. The upgrade token binds an actionable request to its call generation; a sibling device's observation does not establish one global peer state.
+
+Group-call invitation join keeps the invited call's ownership and participant ID continuity. Relay updates and committed admission changes apply independently; an unchanged roster does not suppress a required relay update. State is generation-scoped, so a superseded call cannot attach to a replacement.
+
+## MLOW activity
+
+The MLOW encoder classifies activity per frame and can emit inactive frames during silence. Do not assume every packet's TOC is the active-speech byte `0x50`, or treat a successfully encoded silent frame as active speech. Read activity/media counters within their documented scope.

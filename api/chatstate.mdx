@@ -98,7 +98,7 @@ println!("Cleared typing indicator");
 
 ### ChatStateEvent
 
-Incoming chatstate stanzas (typing indicators from other users) are dispatched as `ChatStateEvent` values. Register a handler with [`register_chatstate_handler`](/api/client#register_chatstate_handler) to receive them.
+Incoming chatstate stanzas (typing indicators from other users) are dispatched as `ChatStateEvent` values. Register a handler with [`subscribe_chatstate_handler`](/api/client#subscribe_chatstate_handler) to receive them.
 
 ```rust
 #[derive(Debug, Clone)]
@@ -130,7 +130,7 @@ pub struct ChatStateEvent {
 use whatsapp_rust::ChatStateEvent;
 use std::sync::Arc;
 
-client.register_chatstate_handler(Arc::new(|event: ChatStateEvent| {
+let subscription = client.subscribe_chatstate_handler(Arc::new(|event: ChatStateEvent| {
     match event.state {
         ReceivedChatState::Typing => {
             println!("{} is typing in {}", event.participant.as_ref().unwrap_or(&event.chat), event.chat);
@@ -413,3 +413,5 @@ tokio::time::sleep(Duration::from_secs(3)).await;
 client.chatstate().send_paused(&recipient).await?;
 println!("Recording stopped (would send audio here)");
 ```
+
+Retain `subscription` while receiving chatstate updates. Dropping it unregisters the handler; an in-flight dispatch can still complete. `client.chatstate().subscribe_handler(handler)` follows the same `Subscription` contract.

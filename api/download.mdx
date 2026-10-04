@@ -3,281 +3,67 @@ title: "download"
 description: "Download and decrypt media from WhatsApp messages"
 ---
 
+
 ## download
 
-Download and decrypt media from a message.
-
-<Tip>
-Only use `download` when you need the plaintext bytes (processing, transcoding, re-upload). To forward existing media unchanged, reuse the original message's CDN fields directly — no download required. See [media forwarding via CDN reuse](/guides/media-handling#forwarding-media-via-cdn-reuse).
-</Tip>
-
-<Tip>
-`download` and its siblings need a connected `Client` for most media — they ask the server for CDN hosts and an auth token (cached and refreshed automatically, not fetched on every call). The exception is `static_url` media (newsletter/channel content), which skips that round trip entirely — see the note below. If you've persisted a message's CDN fields and want to download after the session has disconnected, use [`MediaDownloader`](#mediadownloader) instead — it needs no `Client` at all.
-</Tip>
-
 ```rust
-pub async fn download(
-    &self,
-    downloadable: &dyn Downloadable
-) -> Result<Vec<u8>, anyhow::Error>
+let bytes = client.download(&image_message).await?;
+let bytes = client.download(&persisted_params).await?;
 ```
 
-<ParamField path="downloadable" type="&dyn Downloadable" required>
-  Any message type that implements the `Downloadable` trait. Includes:
-  - `ImageMessage`
-  - `VideoMessage`
-  - `AudioMessage`
-  - `DocumentMessage`
-  - `StickerMessage`
-  - `ExternalBlobReference` (app state)
-  - `HistorySyncNotification`
-</ParamField>
-
-<ResponseField name="bytes" type="Vec<u8>">
-  Decrypted media bytes. For encrypted media (E2EE), automatically decrypts using AES-256-CBC, verifies HMAC-SHA256, and checks the downloadable's declared `file_enc_sha256` and `file_sha256` against the ciphertext and plaintext (any mismatch fails the attempt and triggers host failover). For plaintext media (newsletters/channels), validates SHA-256 hash.
-</ResponseField>
-
-### Example: download image
-
-```rust
-use waproto::whatsapp as wa;
-
-// From a received message
-if let Some(image_msg) = message.image_message {
-    let image_bytes = client.download(image_msg.as_ref()).await?;
-    std::fs::write("downloaded_image.jpg", image_bytes)?;
-}
-```
-
-### Example: download with error handling
-
-```rust
-match client.download(downloadable).await {
-    Ok(data) => {
-        println!("Downloaded {} bytes", data.len());
-        // Process data...
-    }
-    Err(e) => {
-        eprintln!("Download failed: {}", e);
-        // Fallback logic...
-    }
-}
-```
-
-### Recovering the CDN status by type
-
-`download` still returns bare `anyhow::Error`, but as of PR #1195 the status the CDN refused is recoverable by type via [`ErrorChainExt::http_status()`](/api/errors#error-chain-recovery) instead of only by parsing the message:
-
-```rust
-use whatsapp_rust::ErrorChainExt;
-
-match client.download(downloadable).await {
-    Ok(data) => { /* ... */ }
-    Err(e) => {
-        let cause: &(dyn std::error::Error + 'static) = e.as_ref();
-        match cause.http_status() {
-            // 500/502/503/504 are the CDN statuses normally worth a retry;
-            // 501/505 mean the request itself is unsupported and won't
-            // succeed on a resend. Apply your own policy per status.
-            Some(429) | Some(500) | Some(502) | Some(503) | Some(504) => {
-                /* worth backing off and retrying later */
-            }
-            Some(status) => eprintln!("CDN refused with {status}: {e}"),
-            None => eprintln!("no HTTP refusal status recoverable, inspect the cause: {e}"),
-        }
-    }
-}
-```
-
-`None` doesn't mean no HTTP exchange took place — it means no *refused* status was attached. A socket that never connected reports `None`, but so does a body that downloaded successfully and then failed decryption or hash validation: neither case has a CDN status to recover, so there's nothing to forward upstream. Inspect the underlying cause (`cause.source()` or the message) rather than assuming either case is always yours to fix.
-
-### Automatic retry and URL re-derivation
-
-All download methods handle three categories of CDN errors automatically:
-
-- **Auth errors (401/403):** The client invalidates the cached media connection, fetches fresh credentials, and retries the download once.
-- **Media not found (404/410):** When a media URL has expired or the file has been relocated, the CDN returns 404 or 410. The client treats this the same as an auth error — it invalidates the cached connection, re-derives download URLs with fresh credentials and hosts, and retries once. This matches WhatsApp Web's `MediaNotFoundError` handling.
-- **Other errors (e.g., 500):** The client tries the next available CDN host without refreshing credentials. Hosts are tried in priority order (primary first, then fallback).
-
-For streaming downloads (`download_to_writer`), every attempt — including the first — starts by truncating the writer to empty via [`DownloadWriter::truncate`](#downloadwriter-trait) and rewinding it, so a host that streamed out plaintext before failing its MAC can't leave a tail behind a shorter successful retry. If every host fails, the writer is truncated to empty one final time on a best-effort basis rather than left holding unverified bytes. For in-memory downloads (`download()`), each retry gets a fresh buffer rather than reusing the previous one, for the same reason.
-
-If every retry is exhausted, the status of the final refusal survives into the error `download`/`download_to_writer` return — recover it with `ErrorChainExt::http_status()` as shown [above](#recovering-the-cdn-status-by-type) rather than parsing the message.
-
-<Note>
-This classification reads `status_code` off a successfully completed HTTP exchange — it never sees a status that a custom `HttpClient` implementation turned into an `Err`. If you provide your own `HttpClient`, see the [non-2xx-as-`Ok` contract](/api/http-client#httpclient-trait) it must follow for this retry logic to work at all.
-</Note>
-
-<Note>
-`static_url` media (newsletter/channel content fetched from a fixed CDN URL) skips the media-conn round trip entirely: `download` and its siblings only ask the server for hosts when the downloadable has no `static_url`.
-</Note>
-
----
+Both message media and `DownloadParams` implement `Downloadable`. The client returns `Result<Vec<u8>, ClientDownloadError>` after applicable session refresh and host failover. Static URLs bypass media IQs and their first reference rejection is final.
 
 ## download_to_writer
 
-Download media to a writer using streaming when available, with automatic buffered fallback. This is the method to use for downloading straight to a file — pass a `File` or `BufWriter<File>`.
-
-When the HTTP client supports streaming (`supports_streaming()` returns `true`), the entire HTTP download, decryption, and file write happen in a single blocking thread with ~40KB memory usage regardless of file size. When streaming is not available, the method automatically falls back to a buffered download — fetching the full response into memory, then decrypting and writing to the writer. This ensures `download_to_writer` works with any `HttpClient` implementation.
-
-The writer must implement [`DownloadWriter`](#downloadwriter-trait) rather than plain `Write + Seek` — see that section for why, and for what a custom writer needs to add.
-
 ```rust
-pub async fn download_to_writer<W: DownloadWriter + Send + 'static>(
-    &self,
-    downloadable: &dyn Downloadable,
-    writer: W,
-) -> Result<W, anyhow::Error>
+use std::io::Cursor;
+let writer = client.download_to_writer(&persisted_params, Cursor::new(Vec::new())).await?;
 ```
 
-<ParamField path="downloadable" type="&dyn Downloadable" required>
-  Message containing downloadable media
-</ParamField>
+The call consumes and returns the writer. Success replaces previous contents with verified media and rewinds the destination. Each attempt truncates before writing, so a shorter successful retry cannot retain a prior tail. Streaming keeps bounded crypto/read state; a non-streaming HTTP adapter still buffers its response.
 
-<ParamField path="writer" type="W: DownloadWriter + Send + 'static" required>
-  Writer for streaming output. Must implement [`DownloadWriter`](#downloadwriter-trait) and be Send + 'static for use in blocking task.
-</ParamField>
-
-<ResponseField name="writer" type="W">
-  Returns the writer after a successful download, holding exactly the decrypted media and seeked back to position 0 — nothing a caller left in it beforehand, and no tail from a host that failed partway through, survives.
-</ResponseField>
-
-### Example: streaming download
-
-```rust
-use std::fs::File;
-
-let file = File::create("large_video.mp4")?;
-let file = client.download_to_writer(video_msg.as_ref(), file).await?;
-// File holds exactly the downloaded media, seeked to start, and can be reused
-```
-
-<Note>
-  When using an HTTP client that supports streaming (like the default `UreqHttpClient`), memory usage is constant ~40KB (8KB read buffer + decryption state). HTTP clients that don't support streaming fall back to buffered downloads, which load the full file into memory before writing.
-</Note>
-
-<Note>
-  If the download fails on every host, the writer is emptied too, on a best-effort basis: a sink that refuses to empty is logged rather than replacing the download's own error. This only matters to a caller who kept a separate handle to the writer (e.g. a shared/cloneable writer), since `download_to_writer` otherwise consumes it and returns nothing on failure.
-</Note>
-
----
+On an ordinary returned error, the downloader clears and rewinds the consumed destination when possible. `WriterCleanup` exposes refusal or cleanup failure. Cancellation or executor loss can prevent return and cleanup; publish a separately retained destination only after success.
 
 ## DownloadWriter trait
 
-<Warning>
-**Breaking change (as of PR #1197):** `download_to_writer`, `download_from_params_to_writer`, and `MediaDownloader::download_to_writer` now take `W: DownloadWriter` instead of `W: Write + Seek`. `std::fs::File`, `std::io::Cursor<Vec<u8>>`, `std::io::Cursor<&mut Vec<u8>>`, `std::io::BufWriter<W: DownloadWriter>`, and `&mut W where W: DownloadWriter` all implement it already, so call sites using those types need no changes. A custom writer type needs one additional method — see below.
-</Warning>
+A writer must implement `Write`, `Seek`, and `truncate`. `Cursor<Vec<u8>>` and `std::fs::File` implement this contract. A custom host writer must truncate existing output as well as accept writes and rewinds.
 
-`download_to_writer` needs more than `Write + Seek` from its sink: it needs to be able to empty it.
+## ClientDownloadError
 
-```rust
-pub trait DownloadWriter: std::io::Write + std::io::Seek {
-    /// Shorten the sink to `len` bytes, discarding anything beyond it.
-    /// Only ever called with a length the sink already reaches.
-    fn truncate(&mut self, len: u64) -> std::io::Result<()>;
-}
-```
+| Variant | Final outcome |
+| --- | --- |
+| `ReferenceRejected` | CDN rejected the reference after applicable refresh |
+| `HostsUnreachable` | Every host failed; last transport, HTTP, or integrity cause retained |
+| `NoHosts` | No host route existed; no HTTP exchange |
+| `NoHostsAfterRefresh` | A forced refresh was empty after rejection; original status retained |
+| `Preparation` | Metadata could not become a request |
+| `MediaSession { force_refresh, source }` | Initial session acquisition or forced refresh failed with a typed IQ cause |
+| `WriterIo` | Local truncate, write, or rewind failed; no CDN retry or refresh |
+| `WriterCleanup { failure, cleanup }` | Clearing the destination failed too; inspect both causes |
 
-Media is authenticated by a single MAC over the whole ciphertext, so decryption has necessarily streamed plaintext into the writer by the time a forged body is caught, and a retry against the next host may end up writing fewer bytes than the attempt it replaces. Rewinding with `seek` alone can't remove bytes that are already there — shortening a sink requires a concrete operation (`File::set_len`, `Vec::truncate`) that no `std` trait exposes. `DownloadWriter::truncate` names that operation, which is what lets `download_to_writer` guarantee: **exactly the media on success**, and **empty on failure on a best-effort basis** (a sink that refuses to empty during that final cleanup is logged, not treated as fatal — see the note above).
+Match with a fallback arm because the enum is extensible. `ErrorChainExt` recovers typed source information such as HTTP status. Local writer I/O is terminal; HTTP reader failure can still fail over. An existing `anyhow::Result` function can use `?`, or explicitly convert the error at an erased return boundary.
 
-Every attempt begins by truncating the writer to 0, which clears its length, and then seeking it to 0, which resets its position — two separate operations that both matter on an append-mode `File`: appending forces every write to the file's current end regardless of position, so truncating to 0 is what makes that end (and therefore the next write) land at the start; a bare `seek` would change the position but not the end, and appending would still write there. On success, `download_to_writer` performs one further `seek(0)` after the writer's own bytes are in place, which is the "seeked back to position 0" postcondition on the returned writer described above.
+## Automatic retry and URL re-derivation
 
-### Built-in implementations
+For session-derived routes, the client performs applicable host failover and can refresh media credentials once after a reference rejection. Static URLs bypass session acquisition and their first reference rejection is terminal. Inspect `ClientDownloadError` for the final classification; a refreshed empty host list preserves the original rejection status. The standalone `MediaDownloader` cannot ask a client for refreshed credentials.
 
-| Type | `truncate` behavior |
-|------|------|
-| `std::fs::File` | Calls `File::set_len` |
-| `std::io::Cursor<Vec<u8>>` | Calls `Vec::truncate`, saturating rather than failing if `len` doesn't fit in `usize` |
-| `std::io::Cursor<&mut Vec<u8>>` | Same as above, over the borrowed buffer |
-| `std::io::BufWriter<W: DownloadWriter>` | Flushes first (buffered bytes count toward the sink's length), then delegates to the inner writer |
-| `&mut W where W: DownloadWriter` | Delegates to the wrapped writer |
+Local writer failures do not trigger CDN retry or refresh. A consumed sink may have changed before failure; use the cleanup and cancellation boundaries above rather than publish partial output.
 
-### Implementing DownloadWriter for a custom writer
+## Recovering the CDN status by type
 
-Any writer type used with `download_to_writer` that isn't one of the built-ins above — including a wrapper around one, like a progress-reporting adapter — needs its own `DownloadWriter` impl. For a wrapper, this is normally a one-line delegation:
+Call `ErrorChainExt::http_status()` on the typed `ClientDownloadError`. It walks retained sources; absence of a status does not imply an HTTP exchange succeeded. Session acquisition failures retain their IQ cause, while cleanup failures can preserve both the download and cleanup causes. See [error chain recovery](/api/errors#error-chain-recovery).
 
-```rust
-use wacore::download::DownloadWriter;
+## Music artwork
 
-impl<W: DownloadWriter> DownloadWriter for ProgressWriter<W> {
-    fn truncate(&mut self, len: u64) -> std::io::Result<()> {
-        self.inner.truncate(len)
-    }
-}
-```
-
-See [Streaming with Progress](/guides/media-handling#streaming-with-progress) for the full `ProgressWriter` example, including its `Write` and `Seek` impls.
-
----
-
-## download_from_params
-
-Download and decrypt media from raw CDN parameters without the original message. The parameters are bundled into a [`DownloadParams`](#downloadparams) struct.
+`wa::EmbeddedMusic` implements `Downloadable` for encrypted artwork. To derive the mode from its actual chat:
 
 ```rust
-pub async fn download_from_params(
-    &self,
-    params: &DownloadParams,
-) -> Result<Vec<u8>, anyhow::Error>
+use whatsapp_rust::wacore::download::MusicArtwork;
+let artwork = MusicArtwork::for_chat(&embedded_music, &chat_jid);
+let bytes = client.download(&artwork).await?;
 ```
 
-<ParamField path="params" type="&DownloadParams" required>
-  The CDN/crypto fields needed to fetch and decrypt the media. Build one with [`DownloadParams::encrypted`](#downloadparams).
-</ParamField>
-
-<ResponseField name="bytes" type="Vec<u8>">
-  Decrypted media bytes
-</ResponseField>
-
-### Example: download from stored metadata
-
-```rust
-use wacore::download::MediaType;
-use whatsapp_rust::download::DownloadParams;
-
-// If you stored media metadata separately
-let params = DownloadParams::encrypted(
-    "/v/t62.7118-24/12345_67890",
-    &media_key,
-    &file_sha256,
-    &file_enc_sha256,
-    file_length,
-    MediaType::Image,
-);
-
-let image_bytes = client.download_from_params(&params).await?;
-```
-
-<Tip>
-`DownloadParams` implements [`Downloadable`](#downloadable-trait), so you can also pass it straight to [`download`](#download): `client.download(&params).await?`.
-</Tip>
-
----
-
-## download_from_params_to_writer
-
-Streaming variant of `download_from_params` that writes to a writer. Same writer contract as [`download_to_writer`](#download_to_writer): the writer must implement [`DownloadWriter`](#downloadwriter-trait), and holds exactly the decrypted media on success.
-
-```rust
-pub async fn download_from_params_to_writer<W: DownloadWriter + Send + 'static>(
-    &self,
-    params: &DownloadParams,
-    writer: W,
-) -> Result<W, anyhow::Error>
-```
-
-<ParamField path="params" type="&DownloadParams" required>
-  The CDN/crypto fields needed to fetch and decrypt the media. See [`DownloadParams`](#downloadparams).
-</ParamField>
-
-<ParamField path="writer" type="W: DownloadWriter + Send + 'static" required>
-  Writer for streaming output
-</ParamField>
-
-<ResponseField name="writer" type="W">
-  Returns the writer after a successful download, holding exactly the decrypted media
-</ResponseField>
-
----
+Only an actual newsletter JID selects plaintext channel artwork. Other chats require the media key. `MediaType::MusicArtwork` and `NewsletterMusicArtwork` provide the corresponding routes.
 
 ## DownloadParams
 
@@ -318,7 +104,7 @@ pub fn encrypted(
 ) -> Self
 ```
 
-`DownloadParams` implements [`Downloadable`](#downloadable-trait), so it works with `download`, `download_to_writer`, `download_from_params`, `download_from_params_to_writer`, and [`MediaDownloader`](#mediadownloader).
+`DownloadParams` implements [`Downloadable`](#downloadable-trait), so it works with `download`, `download_to_writer`, and [`MediaDownloader`](#mediadownloader).
 
 ---
 
@@ -376,7 +162,7 @@ impl MediaDownloader {
 
 ```rust
 use std::sync::Arc;
-use wacore::download::MediaType;
+use whatsapp_rust::wacore::download::MediaType;
 use whatsapp_rust::download::{DownloadParams, MediaDownloader};
 
 // Needs only an HttpClient + Runtime — no paired Client required.
@@ -422,7 +208,7 @@ pub enum MediaDownloadError {
 
 `MediaDownloadError` is `#[non_exhaustive]`; match it with a wildcard (`_ => `) arm so a future variant doesn't break your build.
 
-`Client::download` and `Client::download_to_writer` keep returning `anyhow::Error`: they already try a credential refresh before the error would escape, so the extra classification has nothing left to add there.
+`Client::download` and `Client::download_to_writer` return `ClientDownloadError`, which classifies the final outcome after applicable credential refresh and host failover. Low-level `MediaDownloader` uses `MediaDownloadError`.
 
 ### MediaRoute and MediaHost
 
@@ -501,37 +287,45 @@ A non-2xx response fails with the same contract as `download`: the status is rec
 use whatsapp_rust::Client;
 
 let pack = client.fetch_sticker_pack("3F9Z2…", "en").await?;
-println!("Pack '{}' by {}", pack.name, pack.publisher);
-for sticker in &pack.stickers {
+println!("Pack {:?} by {:?}", pack.name, pack.publisher);
+for (index, sticker) in pack.stickers.iter().enumerate() {
     let bytes = client.download(sticker).await?;
-    std::fs::write(format!("{}.webp", sticker.file_name), bytes)?;
+    std::fs::write(format!("sticker-{index}.webp"), bytes)?;
 }
 ```
 
 ### StickerPack
 
 ```rust
-pub struct StickerPack {
-    pub sticker_pack_id: String,
-    pub name: String,
-    pub publisher: String,
+pub struct StickerPack {    pub sticker_pack_id: Option<String>,
+    pub name: Option<String>,
+    pub publisher: Option<String>,
     pub description: Option<String>,
-    pub tray_image_file_name: Option<String>,
+    pub file_size: Option<String>,
+    pub image_data_hash: Option<String>,
     pub stickers: Vec<StickerPackItem>,
-    // additional CDN metadata: animated, tray-icon colors, …
+    pub animated: i32,
+    pub lottie: i32,
+    pub preview_image_ids: Vec<String>,
+    pub tray_image_id: Option<String>,
+    pub tray_image_preview: Option<String>,
 }
 ```
 
 ### StickerPackItem
 
 ```rust
-pub struct StickerPackItem {
-    pub file_name: String,
+pub struct StickerPackItem {    pub media_key: Option<Vec<u8>>,
+    pub file_hash: Option<Vec<u8>>,
+    pub enc_file_hash: Option<Vec<u8>>,
+    pub direct_path: Option<String>,
+    pub url: Option<String>,
+    pub file_size: Option<u64>,
+    pub mimetype: Option<String>,
+    pub width: Option<u32>,
+    pub height: Option<u32>,
     pub emojis: Vec<String>,
     pub accessibility_text: Option<String>,
-    pub is_animated: bool,
-    // plus all Downloadable fields:
-    //   direct_path, media_key, file_enc_sha256, file_sha256, file_length
 }
 
 impl Downloadable for StickerPackItem { /* … */ }
@@ -611,6 +405,7 @@ The `Downloadable` trait is automatically implemented for:
 Media type enum for encryption/decryption.
 
 ```rust
+#[non_exhaustive]
 pub enum MediaType {
     Image,
     Video,
@@ -623,6 +418,9 @@ pub enum MediaType {
     StickerPackThumbnail,
     LinkThumbnail,
     ProductCatalogImage,
+    GroupHistory,
+    MusicArtwork,
+    NewsletterMusicArtwork,
 }
 ```
 
@@ -633,6 +431,8 @@ Each media type has specific HKDF info strings used for key derivation:
 - `Audio` → `"WhatsApp Audio Keys"`
 - `Document` → `"WhatsApp Document Keys"`
 - `History` → `"WhatsApp History Keys"`
+- `GroupHistory` → `"Group History"`
+- `MusicArtwork` / `NewsletterMusicArtwork` → `"WhatsApp Music Artwork Keys"`
 - `AppState` → `"WhatsApp App State Keys"`
 - `StickerPack` → `"WhatsApp Sticker Pack Keys"`
 - `StickerPackThumbnail` → `"WhatsApp Sticker Pack Thumbnail Keys"`

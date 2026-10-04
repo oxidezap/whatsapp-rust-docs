@@ -11,301 +11,40 @@ The `Mex` feature wraps WhatsApp's Meta Exchange (MEX) GraphQL API. Operations a
 let mex = client.mex();
 ```
 
+
 ## Building a request
 
-Each persisted operation lives in its own module under [`wacore::iq::mex_operations`](/api/wacore). Every module exposes:
-
-- `NAME` — the operation name (e.g. `"WAWebJoinNewsletterMutation"`).
-- `DOC_ID` — the current persisted document ID.
-- `OPERATION_KIND` — `"query"` or `"mutation"`.
-- `VARIABLE_KEYS` — every variable name the persisted document declares, e.g. `&["fetch_viewer_metadata", "fetch_full_image", ...]`.
-- `Variables` — a typed struct matching the operation's input shape.
-- `Response` — a typed struct matching the operation's output shape.
-
-Construct a [`MexRequest`](#mexrequest) with [`MexRequest::new`](#new) using those constants and a `Variables` value:
-
 ```rust
-use wacore::iq::mex_operations::fetch_newsletter;
-use whatsapp_rust::features::mex::MexRequest;
+use whatsapp_rust::{mex_operation, wacore::iq::mex_operations::join_newsletter};
 
-let request = MexRequest::new(
-    fetch_newsletter::NAME,
-    fetch_newsletter::DOC_ID,
-    fetch_newsletter::VARIABLE_KEYS,
-    fetch_newsletter::Variables {
-        input: Some(fetch_newsletter::Input {
-            key: Some(jid.to_string()),
-            r#type: Some("JID".into()),
-            view_role: Some("GUEST".into()),
-        }),
-        fetch_viewer_metadata: Some(true),
-        fetch_full_image: Some(true),
-        fetch_creation_time: Some(true),
-        fetch_pinned_messages: Some(false),
-        fetch_status_metadata: Some(false),
-        fetch_wamo_sub: Some(false),
-    },
-);
-
-let response = client.mex().query(request).await?;
+let operation = mex_operation!(join_newsletter);
+let request = operation.request(join_newsletter::Variables {
+    newsletter_id: Some(jid.to_string()),
+});
+let response = client.mex().execute(request).await?;
 ```
 
-<Note>
-A generated `Variables` does not implement `Default`. The server binds a persisted query's variables by name and answers a bare `400 Bad Request` when it can't bind one of them, so every variable the operation declares has to be named at the call site — `..Default::default()` does not compile, and neither does `Variables::default()`. Passing `None` for an `Option` field is still how you send a variable WhatsApp Web itself omits; nested input objects (for example `Updates` on `update_newsletter`) are unaffected and keep `Default`.
-</Note>
+`mex_operation!` binds operation name, persisted document ID, declared keys, and generated variables type from the same module. An unrelated variables type fails to compile. Generated top-level `Variables` do not implement `Default`; explicitly choose every declared field. `None` can still mean omission where the generated serializer allows it.
 
-<Tip>
-For operations whose `Variables` schema is too permissive to model exactly, pass any `serde::Serialize` value (for example a `serde_json::json!({...})`) as the variables — `query` and `mutate` are generic over `V: Serialize`. Use [`MexRequest::missing_variables`](#missing_variables) to check such a payload against `VARIABLE_KEYS`, since the compiler can't.
-</Tip>
+## execute
 
-## Methods
+`Mex::execute(MexRequest<V>)` is the shared path for queries and mutations, with `V: Serialize`. It serializes directly to wire bytes and returns `MexResponse`. Generated response mirrors are heuristic; use a domain parser before treating the payload as a feature contract.
 
-### query
+Use `operation.raw_request(serializable_value)` when a generated variables mirror cannot represent the intended input. The descriptor's metadata stays bound to that operation. For custom persisted operations, `MexOperation::from_raw_parts` or `MexRequest::new_raw` is the explicit unchecked path; the host owns metadata consistency.
 
-Execute a GraphQL query.
+## MexRequest
 
-```rust
-pub async fn query<V: Serialize>(
-    &self,
-    request: MexRequest<V>,
-) -> Result<MexResponse, MexError>
-```
+Metadata is private. Read it with `doc()` and `declared_variables()`; `variables` remains public. `missing_variables()` is an optional diagnostic that compares serialized top-level keys, including keys omitted by `skip_serializing_if`. It allocates a JSON value and is not automatically enforced on execution. A declared key is not proof of a required server variable.
 
-### mutate
+## Convenience operations
 
-Execute a GraphQL mutation.
-
-```rust
-pub async fn mutate<V: Serialize>(
-    &self,
-    request: MexRequest<V>,
-) -> Result<MexResponse, MexError>
-```
-
-**Example — mutation with typed variables:**
-
-```rust
-use wacore::iq::mex_operations::join_newsletter;
-use whatsapp_rust::features::mex::MexRequest;
-
-let request = MexRequest::new(
-    join_newsletter::NAME,
-    join_newsletter::DOC_ID,
-    join_newsletter::VARIABLE_KEYS,
-    join_newsletter::Variables {
-        newsletter_id: Some(jid.to_string()),
-    },
-);
-
-let response = client.mex().mutate(request).await?;
-```
-
-**Example — loosely-typed variables with `serde_json`:**
-
-```rust
-use serde_json::json;
-use wacore::iq::mex::MexDoc;
-use whatsapp_rust::features::mex::MexRequest;
-
-let request = MexRequest {
-    doc: MexDoc {
-        name: "WAWebUpdateGroupPropertyMutation",
-        id: "8014515568645029",
-    },
-    declared_variables: &["group_id", "property", "value"],
-    variables: json!({
-        "group_id": group_jid.to_string(),
-        "property": "announcement",
-        "value": true,
-    }),
-};
-
-let response = client.mex().mutate(request).await?;
-```
-
-### fetch_new_chat_message_capping_info
-
-Fetch the cap on how many new one-on-one conversations you can start in the current cycle.
-
-```rust
-pub async fn fetch_new_chat_message_capping_info(
-    &self,
-) -> Result<NewChatMessageCapping, MexError>
-```
-
-WhatsApp Web issues this request at app launch. It refreshes the cap on a TTL (`wa_individual_new_chat_msg_capping_fetch_ttl_seconds`, 1 hour), gated on `wa_individual_new_chat_msg_capping_enabled`. If the cap doesn't apply to your account, you still get an answer — the status just reports `NONE`.
-
-**Example:**
-
-```rust
-use whatsapp_rust::CappingStatus;
-
-let capping = client.mex().fetch_new_chat_message_capping_info().await?;
-
-match &capping.capping_status {
-    Some(CappingStatus::Capped) => println!("New-chat cap reached for this cycle"),
-    Some(status) => println!("Capping status: {:?}", status),
-    None => {}
-}
-
-if let Some(remaining) = capping.remaining_quota() {
-    println!("{} new chats left this cycle", remaining);
-}
-```
-
-### get_username
-
-Read this account's own username, its state, and its username key.
-
-```rust
-pub async fn get_username(&self) -> Result<Option<OwnUsername>, MexError>
-```
-
-**Returns:**
-- `None` — no username is set on this account. WhatsApp Web reads the same 404 the server sends for this case.
-- `Some(OwnUsername)` — the account's username info.
-
-<Note>
-Only reads are exposed. `set_username` and `set_username_key` are not wrapped. They change the account's identity in a way the server does not undo. A wrong call can burn a handle that someone else could otherwise take, and there is no way to test either safely.
-</Note>
-
-**Example:**
-
-```rust
-match client.mex().get_username().await? {
-    Some(own) => println!("Username: {:?} (state: {:?})", own.username, own.state),
-    None => println!("No username set on this account"),
-}
-```
+Use `fetch_reachout_timelock`, `fetch_new_chat_message_capping_info`, and `get_username` for the library's parsed contracts. `ReachoutTimelockUpdate` delivers parsed push updates separately from these reads. See [events](/concepts/events#reachouttimelockupdate).
 
 ## Types
 
-### MexDoc
-
-A persisted-query descriptor. Re-exported from `wacore::iq::mex`.
-
-```rust
-pub struct MexDoc {
-    /// Human-readable operation name (stable across bundle releases).
-    pub name: &'static str,
-    /// Numeric persisted-query ID (rotates with bundle releases).
-    pub id: &'static str,
-}
-```
-
-### MexRequest
-
-A persisted-query descriptor plus its typed variables. `V` is the variables type — usually the generated `Variables` struct for an operation, but any `Serialize` value works.
-
-```rust
-pub struct MexRequest<V> {
-    pub doc: MexDoc,
-    pub declared_variables: &'static [&'static str],
-    pub variables: V,
-}
-```
-
-- `declared_variables` — the variable names the persisted document declares (an operation module's `VARIABLE_KEYS`), carried so [`missing_variables`](#missing_variables) can check a payload against them even when `variables` is a loosely-typed `Serialize` value.
-
-#### new
-
-Pair an operation's `NAME`, `DOC_ID`, and `VARIABLE_KEYS` with its variables. Prefer this over building `MexRequest` as a struct literal.
-
-```rust
-pub fn new(
-    name: &'static str,
-    id: &'static str,
-    declared_variables: &'static [&'static str],
-    variables: V,
-) -> MexRequest<V>
-```
-
-#### missing_variables
-
-Declared variables this request's payload does not carry, found by serializing `variables` and checking which of `declared_variables` are absent.
-
-```rust
-pub fn missing_variables(&self) -> Result<Vec<&'static str>, serde_json::Error>
-```
-
-A non-empty result isn't automatically wrong — WhatsApp Web itself omits an optional variable it has no value for, and this reports that the same way rather than judging it. It exists mainly for the loosely-typed `Serialize` form of a request, where the compiler can't check a `json!` payload against the operation's declared variables the way it checks a `Variables` struct literal.
-
-```rust
-let request = MexRequest::new(
-    fetch_all_newsletters_metadata::NAME,
-    fetch_all_newsletters_metadata::DOC_ID,
-    fetch_all_newsletters_metadata::VARIABLE_KEYS,
-    json!({ "fetch_wamo_sub": false }),
-);
-
-assert_eq!(request.missing_variables()?, vec!["fetch_status_metadata"]);
-```
-
-### MexResponse
-
-Response from a GraphQL operation.
-
-```rust
-pub struct MexResponse {
-    /// Response data (if successful).
-    pub data: Option<serde_json::Value>,
-    /// List of errors (if any).
-    pub errors: Option<Vec<MexGraphQLError>>,
-}
-```
-
-**Methods:**
-- `has_data()` — `true` if the response contains data.
-- `has_errors()` — `true` if the response contains errors.
-- `fatal_error()` — the first fatal error (any error with an `error_code`), if any.
-
-### MexGraphQLError
-
-```rust
-pub struct MexGraphQLError {
-    pub message: String,
-    pub extensions: Option<MexErrorExtensions>,
-}
-```
-
-**Methods:**
-- `error_code()` — the numeric error code, if present.
-- `is_summary()` — `true` when the error is marked as a summary.
-- `has_error_code()` — `true` when an error code is set.
-
-<Note>
-`MexGraphQLError` is re-exported from the crate root as `whatsapp_rust::MexGraphQLError`, alongside `MexError`, `MexErrorExtensions`, `MexFatalError`, `MexRequest`, `MexResponse`, and `OwnUsername`.
-</Note>
-
-### MexErrorExtensions
-
-```rust
-pub struct MexErrorExtensions {
-    pub error_code: Option<i32>,
-    pub is_summary: Option<bool>,
-    pub is_retryable: Option<bool>,
-    pub severity: Option<String>,
-}
-```
-
-### MexFatalError
-
-The typed cause behind a fatal GraphQL error, from `wacore::iq::mex`. WhatsApp Web treats a GraphQL error carrying an extension code as fatal to the whole request. This struct is what lets that code survive the trip through `IqError::ParseError`'s `source()` chain instead of being flattened into a plain message.
-
-```rust
-#[non_exhaustive]
-pub struct MexFatalError {
-    pub query: &'static str,
-    pub code: i32,
-    pub message: String,
-}
-```
-
-You won't normally construct or match this directly. `query`/`mutate` already downcast it for you and hand back [`MexError::ExtensionError`](#error-handling). It's public for callers working with `wacore::iq::mex::MexQuerySpec` directly, below the `whatsapp_rust::features::mex::Mex` wrapper.
-
 ### OwnUsername
 
-This account's own Meta username, as [`get_username`](#get_username) reports it. Every field is optional because the server omits the ones that don't apply.
+This account's own Meta username, as [`get_username`](#convenience-operations) reports it. Every field is optional because the server omits the ones that don't apply.
 
 ```rust
 #[non_exhaustive]
@@ -392,6 +131,7 @@ pub enum CappingMvStatus {
 ## Error handling
 
 ```rust
+#[non_exhaustive]
 pub enum MexError {
     /// Payload missing or malformed with only a descriptive message.
     PayloadParsing(String),
@@ -406,12 +146,12 @@ pub enum MexError {
 }
 ```
 
-`query` and `mutate` automatically convert any fatal GraphQL error (any error with an `error_code`) into `MexError::ExtensionError`. This lets you match on it without inspecting `response.errors` yourself. This now happens for every MEX operation via a typed [`MexFatalError`](#mexfatalerror) carried inside `IqError::ParseError`'s source chain. Previously the code could be lost, surfacing only as a message inside `MexError::Request(IqError::ParseError(_))`.
+`execute` converts a fatal GraphQL response into `MexError::ExtensionError` while preserving its numeric code. Fatal selection checks a summary error, then an error with `error_code`, then the first error with fallback code 500. The typed [`MexFatalError`](#mexfatalerror) remains reachable through an IQ parse-error source chain at lower levels.
 
 ```rust
 use whatsapp_rust::features::mex::MexError;
 
-match client.mex().query(request).await {
+match client.mex().execute(request).await {
     Ok(response) => {
         if response.has_data() {
             println!("Success: {:?}", response.data);
@@ -426,12 +166,16 @@ match client.mex().query(request).await {
 
 `get_username` treats a fatal 404 as "no username set" rather than a failure. It arrives as either `MexError::ExtensionError { code: 404, .. }` or `MexError::Request(IqError::ServerError { code: 404, .. })` — the two shapes WhatsApp Web's own MEX client raises a 404 from. Either shape returns `Ok(None)` instead of an error.
 
+### MexFatalError
+
+`whatsapp_rust::wacore::iq::mex::MexFatalError` retains the operation's `query: &'static str`, numeric `code: i32`, and `message: String`. Use typed matching or source-chain inspection rather than parse its display text. Read the [pinned MEX response parser](https://github.com/oxidezap/whatsapp-rust/blob/54ce6cd9007f4361a07dbad50718973bbf56e2e9/wacore/src/iq/mex.rs) for fatal selection and parsing.
+
 ## Response handling
 
 ### Check for data
 
 ```rust
-let response = client.mex().query(request).await?;
+let response = client.mex().execute(request).await?;
 
 if response.has_data() {
     let data = response.data.unwrap();
@@ -444,7 +188,7 @@ if response.has_data() {
 Errors without an `error_code` are non-fatal and surface in `response.errors` alongside any partial data.
 
 ```rust
-let response = client.mex().query(request).await?;
+let response = client.mex().execute(request).await?;
 
 if response.has_errors() {
     for error in response.errors.as_ref().unwrap() {
@@ -460,9 +204,9 @@ if response.has_errors() {
 Generated operation modules also expose a `Response` struct that mirrors the GraphQL schema. Decode it from `response.data` with `serde_json`:
 
 ```rust
-use wacore::iq::mex_operations::fetch_newsletter;
+use whatsapp_rust::wacore::iq::mex_operations::fetch_newsletter;
 
-let response = client.mex().query(request).await?;
+let response = client.mex().execute(request).await?;
 
 if let Some(data) = response.data {
     let decoded: fetch_newsletter::Response = serde_json::from_value(data)?;

@@ -29,7 +29,7 @@ Add `whatsapp-rust` with the `metrics` feature, plus the recorder you want to ex
 
 ```toml Cargo.toml
 [dependencies]
-whatsapp-rust = { version = "0.7", features = ["metrics"] }
+whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "54ce6cd9007f4361a07dbad50718973bbf56e2e9", features = ["metrics"] }
 metrics = "0.24"
 metrics-exporter-prometheus = "0.16"
 ```
@@ -85,13 +85,13 @@ All metrics are prefixed with `wa_` and emitted at the same boundaries as the ma
 | `wa_appstate_mutations_total` | — | App-state mutations applied |
 | `wa_identity_change_total` | — | Peer identity changes that triggered a session reset |
 | `wa_prekey_upload_total` | `outcome` = `ok`, `fail` | Pre-key uploads by outcome |
-| `wa_session_record_quarantined_total` | — | Stored session rows that failed to decode and were treated as absent for recovery. Steady state is zero — see [session row quarantine](/concepts/storage#signalstorecache) |
+| `wa_session_record_quarantined_total` | — | Stored session rows that failed to decode and were treated as absent for recovery. Steady state is zero — see [session row quarantine](/concepts/storage#cache-coherence) |
 | `wa_unkeyable_device_total` | `reason` = `no_bundle`, `session_setup`, `session_lookup`, `rejected_406`, `rejected_4xx`, `rejected_5xx`, `rejected_other`, `refused_batch`, `fetch_failed`, `encrypt` | Failed attempts to obtain key material for one device, by reason ([#1304](https://github.com/oxidezap/whatsapp-rust/pull/1304)) |
 
 <Note>
 `wa_unkeyable_device_total` is the rate to watch after a session-repair change, or to page on when a chat sits on "Waiting for this message". It is an attempt counter, not a per-delivered-device one — a retry that fails the same way counts again. `406` keeps its own label since it's the only code that changes client behavior. `refused_batch` is kept apart from a named `rejected_*` label because a batch refusal names no device. `stats()`'s [`devices_unkeyed_*` fields](/api/client#stats) carry the same totals without the per-code split.
 
-Both are process-wide: they say a device went unkeyed somewhere, never which message lost it. As of [#1362](https://github.com/oxidezap/whatsapp-rust/pull/1362), the per-message question is answered by [`SendResult::recipient_fanout`](/api/send#recipientfanout) instead — a DM's result carries how many recipient devices it addressed, how many actually encrypted, and whether the recipient's primary device was among the ones that didn't.
+Both are process-wide: they say a device went unkeyed somewhere, never which message lost it. As of [#1362](https://github.com/oxidezap/whatsapp-rust/pull/1362), the per-message question is answered by [`SendResult::recipient_fanout`](/api/send#sendresult) instead — a DM's result carries how many recipient devices it addressed, how many actually encrypted, and whether the recipient's primary device was among the ones that didn't.
 </Note>
 
 ### Histograms (seconds)

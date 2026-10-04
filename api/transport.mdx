@@ -17,13 +17,13 @@ The `Transport` trait represents an active network connection as a simple byte p
 
 ```rust
 use async_trait::async_trait;
-use wacore::sync_marker::MaybeSendSync;
+use whatsapp_rust::wacore::sync_marker::MaybeSendSync;
 
 #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
 pub trait Transport: MaybeSendSync {
     /// Sends raw data to the server
-    async fn send(&self, data: Vec<u8>) -> Result<(), anyhow::Error>;
+    async fn send(&self, data: whatsapp_rust::bytes::Bytes) -> Result<(), anyhow::Error>;
 
     /// Closes the connection
     async fn disconnect(&self);
@@ -41,7 +41,7 @@ pub trait Transport: MaybeSendSync {
 Sends raw bytes through the transport. The caller is responsible for any protocol framing.
 
 ```rust
-async fn send(&self, data: Vec<u8>) -> Result<(), anyhow::Error>;
+async fn send(&self, data: whatsapp_rust::bytes::Bytes) -> Result<(), anyhow::Error>;
 ```
 
 **Parameters:**
@@ -54,7 +54,7 @@ async fn send(&self, data: Vec<u8>) -> Result<(), anyhow::Error>;
 **Example:**
 ```rust
 let data = vec![1, 2, 3, 4];
-transport.send(data).await?;
+transport.send(data.into()).await?;
 ```
 
 #### disconnect
@@ -127,7 +127,7 @@ let factory = TokioWebSocketTransportFactory::new();
 let (transport, events) = factory.create_transport().await?;
 
 // Use transport to send data
-transport.send(data).await?;
+transport.send(data.into()).await?;
 
 // Listen for events
 while let Ok(event) = events.recv().await {
@@ -246,7 +246,7 @@ The default factory handles DNS resolution, TCP connection, and TLS. For custom 
 When no custom connector is supplied via [`with_connector`](#with_connector), the factory builds [`default_tls_connector()`](#default_tls_connector) once, on the first call to `create_transport`, and retains it in a `OnceLock` for every subsequent dial on that factory — a reconnect no longer pays for a fresh TLS config. Retaining the connector also lets a later dial reuse resumption tickets an earlier handshake received: previously (the pre-#1245 behavior), rebuilding the config per dial discarded the resumption store — tickets and all — before the next dial could ever use it. A connector supplied explicitly via `with_connector` is used as-is and never touches this cache.
 
 ```rust
-use whatsapp_rust_tokio_transport::TokioWebSocketTransportFactory;
+use whatsapp_rust::transport::TokioWebSocketTransportFactory;
 
 // Default - connects to WhatsApp Web
 let factory = TokioWebSocketTransportFactory::new();
@@ -280,7 +280,7 @@ For full proxy support, implement `TransportFactory` directly and use [`from_web
 **Example — custom CA certificate:**
 
 ```rust
-use whatsapp_rust_tokio_transport::{TokioWebSocketTransportFactory, Connector, default_tls_connector};
+use whatsapp_rust::transport::{TokioWebSocketTransportFactory, Connector, default_tls_connector};
 use tokio_rustls::TlsConnector;
 use rustls::RootCertStore;
 use std::sync::Arc;
@@ -338,7 +338,7 @@ Its session-resumption store is sized for the one host a factory dials: 8 ticket
 
 ```rust
 use whatsapp_rust::Bot;
-use whatsapp_rust_tokio_transport::TokioWebSocketTransportFactory;
+use whatsapp_rust::transport::TokioWebSocketTransportFactory;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -380,7 +380,7 @@ The function splits the WebSocket into read/write halves, spawns a background re
 **Example — IPv4-only connection with TCP keepalive:**
 
 ```rust
-use whatsapp_rust_tokio_transport::from_websocket;
+use whatsapp_rust::transport::from_websocket;
 use tokio::net::TcpStream;
 use tokio_websockets::ClientBuilder;
 
@@ -406,8 +406,8 @@ let (transport, events) = from_websocket(ws);
 **Example — using with a custom TransportFactory:**
 
 ```rust
-use whatsapp_rust_tokio_transport::from_websocket;
-use wacore::net::{Transport, TransportEvent, TransportFactory};
+use whatsapp_rust::transport::from_websocket;
+use whatsapp_rust::wacore::net::{Transport, TransportEvent, TransportFactory};
 
 struct MyTransportFactory;
 
@@ -434,8 +434,8 @@ The transport layer provides two approaches for proxy support, depending on your
 **Option 1: Implement `TransportFactory` directly** — for full control over the connection (SOCKS5, HTTP CONNECT, etc.). Establish a WebSocket through the proxy yourself, then wrap it with `from_websocket`:
 
 ```rust
-use whatsapp_rust_tokio_transport::from_websocket;
-use wacore::net::{Transport, TransportEvent, TransportFactory};
+use whatsapp_rust::transport::from_websocket;
+use whatsapp_rust::wacore::net::{Transport, TransportEvent, TransportFactory};
 
 struct ProxyTransportFactory {
     proxy_url: String,
@@ -494,7 +494,7 @@ Enable the `danger-skip-tls-verify` feature to disable certificate verification:
 
 ```toml
 [dependencies]
-whatsapp-rust-tokio-transport = { version = "0.7", features = ["danger-skip-tls-verify"] }
+whatsapp-rust-tokio-transport = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "54ce6cd9007f4361a07dbad50718973bbf56e2e9", features = ["danger-skip-tls-verify"] }
 ```
 
 This allows connecting through MITM proxies or self-signed certificates.
@@ -580,14 +580,14 @@ You can implement custom transports for different runtimes or protocols.
 ```rust
 use async_trait::async_trait;
 use std::sync::Arc;
-use wacore::net::{Transport, TransportEvent, TransportFactory};
+use whatsapp_rust::wacore::net::{Transport, TransportEvent, TransportFactory};
 
 /// A mock transport that does nothing
 pub struct MockTransport;
 
 #[async_trait]
 impl Transport for MockTransport {
-    async fn send(&self, _data: Vec<u8>) -> Result<(), anyhow::Error> {
+    async fn send(&self, _data: whatsapp_rust::bytes::Bytes) -> Result<(), anyhow::Error> {
         // Silently succeed
         Ok(())
     }
@@ -633,7 +633,7 @@ pub struct TcpTransport {
 
 #[async_trait]
 impl Transport for TcpTransport {
-    async fn send(&self, data: Vec<u8>) -> Result<(), anyhow::Error> {
+    async fn send(&self, data: whatsapp_rust::bytes::Bytes) -> Result<(), anyhow::Error> {
         let mut writer = self.writer.lock().await;
         writer.write_all(&data).await?;
         Ok(())
@@ -682,7 +682,7 @@ impl TransportFactory for TcpTransportFactory {
                 match reader.read(&mut buf).await {
                     Ok(0) => break,
                     Ok(n) => {
-                        let data = bytes::Bytes::copy_from_slice(&buf[..n]);
+                        let data = whatsapp_rust::bytes::Bytes::copy_from_slice(&buf[..n]);
                         if event_tx.send(TransportEvent::DataReceived(data)).await.is_err() {
                             break;
                         }
@@ -723,7 +723,7 @@ mod tests {
         let (transport, events) = factory.create_transport().await.unwrap();
         
         // Should succeed without error
-        transport.send(vec![1, 2, 3]).await.unwrap();
+        transport.send(vec![1, 2, 3].into()).await.unwrap();
         
         // Disconnect should be no-op
         transport.disconnect().await;
@@ -750,3 +750,16 @@ mod tests {
 - [Storage Traits](/api/store) - Storage backend abstraction
 - [HTTP Client Trait](/api/http-client) - HTTP client abstraction
 - [Client API](/api/client) - Main client interface
+## Caller-dialed streams
+
+`whatsapp_rust::transport::StreamDialer` lets the application own DNS, proxy negotiation, authentication, and socket options while the factory retains its canonical TLS and WebSocket upgrade:
+
+```rust
+use whatsapp_rust::transport::TokioWebSocketTransportFactory;
+
+let factory = TokioWebSocketTransportFactory::new().with_dialer(dialer);
+```
+
+Implement `dial(&self, host: &str, port: u16) -> Result<BoxedStream, anyhow::Error>` using the crate's async-trait convention. Return a connected byte stream before TLS. `with_dialer` retains the factory's connector, TLS session reuse, Origin, and upgrade logic. The dial future is awaited inside the client's transport timeout; cancellation drops it and its owned stream. Avoid detached connect tasks.
+
+Use `from_websocket` when the host already owns an upgraded WebSocket. That path intentionally transfers the upgrade responsibility to the caller.

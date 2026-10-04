@@ -17,7 +17,7 @@ The client supports both buffered and streaming responses for efficient handling
 
 ```rust
 use async_trait::async_trait;
-use wacore::sync_marker::MaybeSendSync;
+use whatsapp_rust::wacore::sync_marker::MaybeSendSync;
 
 #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
@@ -61,7 +61,7 @@ pub trait HttpClient: MaybeSendSync {
 </Note>
 
 <Note>
-`supports_upload_streaming` / `execute_upload` were added in v0.6 to back [`Client::upload_stream`](/api/upload#upload-stream-constant-memory). Both have safe defaults (returning `false` / an error), so existing custom `HttpClient` implementations keep compiling — implement them only if you want constant-memory uploads through your client. `UreqHttpClient` implements both. `UploadBody` is `Box<dyn std::io::Read + Send>`.
+`supports_upload_streaming` / `execute_upload` were added in v0.6 to back [`Client::upload_stream`](/api/upload#upload_stream-constant-memory). Both have safe defaults (returning `false` / an error), so existing custom `HttpClient` implementations keep compiling — implement them only if you want constant-memory uploads through your client. `UreqHttpClient` implements both. `UploadBody` is `Box<dyn std::io::Read + Send>`.
 </Note>
 
 <Warning>
@@ -175,7 +175,7 @@ pub struct HttpRequest {
     pub url: String,
     pub method: String,  // "GET" or "POST"
     pub headers: HashMap<String, String>,
-    pub body: Option<Vec<u8>>,
+    pub body: Option<bytes::Bytes>,
 }
 ```
 
@@ -266,7 +266,7 @@ The default HTTP client implementation using the `ureq` crate (v3.4) for synchro
 ### Creating a client
 
 ```rust
-use whatsapp_rust_ureq_http_client::UreqHttpClient;
+use whatsapp_rust::http::UreqHttpClient;
 
 // Basic usage — creates a shared ureq::Agent internally
 let client = UreqHttpClient::new();
@@ -357,8 +357,8 @@ for backend in session_backends {
 #### Basic GET Request
 
 ```rust
-use whatsapp_rust_ureq_http_client::UreqHttpClient;
-use wacore::net::HttpRequest;
+use whatsapp_rust::http::UreqHttpClient;
+use whatsapp_rust::wacore::net::HttpRequest;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -590,7 +590,7 @@ You can implement custom HTTP clients for different runtimes or requirements.
 
 ```rust
 use async_trait::async_trait;
-use wacore::net::{HttpClient, HttpRequest, HttpResponse};
+use whatsapp_rust::wacore::net::{HttpClient, HttpRequest, HttpResponse};
 
 #[derive(Clone)]
 pub struct ReqwestHttpClient {
@@ -687,7 +687,7 @@ let client = MockHttpClient::new()
 
 ```rust
 use whatsapp_rust::Bot;
-use whatsapp_rust_ureq_http_client::UreqHttpClient;
+use whatsapp_rust::http::UreqHttpClient;
 use std::sync::Arc;
 
 #[tokio::main]

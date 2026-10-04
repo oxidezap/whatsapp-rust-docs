@@ -65,6 +65,7 @@ for bot in bot_list.flatten() {
 The whole bot directory as the server returned it.
 
 ```rust
+#[non_exhaustive]
 pub struct BotList {
     pub version: BotListVersion,
     pub bhash: Option<String>,
@@ -87,6 +88,7 @@ pub struct BotList {
 A display group of bots.
 
 ```rust
+#[non_exhaustive]
 pub struct BotListSection {
     pub name: Option<String>,
     pub section_type: BotSectionType,
@@ -102,6 +104,7 @@ pub struct BotListSection {
 One bot in the directory.
 
 ```rust
+#[non_exhaustive]
 pub struct BotListEntry {
     pub jid: Jid,
     pub persona_id: String,
@@ -121,6 +124,7 @@ pub struct BotListEntry {
 The bot the client offers by default.
 
 ```rust
+#[non_exhaustive]
 pub struct BotDefault {
     pub jid: Jid,
     pub persona_id: String,
@@ -134,6 +138,7 @@ A distinct type from `BotListEntry`: `<default>` carries exactly these two attri
 Per-mode colours for a bot's card.
 
 ```rust
+#[non_exhaustive]
 pub struct BotTheme {
     pub mode: BotThemeMode,
     pub background: Option<String>,

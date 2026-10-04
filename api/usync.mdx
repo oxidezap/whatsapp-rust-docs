@@ -89,6 +89,7 @@ pub const fn with_expected_timestamp(mut self, expected_timestamp: i64) -> Self
 ### `UsyncProtocol`
 
 ```rust
+#[non_exhaustive]
 pub enum UsyncProtocol {
     Contact { addressing_mode: UsyncAddressingMode },
     DevicesV2,
@@ -109,6 +110,7 @@ pub enum UsyncProtocol {
 ## Reading the response
 
 ```rust
+#[non_exhaustive]
 pub struct UsyncResponse {
     pub protocol_states: Vec<UsyncProtocolState>,
     pub users: Vec<UsyncUserResult>,
@@ -117,6 +119,7 @@ impl UsyncResponse {
     pub fn protocol_state(&self, protocol: UsyncProtocolKind) -> Option<&UsyncProtocolState>
 }
 
+#[non_exhaustive]
 pub struct UsyncUserResult {
     pub id: Option<Jid>,      // absent for contact-only results without a JID
     pub pn_jid: Option<Jid>,
@@ -143,6 +146,7 @@ impl<T> UsyncOutcome<T> {
 `UsyncProtocolResult` carries the typed payload per protocol:
 
 ```rust
+#[non_exhaustive]
 pub enum UsyncProtocolResult {
     Contact(UsyncOutcome<UsyncContactResult>),
     Devices(UsyncOutcome<UsyncDevicesResult>),
@@ -234,7 +238,7 @@ pub enum UsyncValidationError {
 
 ## Hosted addressing
 
-`UsyncDeviceResult.is_hosted` (and the corresponding `is_hosted` field on the persisted `DeviceInfo`/`UsyncDevice` types — see [Store: DeviceListRecord](/api/store#devicelistrecord)) marks a device as belonging to WhatsApp's *hosted* PN/LID address space rather than the regular one. Use `Jid::with_device_hosting(device_id, is_hosted)` to build a correctly-addressed device JID from a device-list entry:
+`UsyncDeviceResult.is_hosted` (and the corresponding `is_hosted` field on the persisted `DeviceInfo`/`UsyncDevice` types — see [Store: DeviceListRecord](/api/store#source-reference)) marks a device as belonging to WhatsApp's *hosted* PN/LID address space rather than the regular one. Use `Jid::with_device_hosting(device_id, is_hosted)` to build a correctly-addressed device JID from a device-list entry:
 
 ```rust
 let device_jid = user_jid.with_device_hosting(device.id, device.is_hosted);

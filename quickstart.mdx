@@ -11,7 +11,7 @@ Add the dependencies — one crate is enough; `whatsapp-rust` re-exports the ent
 
 ```toml Cargo.toml
 [dependencies]
-whatsapp-rust = "0.7"
+whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "54ce6cd9007f4361a07dbad50718973bbf56e2e9" }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
@@ -23,7 +23,7 @@ use whatsapp_rust::prelude::*;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let bot = Bot::builder()
-        .with_backend(SqliteStore::new("whatsapp.db").await?)
+        .with_backend(SqliteStore::open("whatsapp.db").await?)
         .on_qr_code(|code, _timeout| async move {
             println!("Scan this QR code with WhatsApp:\n{code}");
         })
@@ -37,8 +37,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .build()
         .await?;
 
-    // Runs until logout or client.disconnect() from another task.
-    bot.run().await;
+    // Runs until logout or client.shutdown() from another task.
+    let reason = bot.run().await;
+    println!("Session ended: {reason:?}");
     Ok(())
 }
 ```
@@ -51,7 +52,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
   The bot needs persistent storage for session data, keys, and state:
 
   ```rust
-  let backend = SqliteStore::new("whatsapp.db").await?;
+  let backend = SqliteStore::open("whatsapp.db").await?;
   ```
 
   This creates a SQLite database file named `whatsapp.db` in your current directory. The session will persist across restarts.
@@ -184,7 +185,7 @@ use whatsapp_rust::prelude::*;
 use whatsapp_rust::pair_code::PairCodeOptions;
 
 let bot = Bot::builder()
-    .with_backend(SqliteStore::new("whatsapp.db").await?)
+    .with_backend(SqliteStore::open("whatsapp.db").await?)
     .with_pair_code(PairCodeOptions {
         phone_number: "15551234567".to_string(),
         ..Default::default()
@@ -200,7 +201,7 @@ let bot = Bot::builder()
 
 ```rust
 use whatsapp_rust::pair_code::PairCodeOptions;
-use wacore::companion_reg::CompanionWebClientType;
+use whatsapp_rust::wacore::companion_reg::CompanionWebClientType;
 
 PairCodeOptions {
     phone_number: "15551234567".to_string(),
@@ -334,7 +335,7 @@ use whatsapp_rust::prelude::*;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let bot = Bot::builder()
-        .with_backend(SqliteStore::new("whatsapp.db").await?)
+        .with_backend(SqliteStore::open("whatsapp.db").await?)
         .on_message(|ctx| async move {
             let _ = ctx.reply("hello").await;
         })
@@ -384,7 +385,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         })
         .init();
 
-    let store = SqliteStore::new("whatsapp.db").await?;
+    let store = SqliteStore::open("whatsapp.db").await?;
     info!("SQLite backend initialized");
 
     let bot = Bot::builder()
@@ -405,7 +406,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await?;
 
     info!("Starting bot...");
-    bot.run().await;
+    let reason = bot.run().await;
+    println!("Session ended: {reason:?}");
     Ok(())
 }
 

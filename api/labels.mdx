@@ -82,7 +82,7 @@ pub async fn add_chat_label(
 
 **Example:**
 ```rust
-use wacore_binary::jid::Jid;
+use whatsapp_rust::wacore_binary::jid::Jid;
 
 let chat: Jid = "15551234567@s.whatsapp.net".parse()?;
 client.labels().add_chat_label("5", &chat).await?;
@@ -168,7 +168,7 @@ Both calls send one mutation per message. There is no batch form on the wire, ma
 Label changes made on a linked device are delivered through the event bus. All three events carry the underlying app state action so you can read the new name, color, deleted flag, or labeled state directly.
 
 ```rust
-use wacore::types::events::Event;
+use whatsapp_rust::wacore::types::events::Event;
 
 .on_event(|event, _client| async move {
     match &*event {
@@ -244,7 +244,7 @@ if let Err(AppStateError::InvalidRequest(msg)) = client.labels().create_label(""
 
 ```rust
 use whatsapp_rust::Client;
-use wacore_binary::jid::Jid;
+use whatsapp_rust::wacore_binary::jid::Jid;
 use std::sync::Arc;
 
 async fn tag_vip_chats(client: &Arc<Client>) -> anyhow::Result<()> {
