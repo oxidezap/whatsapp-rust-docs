@@ -29,7 +29,7 @@ Add `whatsapp-rust` with the `metrics` feature, plus the recorder you want to ex
 
 ```toml Cargo.toml
 [dependencies]
-whatsapp-rust = { version = "0.7", features = ["metrics"] }
+whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "54ce6cd9007f4361a07dbad50718973bbf56e2e9", features = ["metrics"] }
 metrics = "0.24"
 metrics-exporter-prometheus = "0.16"
 ```

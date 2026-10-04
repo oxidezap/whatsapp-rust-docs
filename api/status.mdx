@@ -42,7 +42,7 @@ pub async fn send_text(
 
 **Example:**
 ```rust
-use waproto::whatsapp as wa;
+use whatsapp_rust::waproto::whatsapp as wa;
 use whatsapp_rust::{Jid, StatusSendOptions};
 
 let recipients = [
@@ -87,7 +87,7 @@ pub async fn send_image(
 
 **Example:**
 ```rust
-use wacore::download::MediaType;
+use whatsapp_rust::wacore::download::MediaType;
 
 // Upload the image first
 let image_data = std::fs::read("photo.jpg")?;
@@ -133,7 +133,7 @@ pub async fn send_video(
 
 **Example:**
 ```rust
-use wacore::download::MediaType;
+use whatsapp_rust::wacore::download::MediaType;
 
 let video_data = std::fs::read("video.mp4")?;
 let upload = client.upload(video_data, MediaType::Video, Default::default()).await?;
@@ -166,7 +166,7 @@ pub async fn send_raw(
 
 **Example:**
 ```rust
-use waproto::whatsapp as wa;
+use whatsapp_rust::waproto::whatsapp as wa;
 
 let message = wa::Message {
     extended_text_message: buffa::MessageField::some(wa::message::ExtendedTextMessage {
@@ -181,80 +181,28 @@ let result = client.status()
     .await?;
 ```
 
+
 ### revoke
 
-Delete a previously sent status update.
-
 ```rust
-pub async fn revoke(
-    &self,
-    message_id: impl Into<String>,
-    recipients: &[Jid],
-    options: StatusSendOptions,
-) -> Result<SendResult, SendError>
+use whatsapp_rust::{StanzaId, StatusSendOptions};
+
+let revoked = client.status().revoke(
+    sent.message_id.clone(),
+    &validated_recipients,
+    StatusSendOptions::default().with_stanza_id(StanzaId::new("REVOKE-OPERATION")?),
+).await?;
 ```
 
-**Parameters:**
-- `message_id` - ID of the status to revoke
-- `recipients` - Same recipients the status was sent to
-- `options` - Privacy options
-
-**Example:**
-```rust
-use waproto::whatsapp::message::extended_text_message::FontType;
-
-// Send a status
-let result = client.status()
-    .send_text("Temporary status", 0xFF000000, FontType::SYSTEM, &recipients, Default::default())
-    .await?;
-
-// Later, revoke it
-client.status()
-    .revoke(&result.message_id, &recipients, Default::default())
-    .await?;
-```
+The target is a `MessageId`; the new revoke envelope has its own operation ID. Use the same recipients as the original post. A revoke override must differ from the target ID.
 
 ### send_reaction
 
-React to a status update with an emoji. You send status reactions via `Client::send_reaction` (not `client.status()`) using `status@broadcast` as the chat JID and a `wa::MessageKey` whose `participant` field identifies the status owner.
+React through `client.send_reaction(&MessageRef, emoji)` with a status reference retaining the original author. The reaction uses DM fanout to that author's devices. `send_reaction_raw` accepts an explicit raw chat/key pair. See [reactions](/api/send#send_reaction).
 
-```rust
-pub async fn send_reaction(
-    &self,
-    chat: impl Into<Jid>,
-    target_key: wa::MessageKey,
-    emoji: &str,
-) -> Result<SendResult, SendError>
-```
+### audience
 
-**Parameters:**
-- `chat` - `Jid::status_broadcast()` (the broadcast JID)
-- `target_key` - Identifies the status to react to; set `participant` to the status owner's JID and `id` to the status message ID
-- `emoji` - Emoji to send (e.g. `"💚"`). Pass `""` to remove a previous reaction
-
-**Example:**
-```rust
-use waproto::whatsapp as wa;
-
-let status_jid = Jid::status_broadcast();
-
-let target_key = wa::MessageKey {
-    remote_jid: Some(status_jid.to_string()),
-    from_me: Some(false),
-    id: Some(status_message_id.clone()),
-    participant: Some(Jid::pn("15551234567").to_string()),
-};
-
-// React to a status
-client.send_reaction(&status_jid, target_key.clone(), "💚").await?;
-
-// Remove a previous reaction
-client.send_reaction(&status_jid, target_key, "").await?;
-```
-
-<Note>
-See [Send API — send_reaction](/api/send#send_reaction) for the full parameter reference and additional examples.
-</Note>
+`client.status().audience()` returns the latest synced `StatusPrivacyAction`, or `None` when unobserved. `StatusPrivacyUpdate` reports changes. Neither the observed setting nor `StatusSendOptions::privacy` filters recipients automatically. Choose and validate recipients against the intended audience; unknown audience is not permission to send to all contacts.
 
 ## Types
 
@@ -276,41 +224,22 @@ pub enum StatusPrivacySetting {
 
 `StatusPrivacySetting` is `#[non_exhaustive]`, so match statements should include a wildcard arm to handle future variants.
 
+
 ### StatusSendOptions
 
-Options for sending status updates.
+The type is `#[non_exhaustive]`. Use `Default` and fluent setters:
 
 ```rust
-pub struct StatusSendOptions {
-    /// Privacy setting for this status. Sent in the `<meta>` stanza node.
-    pub privacy: StatusPrivacySetting,
-    /// Override the generated message ID.
-    pub message_id: Option<String>,
-    /// Extra child nodes appended to the status stanza.
-    pub extra_stanza_nodes: Vec<Node>,
-    /// Freshness policy for the recipient device lists used by this send.
-    pub device_freshness: Freshness,
-}
+use whatsapp_rust::{Freshness, MessageId, StatusSendOptions, StatusPrivacySetting};
+let options = StatusSendOptions::default()
+    .with_privacy(StatusPrivacySetting::AllowList)
+    .with_message_id(MessageId::new("STATUS-CONTENT")?)
+    .with_device_freshness(Freshness::Refresh);
 ```
 
-- `message_id` - Set this to resend a failed status with its original ID, or to otherwise ensure idempotency. Leave it `None` to auto-generate an ID. Same override use case as `SendOptions::message_id` on 1:1/group sends — see [Send API — SendOptions](/api/send#sendoptions).
-- `extra_stanza_nodes` - Add neutral child nodes here to include them on the outgoing `<message>` stanza. Don't use this for structural children the send path owns (e.g. `<enc>`, `<participants>`) — those are rejected before any cryptographic state changes.
-- `device_freshness` - Leave this at `Freshness::CachePreferred` (default) to reuse the cached recipient device list, or set `Freshness::Refresh` to force a fresh device-list fetch before sending. See [`Freshness`](/api/groups#freshness).
+Content posts accept `with_message_id(MessageId)`. Revoke or raw reaction operations accept `with_stanza_id(StanzaId)`. Simultaneous overrides, a wrong-role override, or a revoke collision fail with `InvalidRequest`. Fresh IDs remain the default.
 
-**Example:**
-```rust
-use whatsapp_rust::{Freshness, StatusSendOptions, StatusPrivacySetting};
-
-// Send to all contacts
-let options = StatusSendOptions::default();
-
-// Send to allow list only, forcing a fresh device-list fetch
-let options = StatusSendOptions {
-    privacy: StatusPrivacySetting::AllowList,
-    device_freshness: Freshness::Refresh,
-    ..Default::default()
-};
-```
+`with_extra_stanza_nodes` adds permitted children. `with_device_freshness` controls device discovery. Recipients remain a separate required argument. `privacy` only sets the status mode metadata and does not implement audience selection or application idempotency.
 
 ## Font styles
 

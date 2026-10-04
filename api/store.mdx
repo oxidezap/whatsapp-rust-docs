@@ -426,87 +426,23 @@ The `take_sent_message` method is an atomic read-and-delete operation. Once a me
 
 ### MsgSecretStore
 
-The fifth required member of [`Backend`](#the-backend-trait). It persists the 32-byte `messageSecret` values needed to decrypt later add-ons keyed off an original message: poll votes, poll/event edits, message edits (`secret_encrypted_message`), and Meta AI / fbid bot replies (`<enc type="msmsg">`). Secrets are keyed by `(chat, sender, msg_id)` and carry an absolute expiry so they can be pruned by policy (see [messageSecret retention](/api/bot#messagesecret-retention)).
+Persist secrets for poll votes, event responses, encrypted edits, and other add-ons. Keys are `(chat, sender, msg_id)`. Implement these three required operations in a custom backend:
 
 ```rust
-/// Store a single secret with no expiry (expires_at = 0, kept forever).
-async fn put_msg_secret(
-    &self,
-    chat: &str,
-    sender: &str,
-    msg_id: &str,
-    secret: &[u8; 32], // MessageSecret, the protocol-fixed message-secret size
-) -> Result<()>;
-
-/// Batch upsert. Each MsgSecretEntry carries its own absolute expires_at
-/// deadline and parent message_ts. On conflict the later deadline wins
-/// (0 = never) and the later non-zero message_ts wins. Returns count stored.
 async fn put_msg_secrets(&self, entries: Vec<MsgSecretEntry>) -> Result<usize>;
-
-/// Look up a secret for decryption.
-async fn get_msg_secret(
-    &self,
-    chat: &str,
-    sender: &str,
-    msg_id: &str,
-) -> Result<Option<Vec<u8>>>;
-
-/// Look up a secret together with the parent message's event time, used to
-/// enforce the per-add-on edit window.
-async fn get_msg_secret_with_ts(
-    &self,
-    chat: &str,
-    sender: &str,
-    msg_id: &str,
-) -> Result<Option<(Vec<u8>, i64)>>;
-
-/// Delete secrets whose expires_at <= cutoff. Rows with expires_at = 0 are
-/// kept forever. Returns count removed.
+async fn get_stored_msg_secret(
+    &self, chat: &str, sender: &str, msg_id: &str,
+) -> Result<Option<StoredMessageSecret>>;
 async fn delete_expired_msg_secrets(&self, cutoff_timestamp: i64) -> Result<u32>;
 ```
 
-`get_msg_secret` and `get_msg_secret_with_ts` still return `Vec<u8>` rather than `MessageSecret`. Reads don't carry the same fixed-length guarantee as writes, since the persisted `secret BLOB` column has no length constraint at the SQL level.
+`StoredMessageSecret` contains a validated `MessageSecret` and `message_ts: Option<i64>`. Construct it with `StoredMessageSecret::new(secret, timestamp)`, or validate database bytes with `StoredMessageSecret::from_stored_bytes(bytes, timestamp)`. Malformed lengths return `StoreError::InvalidMessageSecret`; do not truncate or pad them. Zero timestamps become `None`, representing an unknown parent event time.
 
-```rust
-pub type MessageSecret = [u8; 32]; // wacore::reporting_token::MESSAGE_SECRET_SIZE
+`MessageSecret` is a 32-byte secret newtype with redacted debug output and zeroization on drop. It is not an array alias. `MsgSecretEntry.secret` remains `MessageSecretBytes` (`[u8; 32]`) for batch persistence; its `chat`, `sender`, and `msg_id` fields use `Arc<str>`. Entries also carry independent `expires_at` and `message_ts` Unix-second fields. An expiry of zero means retain indefinitely.
 
-pub struct MsgSecretEntry {
-    pub chat: Arc<str>,     // shared per conversation instead of one String per row
-    pub sender: Arc<str>,
-    pub msg_id: Arc<str>,
-    pub secret: MessageSecret,
-    pub expires_at: i64,
-    pub message_ts: i64,
-}
-```
+The default `put_msg_secret(..., secret: &MessageSecret)` delegates to batch persistence with no expiry. The compatibility projection `get_msg_secret` returns `Option<Vec<u8>>` from the validated read. Implement `get_stored_msg_secret`, including the actual parent timestamp when known, to preserve edit-window checks.
 
-The `chat`, `sender`, and `msg_id` fields are `Arc<str>` rather than `String`. This allows buffered batch inserts to clone entries cheaply. The `secret` field uses the fixed-size `MessageSecret` array rather than `Vec<u8>`. This makes an invalid-length secret unrepresentable, so you no longer need a runtime length check.
-
-This is a breaking change if you build `MsgSecretEntry` directly in a custom backend, or if you override the defaulted `put_msg_secret` method. If you construct entries directly, build the JID/ID fields with `Arc::from(...)` or `.into()`, and pass a `[u8; 32]` for `secret`. If you override `put_msg_secret` (most backends don't — see the Note below), update its signature to take `secret: &[u8; 32]` instead of `secret: &[u8]`. The SQLite table itself is unchanged:
-
-```sql
-CREATE TABLE msg_secrets (
-    chat TEXT NOT NULL,
-    sender TEXT NOT NULL,
-    msg_id TEXT NOT NULL,
-    secret BLOB NOT NULL,
-    device_id INTEGER NOT NULL DEFAULT 1,
-    expires_at INTEGER NOT NULL DEFAULT 0,  -- absolute unix-seconds deadline (0 = never)
-    message_ts INTEGER NOT NULL DEFAULT 0,  -- parent message event time (edit-window check)
-    PRIMARY KEY (chat, sender, msg_id, device_id)
-);
-CREATE INDEX idx_msg_secrets_expires
-    ON msg_secrets (device_id, expires_at)
-    WHERE expires_at <> 0;
-```
-
-<Note>
-As of [whatsapp-rust#1504](https://github.com/oxidezap/whatsapp-rust/pull/1504), the `created_at` column is gone and the expiry index is partial. `created_at` was written on every insert and refreshed on every conflict update, but nothing ever read it — retention runs off the absolute `expires_at` deadline. Excluding never-expire rows (`expires_at = 0`) from the index matches the prune predicate and, on a database dominated by permanent rows, shrinks the index from about 4.6 MiB to about 0.34 MiB at 400k rows. Two migrations run at open, in the existing diesel harness, before the pool serves traffic; the point-lookup plan and the prune plan are unchanged. `MsgSecretEntry` never exposed `created_at`, so the Rust surface is unchanged.
-</Note>
-
-<Note>
-A custom backend only needs to implement three methods: `put_msg_secrets`, `get_msg_secret`, and `delete_expired_msg_secrets`. The other two have defaults — `put_msg_secret` delegates to `put_msg_secrets` with `expires_at = 0`, and `get_msg_secret_with_ts` pairs `get_msg_secret` with a `0` timestamp. Override `get_msg_secret_with_ts` only if your store persists `message_ts` and you want the edit-window enforced.
-</Note>
+Batch upserts retain the later expiry deadline (zero wins as indefinite retention) and the later nonzero parent timestamp. Pruning deletes expired rows and retains zero-expiry rows. SQLite scopes these records by `device_id` and indexes only expiring rows.
 
 ## DeviceStore Trait
 
@@ -566,317 +502,84 @@ As of [whatsapp-rust#1411](https://github.com/oxidezap/whatsapp-rust/pull/1411),
 
 All three are best-effort: a failing sweep or pass logs a warning and is retried on the next tick rather than affecting the connection.
 
-## SqliteStore implementation
 
-The default storage implementation using SQLite with Diesel ORM. SQLite is bundled by default — you don't need it installed on your system.
-
-### Bundled SQLite
-
-The `whatsapp-rust-sqlite-storage` crate enables the `bundled-sqlite` feature by default, which compiles SQLite from source and statically links it. To use a system-installed SQLite instead:
-
-```toml Cargo.toml
-[dependencies]
-whatsapp-rust-sqlite-storage = { version = "0.7", default-features = false }
-```
+## SQLite implementation
 
 ### Creating a store
 
 ```rust
 use whatsapp_rust::store::SqliteStore;
-
-// Basic usage - creates/opens database at path
-let store = SqliteStore::new("whatsapp.db").await?;
-
-// With device_id for multi-device support
-let store = SqliteStore::new_for_device("whatsapp.db", 1).await?;
-
-// Using sqlite:// URL format
-let store = SqliteStore::new("sqlite://path/to/db.sqlite").await?;
+let store = SqliteStore::open("whatsapp.db").await?;
 ```
 
-### Sharing the pool with sibling crates
+The single-account shortcut selects device 1 with default configuration. It opens and migrates the database without provisioning an account. The persistence manager loads or provisions device state during initialization.
+
+### Database configuration
 
 ```rust
-pub fn shared(&self) -> SharedSqlite;
+use whatsapp_rust::store::{SqliteDatabase, SqliteDatabaseConfig, Synchronous};
+
+let config = SqliteDatabaseConfig {
+    pool_size: 1,
+    read_pool_size: 1,
+    cache_size_kib: 512,
+    synchronous: Synchronous::Normal,
+    ..Default::default()
+}.with_mmap_size(8 * 1024 * 1024);
+let db = SqliteDatabase::open("whatsapp.db", config).await?;
+let store = db.store(1);
 ```
 
-`SqliteStore::shared()` returns a clonable `SharedSqlite` handle onto the store's existing r2d2 connection pool and write-serialization semaphore. A sibling crate uses it to run its own queries and migrations against the *same* database file — without opening a second connection pool, which would mean two WAL writers contending for the file lock. An application-level store — a chat/message history store, for example — can use this to attach its own tables to the same `whatsapp.db` file as the device store.
+Configure the database once. `SqliteDatabase` owns shared writer/read pools and administration; `SqliteStore` is a fixed-device handle implementing the backend traits. Selecting a store opens no connections and checks neither existence nor provisioning.
 
-```rust
-pub struct SharedSqlite { /* ... */ }
+Defaults are one writer and one idle-retirable WAL reader where native/private-cache WAL support permits it, with 512 KiB page cache per connection and Normal synchronization. Memory databases and shared-cache URIs decline independent readers. `pool_size` controls the write path; `read_pool_size` widens reads that tolerate an independent snapshot. Consistency-sensitive reads remain on the writer path. Idle readers retire without immediate replacement and reopen when work arrives.
 
-impl SharedSqlite {
-    /// Acquires a semaphore permit and runs `f` on a pooled connection via `spawn_blocking`.
-    pub async fn run<F, T>(&self, f: F) -> Result<T>
-    where
-        F: FnOnce(&mut SqliteConnection) -> Result<T> + Send + 'static,
-        T: Send + 'static;
-
-    /// Runs `f` as a read-only, consistent snapshot — a diesel deferred
-    /// transaction that never asks for the write lock.
-    pub async fn read<F, T>(&self, f: F) -> Result<T>
-    where
-        F: FnOnce(&mut SqliteConnection) -> Result<T> + Send + 'static,
-        T: Send + 'static;
-}
-```
-
-<Note>
-`read` takes a permit from a separate reader pool, sized by [`SqliteStoreConfig::read_pool_size`](/concepts/storage#memory-and-thread-tuning-sqlitestoreconfig), which defaults to `1` connection as of [whatsapp-rust#1401](https://github.com/oxidezap/whatsapp-rust/pull/1401) (it was `0` before). A burst of reads can then run alongside a pending write instead of queueing behind `run`'s write-path permits. If `read_pool_size` is `0` or the underlying connection isn't WAL, `read` falls back to queueing on the same permits as `run` — it's always safe to call. Wrapping the closure in a deferred transaction also means a `read` that issues more than one statement (e.g. resolve a chat's identity keys, then query by them) sees one consistent snapshot across all of them, rather than possibly straddling a write that commits in between. Prefer `read` over `run` for anything that only queries. Most of `SqliteStore`'s own `SignalStore`/`AppSyncStore`/`ProtocolStore`/`DeviceStore` surface does, as of [whatsapp-rust#1222](https://github.com/oxidezap/whatsapp-rust/pull/1222) — session, identity, sender-key, and pre-key lookups among them. A handful of reads are deliberately kept on `run` instead: a stale answer for these would go out on the wire, fail an operation outright, or overwrite a cache unconditionally (app-state sync key lookups, `messageSecret` reads, `get_devices`).
-</Note>
+`with_mmap_size` affects main-file reads, not WAL writes. Page-cache reporting is an estimate and may overstate heap residency when mmap serves reads.
 
 ### Sharing the pool with sibling devices
 
 ```rust
-pub fn share_for_device(&self, device_id: i32) -> Self;
+let db = SqliteDatabase::open("whatsapp.db", SqliteDatabaseConfig::default()).await?;
+let first = db.store(1);
+let second = db.store(2);
 ```
 
-Call `SqliteStore::share_for_device()` to get a new `SqliteStore` for a *sibling device* in the same database file. It clones this store's pool, write-serialization semaphore, and reader pool instead of opening its own. Without it, every constructor builds its own r2d2 pool, so a process holding N sessions against one database file opens N pools. At the default `pool_size` of `1` and `read_pool_size` of `1` (as of [whatsapp-rust#1401](https://github.com/oxidezap/whatsapp-rust/pull/1401); `read_pool_size` defaulted to `0` before), that means 2N connections; a store configured with a larger `pool_size` or `read_pool_size` opens more per session, and sharing removes that entire pool, not just one connection. A connection costs memory before it reads a single row. On the bundled SQLite build, that includes a fixed ~46.9 KiB lookaside slab (`SQLITE_DEFAULT_LOOKASIDE`) — a compile-time setting, so a system-linked or SQLCipher-enabled SQLite (see [Connection init hook](#connection-init-hook)) can size it differently, or not allocate it at all. It also includes a page cache that grows to [`cache_size_kib`](#database-configuration). You can't shrink the lookaside slab with a pragma — `SQLITE_DBCONFIG_LOOKASIDE` is C-API only and diesel doesn't expose it. Since every query already carries a `device_id`, sibling sessions on one database only ever needed that field to differ.
+Every store shares the same pools, write permits, reader state, and commit barrier. `store.database()` returns a database handle without opening connections. Cloning or dropping a database handle does not invalidate existing stores.
 
-```rust
-use whatsapp_rust_sqlite_storage::SqliteStore;
+### Sharing the pool with sibling crates
 
-let device_1 = SqliteStore::new_for_device("whatsapp.db", 1).await?;
-// One pool, two connections (write + read at the defaults), two sessions.
-let device_2 = device_1.share_for_device(2);
-```
-
-The returned store owns clones of the pool handles, so you can keep using it for as long as it lives — dropping the store it came from closes nothing.
-
-What it does **not** do:
-
-- **Create the device row.** It only stamps queries with `device_id`. Wrap the returned store in [`PersistenceManager::new`](/concepts/storage#initialization) and it provisions the row for you automatically, the same as it would for a store built from `new_for_device` — you only need to provision the row yourself if you use the store directly, outside `PersistenceManager`.
-- **Isolate writes.** Siblings share the write permits set by [`SqliteStoreConfig::pool_size`](#database-configuration). At the default of `1`, their writes serialize against each other. On a burst where every sibling writes continuously, sharing costs roughly 2.5x the aggregate write throughput of a pool per session. In exchange you get FIFO-fair scheduling across siblings. A private connection per session instead leaves ordering to SQLite's busy-timeout handler, whose retries on each connection aren't coordinated with any other connection's — producing about 2x the spread between the fastest and slowest session.
-- **Split `resource_report()`.** Siblings share one pool, so every handle reports the same whole-pool estimate. When you sum across a fleet of siblings, count it once per pool, not once per handle.
-
-Because of the write-serialization trade, reach for this with **mostly-idle fleets** — sessions that are connected but not writing continuously, which is the common shape — rather than as a default replacement for a store per session. See [Memory and Thread Tuning](/concepts/storage#memory-and-thread-tuning-sqlitestoreconfig) for measured numbers.
+`db.shared()` and `store.shared()` return `SharedSqlite` for adapters with their own tables. `run` uses the serialized write path; `read` uses the read path when available. This access is database-wide. Your queries must include their own device/account predicates.
 
 ### Account lifecycle
 
-`SqliteStore` exposes an account lifecycle API on top of its multi-account schema: enumerate the accounts in a database, allocate a new one without racing on the id, and reset or remove one atomically. Use this when your app manages several WhatsApp accounts in one database file — for example, a control-plane process that starts and stops accounts on demand.
+| Database method | Effect |
+| --- | --- |
+| `list_devices().await` | List all `StoredDeviceSummary` rows, ordered by ID |
+| `device_exists(id).await` | Check without provisioning |
+| `create_device().await` | Atomically allocate a fresh ID and return its store |
+| `provision_device(id).await` | Create exactly that ID; an existing row is an error |
+| `reset_device(id).await` | Purge and recreate one account with fresh keys under the same ID |
+| `remove_device(id).await` | Purge and delete one account; allocated IDs are not reissued |
 
-Every method routes through the same write-serialization semaphore as the rest of the store, and every mutation runs inside a `BEGIN IMMEDIATE` transaction so a partial failure never leaves an account half-created or half-deleted. `list_devices` uses the reader pool, so it doesn't queue behind writes.
+Stop that account's background work and release crate-owned backend holds before reset/removal. Old store handles are not revoked: they can write to the reset account or recreate rows after removal. Missing IDs return `DeviceNotFound` for reset/removal. No other account is stopped.
 
-```rust
-pub async fn list_devices(&self) -> Result<Vec<StoredDeviceSummary>>;
-pub async fn create_sibling_device(&self) -> Result<(i32, SqliteStore)>;
-pub async fn reset_device(&self, device_id: i32) -> Result<SqliteStore>;
-pub async fn remove_device(&self, device_id: i32) -> Result<()>;
-```
+### Resource reports
 
-#### StoredDeviceSummary
-
-Returned by `list_devices`, one entry per row in `device`:
-
-```rust
-pub struct StoredDeviceSummary {
-    pub id: i32,
-    pub pn: Option<Jid>,
-    pub lid: Option<Jid>,
-    pub push_name: String,
-    pub linked: bool,
-}
-```
-
-`linked` mirrors `Device::is_registered`: the row exists from the moment `create_sibling_device` returns, but the account only counts as paired once the server has assigned it a phone number, which is what `pn` carries. An unpaired row reports `pn = None` and `linked = false`. `lid` is `None` until pairing completes as well. The type is re-exported from `whatsapp_rust_sqlite_storage`, `whatsapp_rust::store`, and the crate prelude.
-
-#### list_devices
-
-Enumerates every account row in the database, ordered by `id`. Use it at startup to discover the accounts already stored in a file, then bind each id through [`share_for_device`](#sharing-the-pool-with-sibling-devices) rather than opening a fresh store per account.
-
-```rust
-use whatsapp_rust_sqlite_storage::SqliteStore;
-
-let store = SqliteStore::new("whatsapp.db").await?;
-for account in store.list_devices().await? {
-    let session = store.share_for_device(account.id);
-    // hand `session` to your per-account client
-}
-```
-
-The method treats "the first row by id" as the primary account. If your app has a stronger rule for which account is primary, sort the returned `Vec` yourself.
-
-#### create_sibling_device
-
-Inserts a fresh, unpaired `device` row and returns its id together with a store handle already bound to it. The id comes from SQLite's `AUTOINCREMENT`, read via `last_insert_rowid()` on the same connection inside the same transaction as the insert, so two concurrent callers never receive the same id and a retry after a partial failure never leaves a second row behind.
-
-```rust
-let (id, account) = store.create_sibling_device().await?;
-assert_eq!(account.device_id(), id);
-// hand `account` to your per-account client to start pairing
-```
-
-Prefer this over the pre-existing `create_new_device` (which requires the caller to pick an id before it exists) whenever the caller doesn't already know which id it wants. The returned handle shares this store's pool, write permit, and reader pool via [`share_for_device`](#sharing-the-pool-with-sibling-devices) — see that method for what is shared and what it costs. Pairing then proceeds through the normal client flow; nothing about the account is WhatsApp-visible until you connect it.
-
-#### reset_device
-
-Wipes an account's state and starts it over under the same id, atomically. Every row in every account-scoped table (identities, sessions, prekeys, sender keys, app-state, `msg_secrets`, group metadata, pending inbound messages, sent messages, tcTokens, and the rest) is deleted, then a new `device` row is inserted with the same id and freshly generated keys. Existing `AccountId` references stay valid; state is what is discarded.
-
-```rust
-let reset = store.reset_device(id).await?;
-// `reset` is a fresh handle bound to the same id, ready to pair from zero
-```
-
-A missing account returns [`StoreError::DeviceNotFound`](#error-handling-1).
-
-<Warning>
-`reset_device` does not invalidate other handles for the same id. If a running client still holds live in-memory state for that account, its next `save` writes back onto the recreated row. Stop the account's background work (device background saver, Signal flush) before calling this — the storage layer cannot enforce it from here.
-</Warning>
-
-#### remove_device
-
-Deletes an account's state and its `device` row, atomically. Like `reset_device`, but the row does not come back and the id is retired for good: `AUTOINCREMENT` will not reissue it, so a later `create_sibling_device` can never hand back an id that once pointed at a different person.
-
-```rust
-store.remove_device(id).await?;
-```
-
-A missing account returns [`StoreError::DeviceNotFound`](#error-handling-1).
-
-<Warning>
-The same caller-side rule as `reset_device` applies: stop the account's background work before removing it, or a live handle can recreate the row on its next save.
-</Warning>
-
-Both teardown paths drive their deletes from one internal table list, so `reset_device` and `remove_device` always purge the same set of tables. Because each teardown issues one `DELETE` per account-scoped table on a `device_id` filter, cost scales with total table size, not with the account's row count — negligible on a small database, worth knowing on a very large one. This runs once per account operation and never on the message path.
-
-### Features
-
-- **Connection pooling** - Uses Diesel r2d2 with pool size of 2
-- **WAL mode** - Write-Ahead Logging for better concurrency
-- **Automatic migrations** - Runs embedded migrations on startup
-- **Semaphore-based locking** - Prevents concurrent writes
-- **Retry logic** - Automatic retry with exponential backoff for locked database
-- **Multi-device support** - Single database can store multiple device sessions
-
-### Database Configuration
-
-SqliteStore automatically configures connections with:
-
-```sql
-PRAGMA journal_mode = WAL;
-PRAGMA busy_timeout = 30000;
-PRAGMA synchronous = NORMAL;
-PRAGMA cache_size = 512;
-PRAGMA temp_store = memory;
-PRAGMA foreign_keys = ON;
-PRAGMA journal_size_limit = 33554432; -- 32 MiB, as of whatsapp-rust#1411
-```
-
-<Note>
-A WAL grows to the largest single transaction ever committed and, with no limit set, stays that size for the life of the file — an auto-checkpoint only resets the WAL, it never shortens it. The history-sync `msg_secrets` seed is exactly that kind of transaction, so a month-long process would otherwise pay its peak size forever. `journal_size_limit` caps it at 32 MiB, well above any ordinary commit here, so it only ever trims the outlier; combined with the opportunistic `wal_checkpoint(TRUNCATE)` in [`DeviceStore::maintenance()`](/api/store#maintenance), the WAL is brought back under the cap on the ~1-hour engine maintenance cadence. Added in [whatsapp-rust#1411](https://github.com/oxidezap/whatsapp-rust/pull/1411).
-</Note>
-
-`SqliteStoreConfig` also exposes an opt-in `mmap_size: Option<u64>` field (default `None`, current behavior — no `PRAGMA mmap_size` emitted). Set it with the builder-style `with_mmap_size(bytes)`:
-
-```rust
-use whatsapp_rust_sqlite_storage::{SqliteStore, SqliteStoreConfig};
-
-let config = SqliteStoreConfig::default().with_mmap_size(64 * 1024 * 1024); // 64 MiB
-let store = SqliteStore::with_config("whatsapp.db", config).await?;
-```
-
-`with_mmap_size` only sets the field on the config value — the store applies it when the config is passed to [`SqliteStore::with_config`](#creating-a-store) (or `with_config_for_device`). Building a config and never passing it to one of those constructors leaves `mmap_size` unset, since `SqliteStore::new` / `new_for_device` always use `SqliteStoreConfig::default()`.
-
-When set to a non-zero value, this emits `PRAGMA mmap_size = <bytes>;`, moving reads of the main database file through a reclaimable, OS-backed memory map instead of the heap page cache — useful for a process holding many small per-session databases, since mapped pages can be reclaimed under memory pressure while heap-cached pages cannot. `0` disables mmap, same as `None`.
-
-<Warning>
-  mmap I/O covers *reads* of the main database file only. In WAL mode (this store's default), writes still go through the WAL, and a checkpoint briefly falls back to non-mmap I/O. `SqliteStore::resource_report()` (see [`DeviceStore::resource_report`](#resource_report)) does not account for `mmap_size` — with mmap enabled, some reads bypass the heap page cache it measures, so the reported estimate can overstate actual process-heap residency for that session.
-</Warning>
-
-### Opt-in incremental vacuum
-
-`SqliteStoreConfig` also exposes an opt-in `incremental_vacuum: bool` field (default `false`) plus a `incremental_vacuum_pages: u32` bound (default `400`, roughly 1.6 MiB at a 4 KiB page). Turn it on with the builder-style `with_incremental_vacuum(pages)`:
-
-```rust
-use whatsapp_rust_sqlite_storage::{SqliteStore, SqliteStoreConfig};
-
-// Reclaim up to 400 pages per maintenance pass (~1.6 MiB at 4 KiB pages).
-let config = SqliteStoreConfig::default().with_incremental_vacuum(400);
-let store = SqliteStore::with_config("whatsapp.db", config).await?;
-```
-
-When enabled, [`DeviceStore::maintenance()`](#maintenance) issues a bounded `PRAGMA incremental_vacuum(N)` on the ~1-hour engine tick, so free pages that the retention sweeps emptied return to the filesystem instead of sitting in the file's free list. `with_incremental_vacuum(0)` is the off switch: it clears the field and leaves the current `auto_vacuum` mode untouched.
-
-The store only enables `auto_vacuum = INCREMENTAL` on a brand-new empty database file, before WAL is set (WAL writes page 1, which would lock the mode in). On a database that already exists in the default mode, this flag is a no-op — switching modes requires a full `VACUUM`, which the library will never run, because the file may be shared with other tables (a rowid table, or an FTS `external-content` table) whose stable rowids a reorganization would invalidate. Consumers that need to convert an existing database run `VACUUM` themselves, when they know no reader holds a snapshot.
-
-Added in [whatsapp-rust#1504](https://github.com/oxidezap/whatsapp-rust/pull/1504).
+Count `db.resource_report().await` once per opened database. Store `DeviceStore::resource_report` reports the same whole pool, so summing it per session double-counts shared resources. `store.scoped_resource_report()` reports `Some(0)` payload memory because this adapter owns no device-specific caches; it excludes the handle itself and the shared SQLite pool.
 
 ### Connection init hook
 
-`SqliteStoreConfig` also exposes an optional `connection_init: Option<ConnectionInitHook>` field, set via the builder-style `with_connection_init(hook)`. The hook runs first in r2d2's `on_acquire` customizer on every pooled connection — before the store's own pragmas, and (because WAL setup and migrations also run on a pooled connection) before those too:
+Use `SqliteDatabaseConfig::with_connection_init` to configure each connection before migrations and normal use, for example with a system SQLite or SQLCipher build. A hook error rejects that connection and surfaces during database opening. The hook must return promptly.
 
-```rust
-pub type ConnectionInitHook = Arc<
-    dyn Fn(&mut SqliteConnection) -> std::result::Result<(), Box<dyn std::error::Error + Send + Sync>>
-        + Send
-        + Sync,
->;
-```
+### Commit barrier and maintenance
 
-The canonical use is SQLCipher-style keying, where `PRAGMA key` must be the first statement executed on a fresh connection, ideally followed by a verification query:
+`with_commit_barrier` installs a host durability barrier after database commits. A barrier failure can follow a committed transaction; retry policy must account for that ambiguity. See [storage durability](/concepts/storage).
 
-```rust
-use whatsapp_rust_sqlite_storage::{SqliteStore, SqliteStoreConfig};
-use diesel::prelude::*;
+`with_incremental_vacuum(pages)` opts into incremental vacuum. Enable an appropriate SQLite auto-vacuum layout when creating the file. Maintenance sweeps retention data and can retire idle readers; it does not promise that allocated disk pages are returned without vacuum.
 
-let config = SqliteStoreConfig::default().with_connection_init(move |conn| {
-    diesel::sql_query("PRAGMA key = 'my-passphrase';").execute(conn)?;
-    // Verify the key: this fails on a wrongly-keyed database.
-    diesel::sql_query("SELECT count(*) FROM sqlite_master;").execute(conn)?;
-    Ok(())
-});
-let store = SqliteStore::with_config("whatsapp.db", config).await?;
-```
+### Bundled SQLite
 
-Linking a SQLCipher-enabled SQLite is the caller's responsibility: disable this crate's default `bundled-sqlite` feature and depend on `libsqlite3-sys` with a SQLCipher build (e.g. its `bundled-sqlcipher` feature) instead. The crate itself gains no SQLCipher, key-type, or zeroization coupling — the hook is a generic per-connection seam that equally serves loading extensions or custom per-connection pragmas.
-
-If the hook returns `Err`, the connection is rejected — this surfaces as a pool/build error at store construction (e.g. `SqliteStore::with_config` fails outright) rather than on a later query, which matters for a wrong-key error: it should fail fast, not after migrations already ran against an unreadable database.
-
-<Note>
-The hook must be idempotent per connection and cheap: r2d2 calls it once for every connection it opens, including replacements after errors. `VACUUM INTO` snapshots run on a pooled (already-keyed) connection, so backups of an encrypted database stay encrypted with no extra work.
-</Note>
-
-### Usage Example
-
-```rust
-use whatsapp_rust_sqlite_storage::SqliteStore;
-use whatsapp_rust::Bot;
-use std::sync::Arc;
-
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Create store
-    let backend = Arc::new(SqliteStore::new("whatsapp.db").await?);
-    
-    // Use with Bot builder
-    let mut bot = Bot::builder()
-        .with_backend(backend.clone())
-        .with_transport_factory(transport_factory)
-        .with_http_client(http_client)
-        .with_runtime(TokioRuntime)
-        .on_event(|event, client| async move { /* handle events */ })
-        .build()
-        .await?;
-    
-    // Store implements all traits
-    // SignalStore
-    backend.put_identity("address@s.whatsapp.net", [0u8; 32]).await?;
-    let identity = backend.load_identity("address@s.whatsapp.net").await?;
-    
-    // AppSyncStore
-    let version = backend.get_version("regular").await?;
-    
-    // ProtocolStore
-    let devices = backend.get_sender_key_devices("group@g.us").await?;
-    
-    // DeviceStore
-    if backend.exists().await? {
-        let device = backend.load().await?;
-    }
-    
-    Ok(())
-}
-```
+`sqlite-storage` includes `sqlite-storage-bundled` by default. Disable defaults and select the system-linked feature set if you need a custom SQLite build. See [installation](/installation#feature-flags).
 
 ## CacheStore Trait
 
@@ -930,6 +633,7 @@ Cache operations are best-effort. The client treats read failures as cache misse
 ### CacheStores configuration
 
 ```rust
+#[non_exhaustive]
 pub struct CacheStores {
     pub group_cache: Option<Arc<dyn CacheStore>>,
     pub device_registry_cache: Option<Arc<dyn CacheStore>>,
@@ -943,9 +647,10 @@ Set individual caches or use `CacheStores::all(store)` to route all pluggable ca
 use whatsapp_rust::{CacheConfig, CacheStores};
 
 let redis = Arc::new(MyRedisCacheStore::new("redis://localhost:6379"));
-let config = CacheConfig {
-    cache_stores: CacheStores::all(redis),
-    ..Default::default()
+let config = {
+    let mut options = CacheConfig::default();
+    options.cache_stores = CacheStores::all(redis);
+    options
 };
 ```
 
@@ -978,7 +683,7 @@ See [Custom backends — cache store](/guides/custom-backends#custom-cache-store
 
 To implement a custom storage backend:
 
-1. Implement all four domain traits
+1. Implement all five domain traits
 2. The `Backend` trait is automatically implemented
 3. All methods must be `async` and thread-safe (`Send + Sync`)
 
@@ -987,8 +692,8 @@ To implement a custom storage backend:
 ```rust
 use async_trait::async_trait;
 use redis::aio::ConnectionManager;
-use wacore::store::traits::*;
-use wacore::store::error::Result;
+use whatsapp_rust::wacore::store::traits::*;
+use whatsapp_rust::wacore::store::error::Result;
 
 pub struct RedisStore {
     client: ConnectionManager,
@@ -1106,11 +811,27 @@ An entry with an empty `token` and only `sender_timestamp` set is a byte-less pl
 
 ```rust
 pub struct DeviceListRecord {
-    pub user: String,               // User part of JID
-    pub devices: Vec<DeviceInfo>,   // Known devices
-    pub timestamp: i64,             // Last update timestamp
-    pub phash: Option<String>,      // Participant hash from usync
-    pub raw_id: Option<u32>,        // ADV raw_id for identity change detection
+    /// The user part of the JID (phone number or LID)
+    /// `Arc<str>`, so the registry cache can key the record by exactly this
+    /// string instead of allocating a second copy of it: every write stores
+    /// the record under its own `user`, and the two used to be separate
+    /// `String` allocations of identical content.
+    pub user: Arc<str>,
+    /// List of known devices for this user.
+    ///
+    /// Boxed rather than a `Vec`: the list is built once and then read for the
+    /// life of the cache entry, so the capacity field is dead weight — and
+    /// worse, `retain_devices_by_key_index` shortens it without releasing the
+    /// capacity, leaving the dropped devices' slots resident. Mutations go
+    /// through [`DeviceListRecord::edit_devices`].
+    pub devices: Box<[DeviceInfo]>,
+    /// Timestamp when this record was last updated
+    pub timestamp: i64,
+    /// Participant hash from usync, if available
+    pub phash: Option<Box<str>>,
+    /// ADV raw_id from `ADVKeyIndexList` — used to detect identity changes.
+    /// When this changes, all sessions and sender keys for the user must be cleared.
+    pub raw_id: Option<u32>,
 }
 
 pub struct DeviceInfo {
@@ -1135,6 +856,7 @@ The `raw_id` field stores the ADV (Account Device Verification) key index list `
 All storage operations return `Result<T>` from `wacore::store::error`. Each variant preserves the underlying typed error as its `source()` so callers can downcast to the original backend error when needed:
 
 ```rust
+#[non_exhaustive]
 pub enum StoreError {
     Io(#[from] std::io::Error),
     Serialization(#[source] Box<dyn std::error::Error + Send + Sync>),

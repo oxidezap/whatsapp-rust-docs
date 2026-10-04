@@ -118,7 +118,7 @@ Newsletter messages are plaintext — they bypass Signal encryption entirely. Yo
 ### Text messages
 
 ```rust
-use waproto::whatsapp as wa;
+use whatsapp_rust::waproto::whatsapp as wa;
 
 let message = wa::Message {
     conversation: Some("Hello subscribers!".to_string()),
@@ -143,12 +143,12 @@ Send a reaction to a specific newsletter message using its `server_id`:
 ```rust
 // React with thumbs up
 client.newsletter()
-    .send_reaction(&newsletter_jid, server_id, "👍")
+    .send_reaction_raw(&newsletter_jid, server_id, "👍")
     .await?;
 
 // Remove reaction (empty string)
 client.newsletter()
-    .send_reaction(&newsletter_jid, server_id, "")
+    .send_reaction_raw(&newsletter_jid, server_id, "")
     .await?;
 ```
 
@@ -159,11 +159,11 @@ See [Send API reference](/api/send#send_message) for details.
 Vote in a channel poll with its `server_id` and the SHA-256 hashes of the chosen option names. Each call replaces your previous selection, and an empty list removes your vote:
 
 ```rust
-use wacore::poll::compute_option_hash;
+use whatsapp_rust::wacore::poll::compute_option_hash;
 
 // Vote for two options
 let vote_id = client.newsletter()
-    .send_poll_vote(
+    .send_poll_vote_raw(
         &newsletter_jid,
         poll_server_id,
         &[compute_option_hash("Rust"), compute_option_hash("Go")],
@@ -172,7 +172,7 @@ let vote_id = client.newsletter()
 
 // Remove your vote
 client.newsletter()
-    .send_poll_vote(&newsletter_jid, poll_server_id, &[])
+    .send_poll_vote_raw(&newsletter_jid, poll_server_id, &[])
     .await?;
 ```
 
@@ -200,7 +200,7 @@ See [`get_my_addons`](/api/newsletter#get_my_addons) for details.
 Channels use a plaintext edit/revoke flow that's separate from DM and group messages. Call the helpers on `client.newsletter()` and pass the original message's `message_id` (the wire stanza id returned by `send_message`, **not** the `server_id` used for reactions):
 
 ```rust
-use waproto::whatsapp as wa;
+use whatsapp_rust::waproto::whatsapp as wa;
 
 // Edit a text message
 let new_body = wa::Message {
@@ -209,12 +209,12 @@ let new_body = wa::Message {
 };
 
 client.newsletter()
-    .edit_message(&newsletter_jid, message_id.clone(), new_body)
+    .edit_message_raw(&newsletter_jid, message_id.clone(), new_body)
     .await?;
 
 // Revoke (delete) it
 client.newsletter()
-    .revoke_message(&newsletter_jid, message_id)
+    .revoke_message_raw(&newsletter_jid, message_id)
     .await?;
 ```
 
@@ -228,7 +228,7 @@ Retrieve past messages with pagination support:
 
 ```rust
 use whatsapp_rust::NewsletterMessageType;
-use wacore::types::message::EditAttribute;
+use whatsapp_rust::wacore::types::message::EditAttribute;
 
 // Fetch the latest 50 messages
 let messages = client.newsletter()
@@ -305,7 +305,7 @@ println!("Subscribed for {}s", duration);
 The server sends `NewsletterLiveUpdate` events with the current counters of each changed message. Handle them in your event handler:
 
 ```rust
-use wacore::types::events::Event;
+use whatsapp_rust::wacore::types::events::Event;
 
 Event::NewsletterLiveUpdate(update) => {
     println!("Newsletter {} updated:", update.newsletter_jid);
@@ -366,3 +366,7 @@ See [`NewsletterError`](/api/newsletter#error-handling) for all variants.
 - [Events](/concepts/events) — Handle newsletter live update events
 - [Sending messages](/guides/sending-messages) — Send messages to groups and contacts
 - [MEX API](/api/mex) — Understand the GraphQL layer used by newsletters
+
+## Referencing channel content
+
+Prefer `message.message_ref(&jid)?` and typed `newsletter().send_reaction(&target, emoji)` or `send_poll_vote(&target, hashes)`. These require server content IDs. Edit/revoke require client content IDs and return `()` while reusing that target ID. A fresh plaintext send has no server ID until observed. Raw overloads above make explicit which stored ID each operation needs.

@@ -11,36 +11,9 @@ WhatsApp-Rust uses an event-driven architecture where the client emits events fo
 
 ### CoreEventBus
 
-**Location:** `wacore/src/types/events.rs`
+`wacore::types::events::CoreEventBus` shares each event through `Arc<Event>` and routes it according to each handler's `EventInterest`. Subscribe through the client and retain the returned `Subscription`. Dropping it unregisters that subscription. A handler already selected by an in-flight dispatch may still run.
 
-```rust
-#[derive(Default, Clone)]
-pub struct CoreEventBus {
-    handlers: Arc<RwLock<Vec<Arc<dyn EventHandler>>>>,
-}
-
-impl CoreEventBus {
-    pub fn dispatch(&self, event: Event) {
-        let handlers = self.handlers.read().expect("...").clone();
-        if handlers.is_empty() {
-            return;
-        }
-        let event = Arc::new(event);
-        for handler in &handlers {
-            handler.handle_event(Arc::clone(&event));
-        }
-    }
-
-    pub fn has_handlers(&self) -> bool {
-        !self.handlers.read().expect("...").is_empty()
-    }
-}
-```
-
-**Features:**
-- Thread-safe event dispatching via `Arc<Event>` — each event is wrapped once and shared across all handlers, eliminating deep clones
-- Multiple handlers supported
-- Clone-cheap with `Arc`
+The bus's private registration state is not an application API. Use supported subscription methods rather than retaining or modifying its internal handler collection.
 
 ### EventHandler Trait
 
@@ -60,7 +33,7 @@ Handlers receive `Arc<Event>` — a shared reference-counted pointer to the even
 
 **Implementation:**
 ```rust
-use wacore::types::events::{Event, InboundMessage};
+use whatsapp_rust::wacore::types::events::{Event, InboundMessage};
 use std::sync::Arc;
 
 struct MyHandler;
@@ -78,7 +51,7 @@ impl EventHandler for MyHandler {
     }
 }
 
-client.register_handler(Arc::new(MyHandler));
+let _subscription = client.subscribe_handler(Arc::new(MyHandler));
 ```
 
 ### Typed event interest (skip boxing unwanted events)
@@ -86,7 +59,7 @@ client.register_handler(Arc::new(MyHandler));
 By default a handler receives every event. If you only care about a few kinds, override `interest()` so the event bus skips building and dispatching the kinds nobody wants — for high-throughput events (presence, receipts) this avoids the per-event `Arc` allocation entirely.
 
 ```rust
-use wacore::types::events::{EventInterest, EventKind};
+use whatsapp_rust::wacore::types::events::{EventInterest, EventKind};
 
 impl EventHandler for MyHandler {
     fn handle_event(&self, event: Arc<Event>) { /* … */ }
@@ -233,6 +206,11 @@ pub enum Event {
 
     // Enc decrypt failure (opt-in)
     EncDecryptFailed(EncDecryptFailed),
+    // Synced settings and pairing history
+    StatusPrivacyUpdate(StatusPrivacyUpdate),
+    UnarchiveChatsSettingUpdate(UnarchiveChatsSettingUpdate),
+    ReachoutTimelockUpdate(ReachoutTimelockUpdate),
+    CallLogHistory(CallLogHistory),
 }
 ```
 
@@ -783,7 +761,7 @@ pub struct PairError {
 ### PairPasskeyRequest
 
 <Note>
-  **Requires the `passkey` feature** (opt-in, off by default as of the next release after 0.7.0). Without it, `PairPasskeyRequest`, `PairPasskeyConfirmation`, and `PairPasskeyError` below are never emitted — a `passkey_prologue_request` notification instead reaches your handler as `Event::Notification`. See [Feature flags](/installation#feature-flags) and [Authentication — Passkey linking](/concepts/authentication#passkey-linking-shortcake_passkey).
+  **Requires the `passkey` feature** (opt-in, off by default). Without it, `PairPasskeyRequest`, `PairPasskeyConfirmation`, and `PairPasskeyError` below are never emitted — a `passkey_prologue_request` notification instead reaches your handler as `Event::Notification`. See [Feature flags](/installation#feature-flags) and [Authentication — Passkey linking](/concepts/authentication#passkey-linking-shortcake_passkey).
 </Note>
 
 **Emitted:** During [passkey (SHORTCAKE_PASSKEY) linking](/concepts/authentication#passkey-linking-shortcake_passkey), when the server asks for a WebAuthn assertion to gate the link
@@ -964,24 +942,77 @@ Both the message body and `MessageInfo` are `Arc`-wrapped inside `InboundMessage
 pub struct MessageInfo {
     pub source: MessageSource,
     pub id: MessageId,
+    /// Legacy range-filtered server id; zero also represents absence. Prefer
+    /// `newsletter_server_id` for lossless newsletter addressing.
     pub server_id: MessageServerId,
+    /// Newsletter envelope `server_id`, retaining every representable number.
+    /// Absence remains absent and zero is a number, not a sentinel.
+    pub newsletter_server_id: Option<u64>,
+    /// The envelope's `type` attribute. `None` when the stanza carried none.
     pub r#type: Option<StanzaMessageType>,
-    pub push_name: String,
+    /// The sender's `notify` display name. Inline up to 24 bytes, which
+    /// covers most names, so a message does not allocate for it.
+    pub push_name: CompactString,
     pub timestamp: DateTime<Utc>,
-    pub server_timestamp_us: Option<i64>,
     pub category: MessageCategory,
     pub multicast: bool,
+    /// The `mediatype` the stanza's `<enc>` nodes declared, aggregated to one
+    /// value per message.
+    ///
+    /// A fan-out stanza carries one `<enc>` per device and the attribute is a
+    /// property of the message, not of a device copy, so the first `<enc>` that
+    /// carries one wins in the order the client enumerates them: the direct
+    /// `<enc>` children first, then this device's under `<participants><to>`.
+    /// Divergent values across a fan-out are not reconciled and the later ones
+    /// are dropped; a consumer that needs per-node values reads them from
+    /// [`DecryptedPayload`](crate::types::events::DecryptedPayload).
+    ///
+    /// Those fan-out nodes are a wider source than WA Web's parser, which maps
+    /// only the direct `<enc>` children. The two agree on every stanza seen so
+    /// far, since the attribute describes the message and every device copy
+    /// repeats it, so the wider read only fills the field on a stanza whose
+    /// direct children carry nothing.
+    ///
+    /// `None` when no `<enc>` carried the attribute.
     pub media_type: Option<EncMediaType>,
     pub edit: EditAttribute,
-    pub bot_info: Option<MsgBotInfo>,
-    pub meta_info: MsgMetaInfo,
-    pub verified_name: Option<Box<VerifiedName>>,
-    pub verified_level: Option<String>,
-    pub verified_name_serial: Option<String>,
-    pub device_sent_meta: Option<DeviceSentMeta>,
+    /// The `<bot>` child. Boxed: most messages carry none.
+    pub bot_info: Option<Box<MsgBotInfo>>,
+    /// The `<meta>` and `<reporting>` children, `None` when the stanza carries
+    /// neither. Boxed: it is 280 bytes of mostly-absent fields, and every
+    /// `MessageInfo` is retained per message through the commit batch and
+    /// every consumer that keeps a message.
+    pub meta_info: Option<Box<MsgMetaInfo>>,
+    /// Decoded `<verified_name>` child cert of business senders; the display
+    /// name is in `.name`. Boxed: most messages carry none.
+    pub verified_name: Option<Box<crate::stanza::business::VerifiedName>>,
+    /// Set on a self-fanout of an own outgoing message. Boxed: rare.
+    pub device_sent_meta: Option<Box<DeviceSentMeta>>,
+    /// Whether this message was delivered during offline sync.
     pub is_offline: bool,
-    pub peer_recipient_pn: Option<Jid>,
+    /// Set when this message was recovered via PDO rather than normal decryption.
+    /// Contains the PDO request message ID.
     pub unavailable_request_id: Option<String>,
+    /// Server-store timestamp in microseconds (envelope `sts` attr). Used by
+    /// WA Web for read-self watermark ordering across companion devices.
+    pub server_timestamp_us: Option<i64>,
+    /// Envelope `verified_level` attr (e.g. "unknown"/"low"/"high"). For
+    /// business messages this is the server-asserted verification tier; for
+    /// regular messages it is absent.
+    pub verified_level: Option<String>,
+    /// Envelope `verified_name` int attr (business name certificate serial).
+    /// Separate from the `verified_name` child cert bytes already on this
+    /// struct.
+    pub verified_name_serial: Option<i64>,
+    /// Envelope `peer_recipient_pn` attr. Present on companion-device
+    /// self-synced DM stanzas to identify the peer's PN (so the receipt
+    /// goes to the right routing target).
+    pub peer_recipient_pn: Option<Jid>,
+    /// Broadcast-contact-list recipients from `<participants><to jid>` on an
+    /// incoming broadcast/status stanza. Populated only for broadcasts; used to
+    /// validate a `deviceSentMessage.phash` (WA Web `validateBclHash`). Empty
+    /// otherwise.
+    pub bcl_participants: Vec<Jid>,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -1176,7 +1207,7 @@ pub struct DeviceSentMeta {
 
 **Example:**
 ```rust
-use waproto::whatsapp as wa;
+use whatsapp_rust::waproto::whatsapp as wa;
 
 Event::Messages(batch) => {
     for InboundMessage { message: msg, info, .. } in batch.iter() {
@@ -1650,7 +1681,7 @@ Both `MembershipApprovalRequest` and `CreatedMembershipRequests` include an opti
 
 **Example: handling specific group actions:**
 ```rust
-use wacore::stanza::groups::GroupNotificationAction;
+use whatsapp_rust::wacore::stanza::groups::GroupNotificationAction;
 
 Event::GroupUpdate(update) => {
     match &*update.action {
@@ -2644,7 +2675,7 @@ This is a pure observability hook — it does not replace or gate the client's b
 
 **Example:**
 ```rust
-use wacore::iq::dirty::DirtyType;
+use whatsapp_rust::wacore::iq::dirty::DirtyType;
 
 Event::DirtyState(DirtyState { dirty_type, timestamp, .. }) => {
     match dirty_type {
@@ -2969,6 +3000,7 @@ You must call `client.newsletter().subscribe_live_updates(&jid)` to receive thes
 
 ```rust
 #[derive(Debug, Clone, Serialize)]
+#[non_exhaustive]
 pub struct IncomingCall {
     pub from: Jid,
     /// Stanza id; distinct from `CallAction::call_id`.
@@ -3005,6 +3037,7 @@ pub struct IncomingCall {
 `GroupCallUpdate` is the same authoritative roster/relay type `CallHandle::group_state()` exposes once you've joined (via `GroupCallState::snapshot()` — see [Reading group state](/guides/voip-calls#reading-group-state)):
 
 ```rust
+#[non_exhaustive]
 pub struct GroupCallUpdate {
     pub call_id: String,
     pub call_creator: Jid,
@@ -3019,6 +3052,7 @@ pub struct GroupCallUpdate {
     pub relay: Option<GroupCallRelay>,
 }
 
+#[non_exhaustive]
 pub struct GroupCallParticipant {
     pub jid: Jid,
     pub state: Option<String>,          // "connected", …
@@ -3032,6 +3066,7 @@ The `action` field is a tagged enum that mirrors the inner stanza child (`<offer
 ```rust
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum CallAction {
     Offer {
         call_id: String,
@@ -3405,7 +3440,7 @@ See [`acquire_enc_decrypt_failed_forwarding`](/api/client#acquire_enc_decrypt_fa
 
 ```rust
 use whatsapp_rust::bot::Bot;
-use wacore::types::events::{Event, InboundMessage};
+use whatsapp_rust::wacore::types::events::{Event, InboundMessage};
 
 let mut bot = Bot::builder()
     .with_backend(backend)
@@ -3425,18 +3460,14 @@ let mut bot = Bot::builder()
     .await?;
 ```
 
+
 ### Delivery order and backpressure
 
-Closures registered via `on_event`, `on_event_for`, `on_message`, and the other typed registrars are bridged onto the `CoreEventBus` by an internal adapter with a configurable delivery strategy, set via [`BotBuilder::with_event_delivery`](/api/bot#with_event_delivery):
+The default Bot callback adapter is `BoundedConcurrent { capacity: 256, max_concurrency: 16 }`. A full mailbox drops the newest event. Each event's callbacks run in registration order, but different events can overlap and finish out of order.
 
-- **`EventDelivery::Concurrent` (default)** — each event is fanned out to every interested callback on its own spawned task. A slow callback never stalls the bus or its siblings, but ordering across events is not guaranteed, and a persistently slow consumer can accumulate unbounded in-flight tasks.
-- **`EventDelivery::Ordered { capacity }`** — events are handed to a single drainer task through a bounded mailbox and delivered to callbacks strictly in arrival order (within an event, interested callbacks run in registration order). This mirrors the ordered `messages.upsert` contract of WA Web (`preserveOrder: true`), whatsmeow, and Baileys. When the mailbox is full the event is dropped — counted in [`StatsSnapshot::events_dropped`](/api/client#stats) — instead of backpressuring the receive pipeline or growing without bound. A panicking callback is caught and logged; the drainer keeps running and later events still get delivered.
+`Ordered { capacity }` uses one worker and preserves accepted enqueue order; concurrent producers have no wall-clock ordering guarantee. `ConcurrentUnbounded` explicitly allows unbounded callback tasks. Limits belong to one adapter, not the whole process.
 
-Struct-based handlers registered with [`with_event_handler`](/api/bot#with_event_handler) (or `client.register_handler`) always run `handle_event` inline on the dispatch path — `EventDelivery` only governs the closure-based registrars.
-
-<Note>
-`Ordered` trades throughput and drop-under-load for a stronger ordering guarantee. If dropped events are unacceptable, pair it with an [inbound durability hook](/advanced/inbound-durability) for at-least-once redelivery — the hook's buffering is independent of the delivery mailbox.
-</Note>
+Dispatch does not wait for observer code or queue capacity. Overflow is counted in `events_dropped`; it does not request server redelivery. Cancellation discards accepted work, and terminal shutdown cancels without joining callbacks. Inbound durability hooks have their own persistence/replay contract and do not replay callback-mailbox overflow.
 
 ### Multiple Handlers
 
@@ -3461,49 +3492,24 @@ impl EventHandler for ConnectionHandler {
     }
 }
 
-client.register_handler(Arc::new(MessageHandler));
-client.register_handler(Arc::new(ConnectionHandler));
+let _subscription = client.subscribe_handler(Arc::new(MessageHandler));
+let _subscription = client.subscribe_handler(Arc::new(ConnectionHandler));
 ```
+
 
 ### ChannelEventHandler
 
-`ChannelEventHandler` is a built-in event handler that forwards events to an `async_channel` for async consumption. It uses `async-channel` (runtime-agnostic) instead of Tokio channels, so it works with any async executor — including WASM targets.
-
-Events are buffered in an unbounded channel, so events fired before the receiver starts listening are not lost.
-
 ```rust
-use wacore::types::events::{ChannelEventHandler, Event, InboundMessage};
-use std::sync::Arc;
-
-let (handler, event_rx) = ChannelEventHandler::new();
-client.register_handler(handler);
-
-// Wait for events asynchronously
+let (handler, event_rx) = ChannelEventHandler::with_capacity(256);
+let subscription = client.subscribe(EventInterest::of(&[EventKind::Messages]), handler.clone());
 while let Ok(event) = event_rx.recv().await {
-    match &*event {
-        Event::Connected(_) => {
-            println!("Connected!");
-            break;
-        }
-        Event::Messages(batch) => {
-            for InboundMessage { info, .. } in batch.iter() {
-                println!("Message from {}", info.source.sender);
-            }
-        }
-        _ => {}
+    for inbound in event.messages() {
+        println!("{}", inbound.info.id);
     }
 }
 ```
 
-This is particularly useful for:
-
-- **Testing** — assert on specific event sequences without closures
-- **Custom event loops** — process events in your own async task with full control over ordering
-- **Runtime-agnostic code** — no dependency on Tokio's `mpsc` channels
-
-<Note>
-`ChannelEventHandler::new()` returns `(Arc<ChannelEventHandler>, async_channel::Receiver<Arc<Event>>)`. The handler is already wrapped in `Arc` for direct use with `client.register_handler()`. The receiver yields `Arc<Event>`, so use `&*event` or `event.as_ref()` to pattern-match.
-</Note>
+Keep the subscription alive. `ChannelEventHandler::new()` is bounded at 256 events; `unbounded()` explicitly selects an unbounded queue. `stats()` reports enqueued, full, and closed outcomes. The queue is an observation channel, not durable storage.
 
 ### Custom async event handlers
 
@@ -3525,7 +3531,7 @@ impl EventHandler for AsyncHandler {
     }
 }
 
-client.register_handler(Arc::new(AsyncHandler { tx }));
+let _subscription = client.subscribe_handler(Arc::new(AsyncHandler { tx }));
 
 // Process events asynchronously
 tokio::spawn(async move {
@@ -3658,3 +3664,33 @@ async fn handle_event(event: &Event, client: Arc<Client>) -> Result<()> {
 </CardGroup>
 
 
+
+## Subscriptions
+
+`Client::subscribe(EventInterest, Arc<dyn EventHandler>)` returns a RAII `Subscription`. `subscribe_handler` samples the handler's interest at registration. Keep the token: dropping it removes future dispatch registrations, while an old dispatch snapshot or accepted callback may still finish. `update_interest` changes future filtering, `unsubscribe` removes explicitly, and `detach` intentionally leaves the registration installed.
+
+`CallbackEventHandler::from_callback(&client, interest, delivery, callback)` builds an async adapter for external subscriptions. Retain its Arc to inspect `EventDeliveryStats`; `cancel()` aborts accepted work. Removing a subscription does not drain the adapter. Idle workers hold `Weak<Client>` and upgrade for callback execution.
+
+`EventKind::ALL` contains every current kind. Iterate that slice or call `.len()` when you need its count. Do not hard-code a kind count or infer names from debug text. Event kinds and serialized event variants are append-only; match extensible enums with fallback arms and build payloads with their supported builders.
+
+## StatusPrivacyUpdate
+
+Carries the synced `StatusPrivacyAction`, timestamp, and `from_full_sync`. `client.status().audience()` reads the observed action or returns `None`. Applications choose recipient lists; this observation does not filter outbound status recipients.
+
+## UnarchiveChatsSettingUpdate
+
+`unarchive_chats` is the inverse of the phone's **Keep chats archived** switch. `true` means a new message can move the chat out of the archive. The payload also carries timestamp, the typed action, and `from_full_sync`; an absent flag does not fabricate a change.
+
+## ReachoutTimelockUpdate
+
+The parsed push uses the same `ReachoutTimelock` state as `mex().fetch_reachout_timelock()`. It precedes its raw MEX twin and retains optional source, stanza ID, and raw backlog marker. `is_active == Some(false)` reports a lifted restriction; `None` does not assert activity. The event does not enforce outgoing-send policy automatically.
+
+## CallLogHistory
+
+Pairing history emits typed call records after the chunk's harvest and legacy `HistorySync` event, in record wire order. `record` remains unmodified. Creator, direction, and start time stay optional when absent, invalid, or unknown; `record.is_incoming` does not invent direction. `sync_type` and `chunk_order` retain history provenance, not app-state full-sync provenance.
+
+Over-budget chunks can suppress typed call events while leaving raw lazy history available. Replay can repeat calls; there is no cross-chunk ordering or dedup guarantee. Upsert using observed call ID and creator when available. `CallLogSync` is the separate app-state mutation event: its timestamp is mutation-write time, not the call's start time.
+
+## Mutation timestamps
+
+Chat-action payloads exposing `action_timestamp: Option<DateTime<Utc>>` distinguish a missing or invalid wire timestamp from a valid Unix-epoch timestamp. The compatibility `timestamp` can contain a fallback. Use the optional observation for ordering decisions instead of treating a fallback as server evidence.

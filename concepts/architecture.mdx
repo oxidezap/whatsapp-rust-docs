@@ -365,7 +365,7 @@ pub(crate) connection_publish: Mutex<()>,             // Serializes pause()'s te
 5. `resume()` is synchronous and deliberately does not wait on a `pause()` still in flight. That teardown ends in an untimed socket close, and queuing behind it would make "come back on my word" hostage to an unresponsive transport. `resume()` just clears `paused`, fires `pause_state_notifier`, and lets the run loop reconnect immediately.
 6. The `enable_auto_reconnect` check in `run()`'s post-connection logic runs *before* the `pause_teardown_pending`/`paused` check that would otherwise park the loop. So if `enable_auto_reconnect` was already `false` when `pause()` ended a connection (or interrupted an in-flight attempt), the loop takes the auto-reconnect-disabled branch instead: it calls `stop_supervision_loop()` and exits for good, the same as an ordinary auto-reconnect-disabled disconnect. `is_terminal()` reads that combination (`!enable_auto_reconnect && !is_running && !is_connected`) as terminal, so the "not terminal" guarantee in the overview above holds only while `enable_auto_reconnect` stays set.
 
-**What paused reachability means:** `pause()` publishes the `paused` flag *before* it flushes and closes the socket. `can_reach_server()`, `wait_for_socket()`, and `wait_for_connected()`/`is_fully_ready()` all treat a paused client as unreachable for that whole teardown window, not just once the socket is actually down — otherwise a caller could be handed the very connection the application just asked to close. `await_connection` is the one place that deliberately keeps waiting through a pause rather than giving up. It already waits out a 900s backoff the same way. Nothing on the next connection re-issues a consumer's task, so giving up early would drop the work instead of merely deferring it.
+**What paused reachability means:** `pause()` publishes the `paused` flag *before* it flushes and closes the socket. `can_reach_server()`, `wait_for_socket_ready()`, and `wait_for_session_ready()`/`is_fully_ready()` all treat a paused client as unreachable for that whole teardown window, not just once the socket is actually down — otherwise a caller could be handed the very connection the application just asked to close. `await_connection` is the one place that deliberately keeps waiting through a pause rather than giving up. It already waits out a 900s backoff the same way. Nothing on the next connection re-issues a consumer's task, so giving up early would drop the work instead of merely deferring it.
 
 `pause()` does **not** dispatch `Event::Disconnected` (same reasoning as `reconnect()` — the application asked for this, so it isn't news), and it is not a protocol-level presence change. Its interaction with `enable_auto_reconnect` (mechanics point 6 above) is the same ordering that lets `handle_stream_error` make a client terminal (409, 516) through that flag without a pause racing ahead of it.
 
@@ -758,16 +758,12 @@ sequenceDiagram
 <CodeGroup>
 ```rust ✅ Correct
 // Use DeviceCommand for state changes
-client.persistence_manager
+persistence_manager
     .process_command(DeviceCommand::SetPushName(name))
     .await;
 ```
 
-```rust ❌ Wrong
-// Never modify Device directly
-let mut device = client.device.write().await;
-device.push_name = name; // DON'T DO THIS
-```
+The client's private device lock is not a mutation API. Use the persistence manager you supplied at construction.
 </CodeGroup>
 
 ### Async Operations
@@ -781,10 +777,7 @@ let result = tokio::task::spawn_blocking(move || {
 }).await?;
 ```
 
-```rust ❌ Wrong
-// Never block the async runtime
-let result = expensive_operation(); // Stalls all tasks
-```
+The client's private device lock is not a mutation API. Use the persistence manager you supplied at construction.
 </CodeGroup>
 
 ### Error Handling
@@ -794,6 +787,7 @@ use thiserror::Error;
 use anyhow::Result;
 
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum SocketError {
     #[error("socket is closed")]
     SocketClosed,

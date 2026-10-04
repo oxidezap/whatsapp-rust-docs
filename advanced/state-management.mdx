@@ -357,7 +357,7 @@ println!("Push name: {}", snapshot.push_name);
 For simple state changes, use commands:
 
 ```rust
-use wacore::store::commands::DeviceCommand;
+use whatsapp_rust::wacore::store::commands::DeviceCommand;
 
 // Update push name
 persistence_manager.process_command(
@@ -393,7 +393,7 @@ persistence_manager.modify_device(|device| {
 Device state uses two separate locks with different roles:
 
 - **`device_snapshot` (`std::sync::RwLock<Arc<Device>>`)**: read by `get_device_snapshot()`. Readers never contend with writers — they take a brief `std::sync` read lock to clone the `Arc`, then release immediately. The snapshot is updated inside the `tokio::sync::RwLock` write guard in `modify_device`, so readers always see fully committed state.
-- **`device` (`tokio::sync::RwLock<Device>`)**: write-locked inside `modify_device()`. As of [whatsapp-rust#1226](https://github.com/oxidezap/whatsapp-rust/pull/1226), the Signal store adapters (`SignalProtocolStoreAdapter`, `SenderKeyAdapter`) no longer take a read lock here on every operation — they hold `Arc<PersistenceManager>` and call `get_device_snapshot()` instead. The old read-lock approach let concurrent Signal reads coexist, but `tokio::sync::RwLock` is write-preferring. A `process_command` write arriving mid-round-trip queued behind a held read guard, and every later reader then queued behind that writer. So one slow backend round-trip could delay a device mutation and, through it, every other Signal operation waiting on the lock. Adapters no longer hold this lock at all, so that cascade can no longer start. `get_device_arc()` still returns a handle to this lock for any caller that needs `&mut Device` trait access directly; store adapters are no longer among them.
+- **`device` (`tokio::sync::RwLock<Device>`)**: write-locked inside `modify_device()`. As of [whatsapp-rust#1226](https://github.com/oxidezap/whatsapp-rust/pull/1226), the Signal store adapters (`SignalProtocolStoreAdapter`, `SenderKeyAdapter`) no longer take a read lock here on every operation — they hold `Arc<PersistenceManager>` and call `get_device_snapshot()` instead. The old read-lock approach let concurrent Signal reads coexist, but `tokio::sync::RwLock` is write-preferring. A `process_command` write arriving mid-round-trip queued behind a held read guard, and every later reader then queued behind that writer. So one slow backend round-trip could delay a device mutation and, through it, every other Signal operation waiting on the lock. Adapters no longer hold this lock at all, so that cascade can no longer start. Mutate state through the persistence manager's supported methods; the device lock is private.
 
 In practice: `get_device_snapshot()` is contention-free for readers, and the tokio write lock is only held during actual mutations (rare).
 
@@ -461,11 +461,11 @@ For more details on async patterns, see the [Architecture](/concepts/architectur
 The `Backend` trait is a combination of four domain-specific traits:
 
 ```rust
-pub trait Backend: SignalStore + AppSyncStore + ProtocolStore + DeviceStore + Send + Sync {}
+pub trait Backend: SignalStore + AppSyncStore + ProtocolStore + MsgSecretStore + DeviceStore + Send + Sync {}
 
 impl<T> Backend for T 
 where 
-    T: SignalStore + AppSyncStore + ProtocolStore + DeviceStore + Send + Sync
+    T: SignalStore + AppSyncStore + ProtocolStore + MsgSecretStore + DeviceStore + Send + Sync
 {}
 ```
 

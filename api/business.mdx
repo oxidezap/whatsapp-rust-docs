@@ -433,6 +433,7 @@ These three values come from a `biz-cover-photo` media upload, whose response ca
 Paging and thumbnail options for [`get_catalog`](#get_catalog).
 
 ```rust
+#[non_exhaustive]
 pub struct CatalogOptions {
     /// Products per page.
     pub limit: u32,
@@ -453,6 +454,7 @@ pub struct CatalogOptions {
 Options for [`get_collections`](#get_collections).
 
 ```rust
+#[non_exhaustive]
 pub struct CollectionOptions {
     /// Collections per page.
     pub collection_limit: u32,
@@ -746,7 +748,7 @@ pub enum BusinessError {
 Business account changes are reported through the event system. Subscribe to `BusinessStatusUpdate` events to track changes:
 
 ```rust
-use wacore::types::events::{Event, BusinessStatusUpdate, BusinessUpdateType};
+use whatsapp_rust::wacore::types::events::{Event, BusinessStatusUpdate, BusinessUpdateType};
 
 match event {
     Event::BusinessStatusUpdate(update) => {
@@ -796,7 +798,7 @@ See [Contacts API](/api/contacts) for details.
 
 ## Automatic business stanza detection
 
-When sending interactive business messages (native-flow buttons for payments, CTAs, catalogs, etc.), the library automatically injects a `<biz>` stanza child node on the outgoing message. This means you can send `InteractiveMessage` with `NativeFlowMessage` content through `send_message` or `send_message_with_options` without manually constructing business protocol nodes.
+When sending interactive business messages (native-flow buttons for payments, CTAs, catalogs, etc.), the library automatically injects a `<biz>` stanza child node on the outgoing message. This means you can send `InteractiveMessage` with `NativeFlowMessage` content through `send_message` or `send(SendRequest)` without manually constructing business protocol nodes.
 
 See [Send API - Automatic business node detection](/api/send#automatic-business-node-detection) for the full list of supported button-to-flow mappings.
 

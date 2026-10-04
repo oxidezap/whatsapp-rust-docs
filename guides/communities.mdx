@@ -19,40 +19,21 @@ let community = client.community();
 
 See [Community API reference](/api/community) for the full API.
 
+
 ## Creating a community
 
 ```rust
-use whatsapp_rust::features::community::CreateCommunityOptions;
-
-let options = CreateCommunityOptions::new("My Community");
-
-let result = client.community().create(options).await?;
-println!("Community created: {}", result.gid);
-```
-
-By default, `create_general_chat` is `true`, so a general chat subgroup is created alongside the community.
-
-See [Community API reference](/api/community#create) for details.
-
-### Community creation options
-
-Customize the community with `CreateCommunityOptions`:
-
-```rust
-use whatsapp_rust::features::community::CreateCommunityOptions;
-
-let mut options = CreateCommunityOptions::new("My Community");
-options.description = Some("Welcome to the community!".to_string());
+use whatsapp_rust::{CreateCommunityOptions, GroupDescription};
+let mut options = CreateCommunityOptions::new("My Community")?
+    .with_description(GroupDescription::new("Community discussions")?);
 options.closed = true;
-options.allow_non_admin_sub_group_creation = false;
-options.create_general_chat = true;
-
-let result = client.community().create(options).await?;
+let created = client.community().create(options).await?;
+let community_jid = created.metadata.id;
 ```
 
-<Note>
-If a description is provided, it is set via a follow-up IQ after creation — the group create stanza does not support inline descriptions for communities.
-</Note>
+Name and description are validated before remote creation. The default permits an open community, restricts subgroup creation to admins, and enables general chat. The required name has no all-default options value.
+
+Description configuration occurs after creation. `CommunityError::ConfigurationFailed` carries `created_jid`, `CommunityConfigurationStep::SetDescription`, and the typed source when that step fails. Resume the chosen configuration on that JID with `PreviousDescription::Resolve`; do not blindly create another community. The operation has no rollback or atomicity guarantee. See [community failures](/api/community#partial-configuration-failure).
 
 ## Deactivating a community
 
@@ -82,7 +63,9 @@ let result = client.community()
 
 println!("Linked: {:?}", result.linked_jids);
 
-for (jid, error_code) in &result.failed_groups {
+for failure in &result.failed_groups {
+    let jid = &failure.jid;
+    let error_code = failure.code;
     eprintln!("Failed to link {}: error code {}", jid, error_code);
 }
 ```
@@ -291,138 +274,26 @@ for p in &participants {
 
 See [Community API reference](/api/community#get_linked_groups_participants) for details.
 
+
 ## Identifying group types
 
-Use the `group_type` function to classify a group within the community hierarchy:
-
-```rust
-use whatsapp_rust::features::community::{group_type, GroupType};
-
-let metadata = client.groups().fetch_metadata(&group_jid).await?;
-
-match group_type(&metadata) {
-    GroupType::Community => println!("This is a community parent group"),
-    GroupType::LinkedSubgroup => println!("This is a linked subgroup"),
-    GroupType::LinkedAnnouncementGroup => println!("This is the default announcement subgroup"),
-    GroupType::LinkedGeneralGroup => println!("This is the general chat subgroup"),
-    GroupType::Default => println!("This is a regular group"),
-    _ => println!("Unknown group type"),
-}
-```
-
-The classification is based on these `GroupMetadata` fields:
-
-| Field | Description |
-|-------|-------------|
-| `is_parent_group` | `true` for community parent groups |
-| `parent_group_jid` | JID of the parent community (for subgroups) |
-| `is_default_sub_group` | `true` for the default announcement subgroup |
-| `is_general_chat` | `true` for the general chat subgroup |
-| `allow_non_admin_sub_group_creation` | Whether non-admin members can create subgroups |
-
-See [Groups API reference](/api/groups#fetch_metadata) for all `GroupMetadata` fields. Prefer the [`GroupHierarchy`](/api/groups#grouphierarchy) enum on [`GroupOverview`](/api/groups#groupoverview) when you only need the hierarchy classification — `group_type(&metadata)` is a projection of the same information.
+Read `metadata.hierarchy()` or the slim overview's `hierarchy`. `GroupHierarchy::Subgroup { parent, kind }` retains the parent JID; `SubgroupKind` distinguishes regular, announcement, and general chat. Handle future variants in matches.
 
 ## Community Announcement Group (CAG) reactions
 
-The default announcement subgroup of a community — the one where `is_default_sub_group` is `true` — is a Community Announcement Group (CAG). CAGs require encrypted reactions; plaintext reactions are silently dropped by the server.
-
-`client.send_reaction()` handles this transparently. The same call works for DMs, regular groups, and CAGs with no change to your code:
-
 ```rust
-let target_key = wa::MessageKey {
-    remote_jid: Some(cag_jid.to_string()),
-    from_me: Some(false),
-    id: Some("3EB0POSTID".to_string()),
-    // participant must be the post author.
-    participant: Some(post_author_jid.to_string()),
-};
-
-// send_reaction takes target_key by value; clone it to reuse for removal.
-client.send_reaction(&cag_jid, target_key.clone(), "🔥").await?;
-
-// Remove a reaction with an empty emoji:
-client.send_reaction(&cag_jid, target_key, "").await?;
+client.send_reaction(&post.message_ref()?, "👍").await?;
 ```
 
-For CAG chats the library checks the internal `is_community_announce` flag on its send-path routing snapshot (populated from metadata and cached). When `true`, the reaction is encrypted with the target post's `messageSecret` (captured when the post was received) and shipped as an `enc_reaction_message` envelope. If the parent secret is not available the call fails with a descriptive error rather than emitting a plaintext reaction the channel would drop.
-
-Incoming encrypted reactions from CAG posts are decrypted transparently by the receive path and surfaced as a normal `reaction_message` event. The `key` field is filled from the envelope's `target_message_key`, so your event handler looks identical to a regular group reaction:
-
-```rust
-Event::Messages(batch) => {
-    for InboundMessage { message: msg, .. } in batch.iter() {
-        if let Some(reaction) = msg.reaction_message.as_option() {
-            println!("Reaction: {:?}", reaction.text);
-            println!("On post:  {:?}", reaction.key.as_option().and_then(|k| k.id.as_deref()));
-        }
-    }
-}
-```
+The post reference preserves the original author. The captured original secret is required for encrypted announcement reactions.
 
 ## Channel comments
 
-Post encrypted threaded replies under a CAG post using `client.comments()`:
-
 ```rust
-use whatsapp_rust::features::Comments;
-
-let parent_key = wa::MessageKey {
-    remote_jid: Some(cag_jid.to_string()),
-    from_me: Some(false),
-    id: Some("3EB0POSTID".to_string()),
-    // participant must point to the post author so receivers can derive the
-    // decryption key from the envelope. The library resolves the author
-    // automatically when from_me is true and participant is omitted.
-    participant: Some(post_author_jid.to_string()),
-};
-
-// Send a text comment:
-let result = client.comments()
-    .send_text(&cag_jid, parent_key.clone(), "Great post!")
-    .await?;
-println!("Comment sent: {}", result.message_id);
+client.comments().send_text(&post.message_ref()?, "Thanks for the update").await?;
 ```
 
-For arbitrary message bodies, use `send_message`:
-
-```rust
-let body = wa::Message {
-    extended_text_message: buffa::MessageField::some(wa::message::ExtendedTextMessage {
-        text: Some("Great post!".to_string()),
-        ..Default::default()
-    }),
-    ..Default::default()
-};
-
-let result = client.comments()
-    .send_message(&cag_jid, parent_key, body)
-    .await?;
-```
-
-Comments require the parent post's `messageSecret` to have been captured when the post was received (via `msg_secret_policy`). If it was not captured the call returns an error explaining that the secret is missing.
-
-Each comment carries a fresh `messageSecret` of its own so it can receive encrypted reactions. The comment's secret is persisted under the comment's own id and sender.
-
-### Receiving comments
-
-The client decrypts incoming encrypted comments transparently on the receive path. You receive the decrypted body as part of a normal `Event::Messages` batch. The inner `Message` proto has no slot for the parent post key, so you read the threading link off `InboundMessage::comment_target` instead:
-
-```rust
-Event::Messages(batch) => {
-    for InboundMessage { message: msg, comment_target, .. } in batch.iter() {
-        if let Some(parent_key) = comment_target {
-            // This is a channel comment.
-            println!("Comment on post: {:?}", parent_key.id);
-
-            if let Some(text) = msg.text_content() {
-                println!("Comment text: {}", text);
-            }
-        }
-    }
-}
-```
-
-`comment_target` is `None` for all other message types.
+Supply an announcement post. A generic group reference is not proof of group subtype. Received comments arrive as inner bodies in `Event::Messages`, with the parent key in `InboundMessage::comment_target`. See [sending comments](/guides/sending-messages#channel-comments).
 
 ## Error handling
 

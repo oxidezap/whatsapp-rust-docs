@@ -115,8 +115,8 @@ Response from profile picture operations.
 
 ```rust
 pub struct SetProfilePictureResponse {
-    /// The new picture ID (or None if removed)
-    pub id: Option<String>,
+    /// The server-assigned picture ID.
+    pub id: String,
 }
 ```
 
@@ -138,9 +138,7 @@ async fn setup_profile(client: &Arc<Client>) -> anyhow::Result<()> {
     let image_bytes = fs::read("bot_avatar.jpg")?;
     let response = client.profile().set_profile_picture(image_bytes).await?;
     
-    if let Some(id) = response.id {
-        println!("Profile picture updated: {}", id);
-    }
+    println!("Profile picture updated: {}", response.id);
     
     Ok(())
 }

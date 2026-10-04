@@ -17,7 +17,7 @@ Use the typed registrars on `BotBuilder` — they extract the relevant payload b
 use whatsapp_rust::prelude::*;
 
 let bot = Bot::builder()
-    .with_backend(SqliteStore::new("whatsapp.db").await?)
+    .with_backend(SqliteStore::open("whatsapp.db").await?)
     .on_qr_code(|code, _timeout| async move {
         println!("Scan to pair:\n{code}");
     })
@@ -61,6 +61,7 @@ See [Bot API reference](/api/bot#event-handling) for full details.
 ### Available Events
 
 ```rust
+#[non_exhaustive]
 pub enum Event {
     /// One or more successfully decrypted messages (batch of one on live
     /// traffic, an accumulated batch during the offline drain)
@@ -164,7 +165,7 @@ You get `InboundMessage::comment_target` when the dispatched message is a decryp
 Use the `MessageExt` trait to extract content:
 
 ```rust
-use wacore::proto_helpers::MessageExt;
+use whatsapp_rust::wacore::proto_helpers::MessageExt;
 
 // Get text content (conversation or extended_text_message)
 if let Some(text) = message.text_content() {
@@ -735,7 +736,7 @@ impl InboundDurabilityHook for MyStore {
 }
 
 let bot = Bot::builder()
-    .with_backend(SqliteStore::new("whatsapp.db").await?)
+    .with_backend(SqliteStore::open("whatsapp.db").await?)
     .with_inbound_durability_hook(MyStore)
     .build()
     .await?;
@@ -886,7 +887,7 @@ let bot = Bot::builder()
 ### Extract content with helper methods
 
 ```rust
-use wacore::proto_helpers::MessageExt;
+use whatsapp_rust::wacore::proto_helpers::MessageExt;
 
 // Use helper methods instead of manual field access
 let text = message.text_content();
@@ -936,3 +937,15 @@ Spawn tasks for long-running operations:
 - [Group Management](/guides/group-management) - Handle group events
 - [Community management](/guides/communities) - CAG reactions and channel comments
 - [Inbound Durability Hook](/advanced/inbound-durability) - At-least-once message delivery
+
+## Retrying placeholder recovery
+
+Automatic PDO recovery is memoized per message within a session. If your application decides to retry a placeholder explicitly, call:
+
+```rust
+let request_id = client.retry_pdo_placeholder_resend_request(&inbound.info).await?;
+```
+
+`Some(id)` means a new request was sent; `None` means recovery is already pending. This is not an acknowledgement or a guarantee that the phone can recover the message. The explicit retry bypasses the automatic session memo while retaining pending-request ownership. A retry does not erase an unsent automatic reservation.
+
+The dispatch gate deduplicates a recovered message against encrypted retries. For SKDM-bearing PDO retries, it excludes only the top-level sender-key distribution that the receive path actually processed from the dispatch digest. Nested or unprocessed content stays significant. This gate is session-local, not a durable exactly-once contract; retain your application's own processing identifiers when that distinction matters.

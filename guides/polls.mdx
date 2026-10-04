@@ -7,88 +7,37 @@ description: Learn how to create polls, cast votes, and decrypt poll results in 
 
 This guide covers creating polls in WhatsApp chats, casting votes on existing polls, and decrypting encrypted vote results. Polls support both single-select and multi-select modes and work in both direct messages and group chats.
 
+
 ## Creating a poll
 
-Use the `polls()` accessor on the client to create a poll:
-
 ```rust
-use wacore_binary::jid::Jid;
-
-let chat_jid: Jid = "15551234567@s.whatsapp.net".parse()?;
-
-let options = vec![
-    "Option A".to_string(),
-    "Option B".to_string(),
-    "Option C".to_string(),
-];
-
-// Create a single-select poll
-let (result, message_secret) = client
-    .polls()
-    .create(&chat_jid, "What do you prefer?", &options, 1)
-    .await?;
-
-println!("Poll sent with ID: {}", result.message_id);
+let options = vec!["Option A".to_string(), "Option B".to_string()];
+let created = client.polls().create(&chat_jid, "What do you prefer?", &options, 1).await?;
+println!("Poll sent: {}", created.send_result().message_id);
 ```
 
-The `create` method returns a tuple of `(SendResult, message_secret)`. The `SendResult` contains the `message_id` and `to` JID (see [SendResult](/api/send#sendresult)). You must store the `message_secret` (a 32-byte key) to decrypt votes later.
-
-### Multi-select polls
-
-Set `selectable_count` to allow voters to pick multiple options:
-
-```rust
-// Allow selecting up to 2 options
-let (result, message_secret) = client
-    .polls()
-    .create(&chat_jid, "Pick your favorites", &options, 2)
-    .await?;
-```
-
-<Note>
-Polls must have between 2 and 12 options, and all option names must be unique. The `selectable_count` must be between 1 and the total number of options.
-</Note>
+The result is `CreatedPoll`, with a send result, original cryptographic creator, and validated 32-byte `MessageSecret`. Store their association to vote or decrypt later. Use a selectable count above one for multi-select; it cannot exceed the number of options. Polls require 2 to 12 unique option names.
 
 ## Voting on a poll
 
-To vote on an existing poll, you need the poll's message ID, the poll creator's JID, and the `message_secret` from when the poll was created:
-
 ```rust
-let chat_jid: Jid = "15551234567@s.whatsapp.net".parse()?;
-let poll_creator_jid: Jid = "15551234567@s.whatsapp.net".parse()?;
-
 let selected = vec!["Option A".to_string()];
-
-let vote_result = client
-    .polls()
-    .vote(
-        &chat_jid,
-        &poll_msg_id,
-        &poll_creator_jid,
-        &message_secret,
-        &selected,
-    )
-    .await?;
+client.polls().vote(&created.poll_ref()?, &selected).await?;
 ```
 
-Votes are end-to-end encrypted using AES-256-GCM with a key derived from the poll's `message_secret`, the poll message ID, the poll creator's JID, and the voter's JID.
-
-<Warning>
-You can only vote on polls where you have the `message_secret`. This secret is generated at poll creation time and must be stored by the poll creator.
-</Warning>
+For received or stored content, build `PollRef` from a `MessageRef`, exact original crypto creator, and validated secret. Do not infer cryptographic identity from a current alias. Use an empty selection to clear a vote. See [poll references](/api/polls#creation-references).
 
 ## Decrypting votes
 
 When you receive poll update events, the vote payload is encrypted. Use `decrypt_vote` to retrieve the selected option hashes:
 
 ```rust
-use whatsapp_rust::PollOptionResult;
+use whatsapp_rust::{PollOptionResult, PollVoteCiphertext};
 
 let selected_hashes = client
     .polls()
     .decrypt_vote(
-        &enc_payload,
-        &enc_iv,
+        PollVoteCiphertext { enc_payload: &enc_payload, enc_iv: &enc_iv },
         &message_secret,
         &poll_msg_id,
         &poll_creator_jid,
@@ -100,7 +49,7 @@ let selected_hashes = client
 Each returned hash is a 32-byte SHA-256 hash of the option name. To map hashes back to option names, compare them against the known options using `wacore::poll::compute_option_hash`.
 
 <Note>
-`decrypt_vote` and `aggregate_votes` became instance methods on `client.polls()` (instead of static `Polls::…` helpers) in v0.6 so they can consult the LID↔PN cache. If the poll creator and voter were originally addressed in one namespace and the vote is delivered in the other (which happens during LID migration), the client retries decryption with the swapped namespace before giving up.
+The instance methods consult known PN/LID mappings and try creator and voter aliases independently. Preserve the original crypto creator when persisting a poll reference.
 </Note>
 
 ## Aggregating results
@@ -108,7 +57,7 @@ Each returned hash is a 32-byte SHA-256 hash of the option name. To map hashes b
 For tallying votes across multiple voters, use `aggregate_votes`. This handles vote replacement (last-vote-wins) and maps hashes back to option names. Voters are deduped by canonical identity, so a voter who re-votes under the opposite namespace counts once:
 
 ```rust
-use whatsapp_rust::PollOptionResult;
+use whatsapp_rust::{PollOptionResult, PollVoteCiphertext};
 
 let poll_options = vec![
     "Option A".to_string(),
@@ -116,7 +65,7 @@ let poll_options = vec![
     "Option C".to_string(),
 ];
 
-// votes: Vec<(&Jid, &[u8], &[u8])> — (voter_jid, enc_payload, enc_iv)
+// votes: Vec<(&Jid, PollVoteCiphertext)> — oldest first
 // Should be ordered oldest-first
 let results: Vec<PollOptionResult> = client
     .polls()
@@ -163,8 +112,8 @@ async fn create_poll_safely(client: &Client) -> Result<()> {
     let options = vec!["Yes".to_string(), "No".to_string()];
 
     match client.polls().create(&jid, "Agree?", &options, 1).await {
-        Ok((result, secret)) => {
-            println!("Poll created: {}", result.message_id);
+        Ok(created) => {
+            println!("Poll created: {}", created.send_result().message_id);
             // Store secret for later vote decryption
         }
         Err(e) => {

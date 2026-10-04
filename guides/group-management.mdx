@@ -25,19 +25,16 @@ See [Groups API reference](/api/groups) for the full API.
 
 ```rust
 use whatsapp_rust::features::groups::{GroupCreateOptions, GroupParticipantOptions};
-use wacore_binary::jid::Jid;
+use whatsapp_rust::wacore_binary::jid::Jid;
 
 let participant1: Jid = "1234567890@s.whatsapp.net".parse()?;
 let participant2: Jid = "9876543210@s.whatsapp.net".parse()?;
 
-let options = GroupCreateOptions {
-    subject: "My New Group".to_string(),
-    participants: vec![
+let options = GroupCreateOptions::new("My New Group")
+    .with_participants(vec![
         GroupParticipantOptions::new(participant1),
         GroupParticipantOptions::new(participant2),
-    ],
-    ..Default::default()
-};
+    ]);
 
 let result = client.groups().create_group(options).await?;
 println!("Group created with JID: {}", result.gid);
@@ -54,34 +51,11 @@ use whatsapp_rust::features::groups::{
     MembershipApprovalMode,
 };
 
-let options = GroupCreateOptions {
-    subject: "Advanced Group".to_string(),
-    participants: vec![
-        GroupParticipantOptions::new(participant1),
-    ],
-    // Control who can add members
-    member_add_mode: Some(MemberAddMode::AdminAdd),
-
-    // Control membership approval requirement
-    membership_approval_mode: Some(MembershipApprovalMode::On),
-
-    // Control who can share invite links
-    member_link_mode: Some(MemberLinkMode::AdminLink),
-
-    // Create as a community parent group
-    is_parent: false,
-
-    // Whether the community requires approval to join (only used with is_parent)
-    closed: false,
-
-    // Allow non-admin members to create subgroups (only used with is_parent)
-    allow_non_admin_sub_group_creation: false,
-
-    // Create a general chat subgroup (only used with is_parent)
-    create_general_chat: false,
-
-    ..Default::default()
-};
+let options = GroupCreateOptions::new("Advanced Group")
+    .with_participant(GroupParticipantOptions::new(participant1))
+    .with_member_add_mode(MemberAddMode::AdminAdd)
+    .with_membership_approval_mode(MembershipApprovalMode::On)
+    .with_member_link_mode(MemberLinkMode::AdminLink);
 
 let result = client.groups().create_group(options).await?;
 ```
@@ -524,12 +498,12 @@ let results = client.groups().fetch_metadata_batch(&group_jids).await?;
 
 for result in results {
     match result {
-        GroupMetadataResult::Full(metadata) => {
+        GroupMetadataResult::Found(metadata) => {
             let subject = metadata.subject.as_deref().unwrap_or("(no subject)");
             println!("Group: {} — {subject}", metadata.id);
         }
-        GroupMetadataResult::Truncated { id, size } => {
-            println!("Truncated info: {id} ({size} members)");
+        GroupMetadataResult::Truncated { id, participant_count } => {
+            println!("Truncated info: {id} ({participant_count} members)");
         }
         GroupMetadataResult::Forbidden(id) => println!("Access denied: {id}"),
         GroupMetadataResult::NotFound(id) => println!("Not found: {id}"),
@@ -779,7 +753,7 @@ See [Client API - AB props cache](/api/client#ab-props-cache) for more details o
 Groups can use different addressing modes:
 
 ```rust
-use wacore::types::message::AddressingMode;
+use whatsapp_rust::wacore::types::message::AddressingMode;
 
 pub enum AddressingMode {
     Pn,   // Phone number (legacy)
@@ -882,7 +856,7 @@ For advanced participant configurations:
 
 ```rust
 use whatsapp_rust::features::groups::GroupParticipantOptions;
-use wacore_binary::jid::Jid;
+use whatsapp_rust::wacore_binary::jid::Jid;
 
 let lid_jid: Jid = "123456789012345:10@lid".parse()?;
 let phone_jid: Jid = "1234567890@s.whatsapp.net".parse()?;

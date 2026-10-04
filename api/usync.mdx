@@ -89,6 +89,7 @@ pub const fn with_expected_timestamp(mut self, expected_timestamp: i64) -> Self
 ### `UsyncProtocol`
 
 ```rust
+#[non_exhaustive]
 pub enum UsyncProtocol {
     Contact { addressing_mode: UsyncAddressingMode },
     DevicesV2,
@@ -109,6 +110,7 @@ pub enum UsyncProtocol {
 ## Reading the response
 
 ```rust
+#[non_exhaustive]
 pub struct UsyncResponse {
     pub protocol_states: Vec<UsyncProtocolState>,
     pub users: Vec<UsyncUserResult>,
@@ -117,6 +119,7 @@ impl UsyncResponse {
     pub fn protocol_state(&self, protocol: UsyncProtocolKind) -> Option<&UsyncProtocolState>
 }
 
+#[non_exhaustive]
 pub struct UsyncUserResult {
     pub id: Option<Jid>,      // absent for contact-only results without a JID
     pub pn_jid: Option<Jid>,
@@ -143,6 +146,7 @@ impl<T> UsyncOutcome<T> {
 `UsyncProtocolResult` carries the typed payload per protocol:
 
 ```rust
+#[non_exhaustive]
 pub enum UsyncProtocolResult {
     Contact(UsyncOutcome<UsyncContactResult>),
     Devices(UsyncOutcome<UsyncDevicesResult>),

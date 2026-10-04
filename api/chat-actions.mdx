@@ -654,7 +654,7 @@ As of PR [#1158](https://github.com/oxidezap/whatsapp-rust/pull/1158), losing an
 Chat action changes are emitted as events that you can handle:
 
 ```rust
-use wacore::types::events::Event;
+use whatsapp_rust::wacore::types::events::Event;
 
 .on_event(|event, _client| async move {
     match &*event {
@@ -731,7 +731,7 @@ match client.chat_actions().mute_chat_until(&jid, 0).await {
 
 ```rust
 use whatsapp_rust::Client;
-use wacore_binary::jid::Jid;
+use whatsapp_rust::wacore_binary::jid::Jid;
 use chrono::{Utc, Duration};
 use std::sync::Arc;
 

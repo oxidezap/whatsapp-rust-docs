@@ -404,7 +404,7 @@ The mute state is sent as `ON`/`OFF`; the mute expiration is local database stat
 Newsletter message sending is handled by the unified `client.send_message()` method. See the [Send API reference](/api/send#send_message) for full details.
 
 ```rust
-use waproto::whatsapp as wa;
+use whatsapp_rust::waproto::whatsapp as wa;
 
 let message = wa::Message {
     conversation: Some("Hello subscribers!".to_string()),
@@ -421,144 +421,46 @@ The library detects newsletter recipients automatically and sends messages as pl
 `Newsletter::send_message()` was removed. Use `client.send_message()` instead — it accepts newsletter, group, and direct message JIDs.
 </Note>
 
+
 ### send_reaction
 
-Send a reaction to a newsletter message. Returns the stanza ID of the reaction.
-
 ```rust
-pub async fn send_reaction(
-    &self,
-    jid: &Jid,
-    server_id: u64,
-    reaction: &str,
-) -> Result<String, NewsletterError>
+let target = history_message.message_ref(&newsletter_jid)?;
+let operation_id = client.newsletter().send_reaction(&target, "👍").await?;
 ```
 
-**Parameters:**
-- `jid` — Newsletter JID
-- `server_id` — Server-assigned ID of the message to react to
-- `reaction` — Emoji code (e.g., `"👍"`, `"❤️"`), or empty string to remove
-
-The returned ID matches the `id` of the server's acknowledgement, which arrives as `Event::ServerAck`. Use it to match an ack to the reaction that triggered it.
-
-**Example:**
-```rust
-// Add a reaction and keep its stanza ID
-let reaction_id = client.newsletter()
-    .send_reaction(&newsletter_jid, server_id, "👍")
-    .await?;
-
-// Remove a reaction
-client.newsletter()
-    .send_reaction(&newsletter_jid, server_id, "")
-    .await?;
-```
+Requires the reference's `ServerMessageId` and returns a fresh `StanzaId` for ACK correlation. An empty reaction removes the selection. A client-only reference fails instead of substituting its ID. Server ID zero remains a valid observed value.
 
 ### send_poll_vote
 
-Vote in a newsletter (channel) poll. Returns the stanza ID of the vote.
-
 ```rust
-pub async fn send_poll_vote(
-    &self,
-    jid: &Jid,
-    server_id: u64,
-    option_hashes: &[[u8; 32]],
-) -> Result<String, NewsletterError>
+let hashes = [wacore::poll::compute_option_hash("Option A")];
+let operation_id = client.newsletter().send_poll_vote(&target, &hashes).await?;
 ```
 
-**Parameters:**
-- `jid` — Newsletter JID
-- `server_id` — Server-assigned ID of the poll message (not a new ID)
-- `option_hashes` — The full selection, one [`compute_option_hash`](/api/polls) per chosen option. This is the same key that [`NewsletterPollVote::option_hash`](#newsletterpollvote) tallies use.
-
-Every call replaces your previous selection on the server. To change a vote, send the new list. To remove your vote, pass an empty slice.
-
-Hash each option name exactly as the poll payload carries it. Option names can contain variation selectors and ZWJ sequences, so a retyped or normalized name produces a hash the server does not recognize.
-
-The returned ID matches the `id` of the server's acknowledgement, which arrives as `Event::ServerAck`.
-
-**Errors:** Returns `NewsletterError::InvalidRequest` without sending anything if `jid` is not a newsletter JID, `option_hashes` has more than 1000 entries, or the same hash appears twice.
-
-**Example:**
-```rust
-use wacore::poll::compute_option_hash;
-
-// Vote for one option
-let vote_id = client.newsletter()
-    .send_poll_vote(&newsletter_jid, poll_server_id, &[compute_option_hash("Rust")])
-    .await?;
-
-// Reuse hashes from fetched tallies
-let hashes: Vec<[u8; 32]> = message.votes.iter().take(1).map(|v| v.option_hash).collect();
-client.newsletter()
-    .send_poll_vote(&newsletter_jid, message.server_id, &hashes)
-    .await?;
-
-// Remove your vote
-client.newsletter()
-    .send_poll_vote(&newsletter_jid, poll_server_id, &[])
-    .await?;
-```
+The server ID identifies the poll content. Each send replaces the entire selection; an empty slice clears it. Hash the exact option name, including Unicode selectors, without normalization. Returns the new operation's `StanzaId`, not delivery confirmation.
 
 ### edit_message
 
-Edit a previously-sent newsletter message. Channel messages are plaintext, so the edit is sent as a `<message edit="1">` stanza with the new protobuf body — not through the E2E send path.
-
 ```rust
-pub async fn edit_message(
-    &self,
-    jid: &Jid,
-    message_id: impl Into<String>,
-    new_content: wa::Message,
-) -> Result<(), NewsletterError>
+client.newsletter().edit_message(&target, replacement).await?;
 ```
 
-**Parameters:**
-- `jid` — Newsletter JID. Non-newsletter JIDs are rejected with an error; use [`Client::edit_message`](/api/send) for DMs and groups.
-- `message_id` — The target message's `message_id` (the wire stanza id, as returned by `send_message` or carried on [`NewsletterMessage`](#newslettermessage)). This is **not** the `server_id` used by reactions. Empty IDs are rejected.
-- `new_content` — Replacement message body. Typically a `wa::Message { conversation: Some(..), .. }` for text edits.
-
-**Example:**
-```rust
-use waproto::whatsapp as wa;
-
-let new_body = wa::Message {
-    conversation: Some("edited text".to_string()),
-    ..Default::default()
-};
-
-client.newsletter()
-    .edit_message(&newsletter_jid, original_message_id, new_body)
-    .await?;
-```
+Requires the client content `MessageId`. Channel edit/revoke reuse that target ID and return `()`; do not assume they produce a fresh operation ID or `SendResult`.
 
 ### revoke_message
 
-Revoke (delete) a previously-sent newsletter message. Like [`edit_message`](#edit_message), this goes through the plaintext channel path, not the E2E send path.
-
 ```rust
-pub async fn revoke_message(
-    &self,
-    jid: &Jid,
-    message_id: impl Into<String>,
-) -> Result<(), NewsletterError>
+client.newsletter().revoke_message(&target).await?;
 ```
 
-**Parameters:**
-- `jid` — Newsletter JID. Non-newsletter JIDs are rejected; use [`Client::revoke_message`](/api/send) for DMs and groups.
-- `message_id` — The target message's `message_id` (wire stanza id, not `server_id`). Empty IDs are rejected.
+### Raw channel actions
 
-**Example:**
-```rust
-client.newsletter()
-    .revoke_message(&newsletter_jid, message_id)
-    .await?;
-```
+`send_reaction_raw`, `send_poll_vote_raw`, `edit_message_raw`, and `revoke_message_raw` retain explicit chat/ID inputs. Reactions/votes still return `StanzaId`; edit/revoke return `()`. Use typed references for ordinary consumers.
 
-<Note>
-Newsletter JIDs are now also rejected at the root of the E2E send path. If your code accidentally routes a channel JID through `send_message_impl`, `pin_message`, or the standard `edit_message` / `revoke_message` on `Client`, you get an error that names the mis-route instead of a malformed encrypted fan-out.
-</Note>
+## NewsletterMessageRef
+
+`NewsletterMessageRef::new(&chat, Option<MessageId>, Option<ServerMessageId>)?` retains independent optional content IDs. History messages and live-update messages expose `message_ref(&chat)`; sent channel posts expose `SendResult::newsletter_ref()` without inventing a server ID. `with_from_me(bool)` is an explicit caller ownership declaration.
 
 ### get_messages
 
@@ -679,6 +581,7 @@ Metadata for a newsletter channel. Implements `PartialEq` and `Eq` for direct co
 
 ```rust
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct NewsletterMetadata {
     pub jid: Jid,
     pub name: String,
@@ -707,6 +610,7 @@ Both fields are populated from `viewer_metadata.settings` on `list_subscribed` a
 ```rust
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum NewsletterVerification {
     Verified,
     Unverified,
@@ -722,6 +626,7 @@ The server's `verification` value is matched ignoring case, so `VERIFIED` reads 
 ```rust
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum NewsletterState {
     Active,
     Suspended,
@@ -749,6 +654,7 @@ The viewer's role in a newsletter.
 ```rust
 #[non_exhaustive]
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum NewsletterRole {
     Owner,
     Admin,
@@ -765,6 +671,7 @@ An admin's public profile within a newsletter, carried on [`NewsletterAdminInfo`
 
 ```rust
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct NewsletterAdminProfile {
     pub id: Option<String>,
     pub name: String,
@@ -783,6 +690,7 @@ Admin-side information about a newsletter, returned by [`get_admin_info`](#get_a
 
 ```rust
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct NewsletterAdminInfo {
     pub admin_count: Option<u32>,
     pub admin_profile: Option<NewsletterAdminProfile>,
@@ -800,6 +708,7 @@ A follower (subscriber) of a newsletter, returned by [`get_followers`](#get_foll
 
 ```rust
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct NewsletterFollower {
     pub jid: Jid,
     pub phone_jid: Option<Jid>,
@@ -824,7 +733,7 @@ A message from a newsletter's history. `#[non_exhaustive]` — construct it from
 ```rust
 #[non_exhaustive]
 pub struct NewsletterMessage {
-    pub message_id: String,
+    pub message_id: Option<MessageId>,
     pub server_id: u64,
     pub timestamp: u64,
     pub message_type: NewsletterMessageType,
@@ -947,6 +856,7 @@ pub enum NewsletterMessageAssociationType {
 A reaction count on a newsletter message.
 
 ```rust
+#[non_exhaustive]
 pub struct NewsletterReactionCount {
     pub code: String,
     pub count: u64,

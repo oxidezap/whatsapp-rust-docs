@@ -9,27 +9,28 @@ This guide covers implementing custom backends for storage, network transport, a
 
 ## Storage backend architecture
 
-The storage backend is split into four domain-grouped traits:
+The storage backend is split into five domain-grouped traits:
 
 1. **SignalStore** - Signal protocol cryptography (identities, sessions, keys)
 2. **AppSyncStore** - WhatsApp app state synchronization
 3. **ProtocolStore** - WhatsApp Web protocol alignment (SKDM, LID mapping, device registry)
 4. **DeviceStore** - Device persistence operations
+5. **MsgSecretStore** - Persist and validate message secrets for encrypted add-ons
 
 See [Store API reference](/api/store) for the complete trait definitions.
 
 ### Backend Trait
 
-Any type implementing all four traits automatically implements `Backend`:
+Any type implementing all five traits automatically implements `Backend`:
 
 ```rust
-use wacore::store::traits::*;
+use whatsapp_rust::wacore::store::traits::*;
 
-pub trait Backend: SignalStore + AppSyncStore + ProtocolStore + DeviceStore + Send + Sync {}
+pub trait Backend: SignalStore + AppSyncStore + ProtocolStore + MsgSecretStore + DeviceStore + Send + Sync {}
 
 impl<T> Backend for T 
 where 
-    T: SignalStore + AppSyncStore + ProtocolStore + DeviceStore + Send + Sync 
+    T: SignalStore + AppSyncStore + ProtocolStore + MsgSecretStore + DeviceStore + Send + Sync
 {}
 ```
 
@@ -40,8 +41,8 @@ where
 ```rust
 use std::sync::Arc;
 use async_trait::async_trait;
-use wacore::store::traits::*;
-use wacore::store::error::{Result, StoreError};
+use whatsapp_rust::wacore::store::traits::*;
+use whatsapp_rust::wacore::store::error::{Result, StoreError};
 
 #[derive(Clone)]
 pub struct MyCustomStore {
@@ -245,7 +246,7 @@ ADD COLUMN bootstrapped BOOLEAN NOT NULL DEFAULT FALSE;
 ```
 
 ```rust
-use wacore::appstate::hash::HashState;
+use whatsapp_rust::wacore::appstate::hash::HashState;
 use wacore_appstate::processor::AppStateMutationMAC;
 
 #[async_trait]
@@ -356,7 +357,7 @@ See [Store API reference](/api/store#app-sync-store) for all AppSyncStore method
 Handle WhatsApp Web protocol alignment:
 
 ```rust
-use wacore_binary::jid::Jid;
+use whatsapp_rust::wacore_binary::jid::Jid;
 
 #[async_trait]
 impl ProtocolStore for MyCustomStore {
@@ -641,7 +642,7 @@ The `message` column stores the proto-serialized `wa::Message` bytes. The client
 Handle device data persistence:
 
 ```rust
-use wacore::store::Device;
+use whatsapp_rust::wacore::store::Device;
 
 #[async_trait]
 impl DeviceStore for MyCustomStore {
@@ -699,6 +700,22 @@ impl DeviceStore for MyCustomStore {
 
 See [Store API reference](/api/store#device-store) for all DeviceStore methods.
 
+### Step 6: implement MsgSecretStore
+
+Your backend also needs these required methods:
+
+```rust
+async fn put_msg_secrets(&self, entries: Vec<MsgSecretEntry>) -> Result<usize>;
+async fn get_stored_msg_secret(
+    &self, chat: &str, sender: &str, msg_id: &str,
+) -> Result<Option<StoredMessageSecret>>;
+async fn delete_expired_msg_secrets(&self, cutoff_timestamp: i64) -> Result<u32>;
+```
+
+Key records by chat, original sender, and message ID, scoped to your account. Persist both expiry and parent event time. Validate bytes when reading with `StoredMessageSecret::from_stored_bytes`; an invalid length is `StoreError::InvalidMessageSecret`, not a missing record. An unknown event time is `None` and a zero expiry means retain indefinitely.
+
+The single-secret write and byte-vector read have defaults built on these methods. Preserve the later deadline on an upsert, treating zero as indefinite, and the later nonzero parent timestamp. See [MsgSecretStore](/api/store#msgsecretstore) for the full contract.
+
 ### Using your custom backend
 
 ```rust
@@ -708,7 +725,7 @@ use whatsapp_rust::TokioRuntime;
 let backend = Arc::new(MyCustomStore::new("my://connection").await?);
 
 let bot = Bot::builder()
-    .with_backend(backend)
+    .with_backend_arc(backend)
     .with_transport_factory(transport_factory)
     .with_http_client(http_client)
     .with_runtime(TokioRuntime)
@@ -727,7 +744,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::time::Duration;
 use async_trait::async_trait;
-use wacore::runtime::{AbortHandle, Runtime};
+use whatsapp_rust::wacore::runtime::{AbortHandle, Runtime};
 
 pub struct MyRuntime;
 
@@ -852,7 +869,7 @@ To route all traffic through a proxy, you need to configure **both** layers.
 Use `TokioWebSocketTransportFactory::with_connector` to supply a custom TLS `Connector` — for example, adding custom CA certificates or client certificates:
 
 ```rust
-use whatsapp_rust_tokio_transport::{TokioWebSocketTransportFactory, Connector};
+use whatsapp_rust::transport::{TokioWebSocketTransportFactory, Connector};
 use tokio_rustls::TlsConnector;
 use rustls::RootCertStore;
 use std::sync::Arc;
@@ -891,8 +908,8 @@ See [Transport API reference](/api/transport#with_origin) for details.
 For full proxy support (SOCKS5, HTTP CONNECT, etc.), implement the `TransportFactory` trait directly. Establish the WebSocket connection through your proxy, then wrap it with `from_websocket`:
 
 ```rust
-use whatsapp_rust_tokio_transport::from_websocket;
-use wacore::net::{Transport, TransportEvent, TransportFactory};
+use whatsapp_rust::transport::from_websocket;
+use whatsapp_rust::wacore::net::{Transport, TransportEvent, TransportFactory};
 use async_trait::async_trait;
 use std::sync::Arc;
 
@@ -930,7 +947,7 @@ impl TransportFactory for ProxyTransportFactory {
 Use `UreqHttpClient::with_agent` to supply a pre-configured `ureq::Agent` with proxy settings:
 
 ```rust
-use whatsapp_rust_ureq_http_client::UreqHttpClient;
+use whatsapp_rust::http::UreqHttpClient;
 use ureq::config::Config;
 
 let agent: ureq::Agent = Config::builder()
@@ -976,7 +993,7 @@ Implement the `Transport` trait for custom network transports:
 
 ```rust
 use async_trait::async_trait;
-use wacore::net::Transport;
+use whatsapp_rust::wacore::net::Transport;
 
 pub struct MyCustomTransport {
     // Your transport implementation
@@ -1002,7 +1019,7 @@ See [Transport API reference](/api/transport) for full trait details.
 Implement `TransportFactory` to create transport instances:
 
 ```rust
-use wacore::net::{TransportFactory, TransportEvent};
+use whatsapp_rust::wacore::net::{TransportFactory, TransportEvent};
 use async_channel::Receiver;
 use std::sync::Arc;
 
@@ -1043,7 +1060,7 @@ See [Transport API reference](/api/transport#transport-factory) for factory deta
 ### Transport Events
 
 ```rust
-use wacore::net::DisconnectReason;
+use whatsapp_rust::wacore::net::DisconnectReason;
 
 // TransportEvent (from wacore::net) — shown here for reference.
 pub enum TransportEvent {
@@ -1083,7 +1100,7 @@ Media download and upload read `status_code` off the `Ok` response to refresh a 
 
 ```rust
 use whatsapp_rust::http::{HttpClient, HttpRequest, HttpResponse};
-use wacore::net::StreamingHttpResponse;
+use whatsapp_rust::wacore::net::StreamingHttpResponse;
 use async_trait::async_trait;
 
 pub struct MyCustomHttpClient {
@@ -1142,7 +1159,7 @@ See [Store API reference](/api/store#sqlite-store) for the SQLite implementation
 ```rust
 use whatsapp_rust::store::SqliteStore;
 
-let backend = Arc::new(SqliteStore::new("whatsapp.db").await?);
+let backend = Arc::new(SqliteStore::open("whatsapp.db").await?);
 ```
 
 <Note>
@@ -1295,14 +1312,16 @@ let bot = Bot::builder()
     .with_transport_factory(transport)
     .with_http_client(http_client)
     .with_runtime(TokioRuntime)
-    .with_cache_config(CacheConfig {
-        cache_stores: CacheStores {
-            group_cache: Some(redis.clone()),
-            device_registry_cache: Some(redis.clone()),
-            ..Default::default()
-        },
-        ..Default::default()
-    })
+    .with_cache_config({
+    let mut options = CacheConfig::default();
+    options.cache_stores = {
+    let mut options = CacheStores::default();
+    options.group_cache = Some(redis.clone());
+    options.device_registry_cache = Some(redis.clone());
+    options
+};
+    options
+})
     .build()
     .await?;
 ```
@@ -1310,9 +1329,10 @@ let bot = Bot::builder()
 Or route all pluggable caches to the same backend:
 
 ```rust
-let config = CacheConfig {
-    cache_stores: CacheStores::all(redis.clone()),
-    ..Default::default()
+let config = {
+    let mut options = CacheConfig::default();
+    options.cache_stores = CacheStores::all(redis.clone());
+    options
 };
 ```
 
@@ -1352,7 +1372,7 @@ let backend = MyCustomStore::new(connection_string);
 ### Implement proper error handling
 
 ```rust
-use wacore::store::error::{Result, StoreError};
+use whatsapp_rust::wacore::store::error::{Result, StoreError};
 
 async fn load_session(&self, address: &str) -> Result<Option<Vec<u8>>> {
     match self.connection.query("SELECT ...", &[address]).await {

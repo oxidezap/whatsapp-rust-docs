@@ -15,168 +15,43 @@ let polls = client.polls();
 
 ## Methods
 
+
 ### create
 
-Create a new poll in a chat.
-
 ```rust
-pub async fn create(
-    &self,
-    to: &Jid,
-    name: &str,
-    options: &[String],
-    selectable_count: u32,
-) -> Result<(SendResult, Vec<u8>), PollError>
+let options = vec!["Yes".to_string(), "No".to_string()];
+let created = client.polls().create(&chat, "Do you agree?", &options, 1).await?;
+println!("{}", created.send_result().message_id);
 ```
 
-<ParamField path="to" type="&Jid" required>
-  Recipient JID. Can be a direct message or group chat.
-</ParamField>
-
-<ParamField path="name" type="&str" required>
-  Poll question or title.
-</ParamField>
-
-<ParamField path="options" type="&[String]" required>
-  List of poll options. Must have between 2 and 12 entries, with no duplicates.
-</ParamField>
-
-<ParamField path="selectable_count" type="u32" required>
-  Maximum number of options a voter can select. Must be between 1 and the number of options. When set to 1, creates a single-select poll (uses `poll_creation_message_v3`). When greater than 1, creates a multi-select poll (uses `poll_creation_message`).
-</ParamField>
-
-<ResponseField name="(send_result, message_secret)" type="(SendResult, Vec<u8>)">
-  A tuple containing a `SendResult` (with `message_id`, `to`, and `message_key()`) and a 32-byte random secret. The `message_secret` is required to decrypt votes — store it securely. See [SendResult](/api/send#sendresult) for details.
-</ResponseField>
-
-**Example:**
-
-```rust
-let chat_jid: Jid = "15551234567@s.whatsapp.net".parse()?;
-
-let options = vec![
-    "Yes".to_string(),
-    "No".to_string(),
-    "Maybe".to_string(),
-];
-
-let (result, secret) = client
-    .polls()
-    .create(&chat_jid, "Do you agree?", &options, 1)
-    .await?;
-
-println!("Poll sent with ID: {}", result.message_id);
-```
+Returns `Result<CreatedPoll, PollError>`. A poll accepts 2 to 12 distinct options and a selectable count from 1 through the option count. Single-select and multi-select content use their corresponding protobuf creation form.
 
 ### create_quiz
 
-Create a quiz poll — a single-select poll with exactly one correct answer. Quizzes are inherently single-select (WhatsApp Web forces `selectableOptionsCount = 1`); the chosen option is sent as the poll's `correctAnswer` and `poll_type` is set to `QUIZ`.
-
 ```rust
-pub async fn create_quiz(
-    &self,
-    to: &Jid,
-    name: &str,
-    options: &[String],
-    correct_index: usize,
-) -> Result<(SendResult, Vec<u8>), PollError>
+let created = client.polls().create_quiz(&chat, "Choose the correct answer", &options, 0).await?;
 ```
 
-<ParamField path="to" type="&Jid" required>
-  Recipient JID. Can be a direct message or group chat.
-</ParamField>
-
-<ParamField path="name" type="&str" required>
-  Quiz question or title.
-</ParamField>
-
-<ParamField path="options" type="&[String]" required>
-  List of answer options (2–12 entries, no duplicates).
-</ParamField>
-
-<ParamField path="correct_index" type="usize" required>
-  0-based index into `options` of the correct answer. Out-of-range indices return an error.
-</ParamField>
-
-<ResponseField name="(send_result, message_secret)" type="(SendResult, Vec<u8>)">
-  Same shape as [`create`](#create): a [`SendResult`](/api/send#sendresult) plus the 32-byte secret needed to decrypt votes. Votes are cast, decrypted, and aggregated exactly like a regular single-select poll.
-</ResponseField>
-
-**Example:**
-
-```rust
-let chat_jid: Jid = "15551234567@s.whatsapp.net".parse()?;
-
-let options = vec![
-    "Paris".to_string(),
-    "London".to_string(),
-    "Berlin".to_string(),
-];
-
-// The correct answer is "Paris" (index 0).
-let (result, secret) = client
-    .polls()
-    .create_quiz(&chat_jid, "Capital of France?", &options, 0)
-    .await?;
-```
+Returns `CreatedPoll`. The correct index is zero-based and must be in range. A quiz is single-select.
 
 ### vote
 
-Cast a vote on an existing poll.
-
-```rust
-pub async fn vote(
-    &self,
-    chat_jid: &Jid,
-    poll_msg_id: &str,
-    poll_creator_jid: &Jid,
-    message_secret: &[u8],
-    option_names: &[String],
-) -> Result<SendResult, PollError>
-```
-
-<ParamField path="chat_jid" type="&Jid" required>
-  Chat JID where the poll was sent.
-</ParamField>
-
-<ParamField path="poll_msg_id" type="&str" required>
-  Message ID of the original poll creation message.
-</ParamField>
-
-<ParamField path="poll_creator_jid" type="&Jid" required>
-  JID of the user who created the poll.
-</ParamField>
-
-<ParamField path="message_secret" type="&[u8]" required>
-  The 32-byte secret returned by `create`. Required for vote encryption.
-</ParamField>
-
-<ParamField path="option_names" type="&[String]" required>
-  Names of the selected options. Pass an empty slice to clear your vote.
-</ParamField>
-
-<ResponseField name="SendResult" type="SendResult">
-  Result containing the message ID and recipient JID. See [SendResult](/api/send#sendresult).
-</ResponseField>
-
-**Example:**
-
 ```rust
 let selected = vec!["Yes".to_string()];
-
-let vote_result = client
-    .polls()
-    .vote(
-        &chat_jid,
-        &poll_msg_id,
-        &poll_creator_jid,
-        &message_secret,
-        &selected,
-    )
-    .await?;
-
-println!("Vote sent with ID: {}", vote_result.message_id);
+client.polls().vote(&created.poll_ref()?, &selected).await?;
 ```
+
+Use `vote(&PollRef, &[String])`. An empty selection clears the vote. `vote_raw` accepts explicit chat, original ID, crypto creator, raw secret, and selected names for interop; it validates the secret and ID first.
+
+## Creation references
+
+`CreatedPoll` owns the original send result, actual crypto creator, and validated `MessageSecret`. Read `send_result()`, `creator()`, `secret()`, or `poll_ref()`. `into_parts()` explicitly returns those owned values. Creation debug output is redacted; explicitly logging its `SendResult` can expose the protobuf's secret.
+
+For received or stored polls, construct `PollRef::new(message_ref, &original_creator, &secret)?`. The host must associate the correct original identity and 32-byte secret. Shape validation does not prove association, and a later PN/LID alias is not a substitute for the cryptographic creator.
+
+`StoredMessageSecret` validates bytes at the backend read boundary and preserves an optional creation timestamp. Reject malformed retained bytes as a storage error instead of returning invalid key material. See [storage secret reads](/api/store#msgsecretstore).
+
+`decrypt_vote_ref(PollVoteCiphertext, &PollRef, &voter)` uses the same creation reference. Low-level `decrypt_vote` and `aggregate_votes` remain available for raw ciphertext and stored metadata.
 
 ### decrypt_vote
 
@@ -185,8 +60,7 @@ Decrypt an encrypted poll vote.
 ```rust
 pub async fn decrypt_vote(
     &self,
-    enc_payload: &[u8],
-    enc_iv: &[u8],
+    ciphertext: PollVoteCiphertext<'_>,
     message_secret: &[u8],
     poll_msg_id: &str,
     poll_creator_jid: &Jid,
@@ -195,7 +69,7 @@ pub async fn decrypt_vote(
 ```
 
 <Note>
-Since v0.6 this is an `async` instance method (`&self`) rather than a static helper. The client uses its LID↔PN cache to resolve the voter against the poll creator's namespace and falls back to the opposite namespace if the first attempt fails — both encrypt and decrypt now address the vote with the same JID family as the poll itself, so votes authored across LID/PN migrations still decrypt. Update old call sites: `Polls::decrypt_vote(...)` → `client.polls().decrypt_vote(...).await?`.
+The instance methods consult known PN/LID mappings and try creator and voter aliases independently. Preserve the original crypto creator when persisting a poll reference.
 </Note>
 
 <ParamField path="enc_payload" type="&[u8]" required>
@@ -229,13 +103,12 @@ Since v0.6 this is an `async` instance method (`&self`) rather than a static hel
 **Example:**
 
 ```rust
-use whatsapp_rust::Polls;
+use whatsapp_rust::{Polls, PollVoteCiphertext};
 
 let selected_hashes = client
     .polls()
     .decrypt_vote(
-        &enc_payload,
-        &enc_iv,
+        PollVoteCiphertext { enc_payload: &enc_payload, enc_iv: &enc_iv },
         &message_secret,
         "3EB0ABC123",
         &poll_creator_jid,
@@ -252,7 +125,7 @@ Decrypt multiple votes and tally results per option. Later votes from the same v
 pub async fn aggregate_votes(
     &self,
     poll_options: &[String],
-    votes: &[(&Jid, &[u8], &[u8])],
+    votes: &[(&Jid, PollVoteCiphertext<'_>)],
     message_secret: &[u8],
     poll_msg_id: &str,
     poll_creator_jid: &Jid,
@@ -260,15 +133,15 @@ pub async fn aggregate_votes(
 ```
 
 <Note>
-Also async + `&self` since v0.6 for the same LID↔PN reasons. Migrate `Polls::aggregate_votes(...)` → `client.polls().aggregate_votes(...).await?`.
+The instance methods consult known PN/LID mappings and try creator and voter aliases independently. Preserve the original crypto creator when persisting a poll reference.
 </Note>
 
 <ParamField path="poll_options" type="&[String]" required>
   The original poll option names (in order).
 </ParamField>
 
-<ParamField path="votes" type="&[(&Jid, &[u8], &[u8])]" required>
-  Slice of `(voter_jid, enc_payload, enc_iv)` tuples, ordered oldest-first.
+<ParamField path="votes" type="&[(&Jid, PollVoteCiphertext)]" required>
+  Slice of `(voter_jid, PollVoteCiphertext)` tuples, ordered oldest-first.
 </ParamField>
 
 <ParamField path="message_secret" type="&[u8]" required>
@@ -347,7 +220,7 @@ The `wacore::poll` module exposes the cryptographic primitives used internally:
 | `encrypt_poll_vote(hashes, key, stanza_id, voter) -> (Vec<u8>, [u8; 12])` | AES-256-GCM encryption |
 | `decrypt_poll_vote(payload, iv, key, stanza_id, voter) -> Vec<Vec<u8>>` | AES-256-GCM decryption |
 | `decrypt_poll_vote_with_secret(payload, iv, secret, stanza_id, creator, voter) -> Vec<Vec<u8>>` | Single-namespace convenience: derives the vote key from the poll secret and decrypts |
-| `decrypt_poll_vote_with_fallback(payload, iv, secret, stanza_id, creator, voter, alt_creator, alt_voter) -> Vec<Vec<u8>>` | Tries the canonical (creator, voter) namespace first and falls back to `(alt_creator, alt_voter)` so LID/PN-mixed votes still decrypt |
+| `decrypt_poll_vote_with_fallback(ciphertext, secret, stanza_id, primary, fallback) -> Vec<Vec<u8>>` | Tries the canonical (creator, voter) namespace first and falls back to `(alt_creator, alt_voter)` so LID/PN-mixed votes still decrypt |
 
 ## Decrypting secret-encrypted envelopes
 
@@ -417,6 +290,8 @@ pub enum PollError {
     Send(#[from] SendError),
     #[error("invalid poll: {0}")]
     InvalidPoll(String),
+    InvalidSecret(InvalidMessageSecret),
+    Reference(MessageRefError),
     #[error("client is not logged in")]
     NotLoggedIn,
     #[error("poll vote crypto failed: {0}")]
@@ -428,7 +303,7 @@ pub enum PollError {
 use whatsapp_rust::PollError;
 
 match client.polls().create(jid, "Question?", &options, 1).await {
-    Ok((result, secret)) => println!("Poll created: {}", result.message_id),
+    Ok(created) => println!("Poll created: {}", created.send_result().message_id),
     Err(PollError::InvalidPoll(msg)) => eprintln!("Invalid poll: {}", msg),
     Err(PollError::Send(e)) => eprintln!("Send failed: {}", e),
     Err(e) => eprintln!("Error: {}", e),

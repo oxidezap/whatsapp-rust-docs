@@ -1,0 +1,37 @@
+---
+title: "Pictures"
+description: "Look up user, bot, group, and community pictures with explicit targets"
+---
+
+## lookup
+
+```rust
+use whatsapp_rust::{ProfilePictureRequest, ProfilePictureTarget, ProfilePictureType, ProfilePictureLookup};
+
+let request = ProfilePictureRequest::new(
+    ProfilePictureTarget::Contact(&jid), ProfilePictureType::Preview,
+).existing_id(Some("CACHED-ID"));
+match client.pictures().lookup(request).await? {
+    ProfilePictureLookup::Found(picture) => println!("{}", picture.url),
+    ProfilePictureLookup::Unchanged => {},
+    ProfilePictureLookup::NotFound => {},
+    ProfilePictureLookup::NotAuthorized => {},
+    _ => {},
+}
+```
+
+Use `Contact`, `Group`, or `Community` targets and `Preview` or `Full` size. Request metadata remains borrowed for the lookup. Conditional `existing_id` preserves an unchanged result; do not replace it with a missing-picture value.
+
+## ProfilePictureRequest
+
+Construct with `new(target, picture_type)`. Fluent setters accept optional `existing_id`, `common_gid`, `invite`, `persona_id`, and `timeout`. `target()` reads the chosen target.
+
+Privacy tokens apply only to eligible user/bot targets; they are not inferred from a community/group target. Group invite and common-group fallback metadata are explicit.
+
+Lookup returns `ContactError` on request failures. Server outcomes remain `Found`, `Unchanged`, `NotFound`, `NotAuthorized`,; A 429 remains `ContactError::Iq` with the server rejection and optional backoff.
+
+## Picture changes
+
+Set or remove your picture through `client.profile()`. Group picture writes stay on `client.groups()`, and channel writes on `client.newsletter()`. An empty set payload fails locally; use the explicit removal method. The library checks non-emptiness, not JPEG validity or crop dimensions.
+
+Group batch reads remain `groups().get_profile_pictures(...)`.

@@ -9,7 +9,7 @@ description: "Protocol Buffers definitions for WhatsApp messages"
 
 ```toml
 [dependencies]
-waproto = "0.7"
+waproto = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "54ce6cd9007f4361a07dbad50718973bbf56e2e9" }
 ```
 
 ## Structure
@@ -31,7 +31,7 @@ The build writes `whatsapp.rs` and `tags.rs` to `OUT_DIR`. Do not commit these f
 All protobuf types are under the `waproto::whatsapp` module:
 
 ```rust
-use waproto::whatsapp as wa;
+use whatsapp_rust::waproto::whatsapp as wa;
 
 let message = wa::Message {
     conversation: Some("Hello, World!".to_string()),
@@ -46,8 +46,8 @@ Sub-message fields (nested protobuf messages) are `buffa::MessageField<T>`, not 
 </Note>
 
 ```rust
-use waproto::buffa::MessageField;
-use waproto::whatsapp as wa;
+use whatsapp_rust::waproto::buffa::MessageField;
+use whatsapp_rust::waproto::whatsapp as wa;
 
 let img = wa::Message {
     image_message: MessageField::some(wa::message::ImageMessage {
@@ -115,8 +115,8 @@ pub struct Message {
 **Usage in main library:**
 
 ```rust
-use waproto::buffa::MessageField;
-use waproto::whatsapp as wa;
+use whatsapp_rust::waproto::buffa::MessageField;
+use whatsapp_rust::waproto::whatsapp as wa;
 
 // Construct a text message
 let msg = wa::Message {
@@ -660,7 +660,7 @@ Enable them in your `Cargo.toml`:
 
 ```toml
 [dependencies]
-waproto = { version = "0.7", features = ["serde-snake-case"] }
+waproto = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "54ce6cd9007f4361a07dbad50718973bbf56e2e9", features = ["serde-snake-case"] }
 ```
 
 ### Default behavior (no feature flags)
@@ -716,7 +716,7 @@ let json = r#"{"account_type": "enterprise"}"#;
 The build generates the `waproto::tags` module from the compiled protobuf descriptor. You get one `pub mod` per proto message with one `pub const FIELD_NAME: u32 = N;` per field. Nested messages produce nested modules.
 
 ```rust
-use waproto::tags;
+use whatsapp_rust::waproto::tags;
 
 // Field numbers derived directly from whatsapp.proto
 let _ = tags::web_message_info::KEY;           // 1
@@ -757,8 +757,8 @@ The `generate` feature flag was removed. Code generation is now always-on and do
 ### Constructing Messages
 
 ```rust
-use waproto::buffa::MessageField;
-use waproto::whatsapp as wa;
+use whatsapp_rust::waproto::buffa::MessageField;
+use whatsapp_rust::waproto::whatsapp as wa;
 
 // Text message
 let text = wa::Message {
@@ -820,8 +820,8 @@ match (&proto_msg.conversation, proto_msg.image_message.as_option(), proto_msg.v
 See [Media Handling](/guides/media-handling) for complete examples.
 
 ```rust
-use waproto::whatsapp as wa;
-use wacore::download::{Downloadable, MediaType};
+use whatsapp_rust::waproto::whatsapp as wa;
+use whatsapp_rust::wacore::download::{Downloadable, MediaType};
 
 if let Some(img) = message.image_message.as_option() {
     // Use the Downloadable trait to download and decrypt
@@ -853,9 +853,9 @@ wacore provides utilities for working with waproto messages:
 Example:
 
 ```rust
-use waproto::buffa::MessageField;
-use wacore::proto_helpers;
-use waproto::whatsapp as wa;
+use whatsapp_rust::waproto::buffa::MessageField;
+use whatsapp_rust::wacore::proto_helpers;
+use whatsapp_rust::waproto::whatsapp as wa;
 
 // Convert internal JID to protobuf MessageKey
 let key = proto_helpers::message_key(&jid, &message_id, from_me);

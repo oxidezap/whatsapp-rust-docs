@@ -19,98 +19,48 @@ The Client handles:
 Most users should use the [`Bot`](/api/bot) builder instead of creating a Client directly. The Bot provides a simplified API with sensible defaults.
 </Note>
 
-## Creating a Client
+
+## Creating a client
+
+Configure the low-level builder with runtime, persistence manager, transport factory, and HTTP client. Missing dependencies return `ClientBuilderError`.
 
 ```rust
-use whatsapp_rust::Client;
-use whatsapp_rust::TokioRuntime;
-use std::sync::Arc;
+use whatsapp_rust::{Client, ClientOptions, TokioRuntime};
 
-let (client, sync_receiver) = Client::new(
-    Arc::new(TokioRuntime),
-    persistence_manager,
-    transport_factory,
-    http_client,
-    None, // version override
-).await;
+let mut options = ClientOptions::default();
+options.background_saver_interval = Some(std::time::Duration::from_secs(30));
+let client = Client::builder()
+    .with_options(options)
+    .with_runtime(TokioRuntime)
+    .with_persistence_manager(persistence_manager)
+    .with_transport_factory_arc(transport_factory)
+    .with_http_client_arc(http_client)
+    .build().await?
+    .into_client();
 ```
 
-<ParamField path="runtime" type="Arc<dyn Runtime>" required>
-  Async runtime for spawning tasks, sleeping, and blocking operations
-</ParamField>
+`ClientBuild::into_client()` starts the default major-sync worker. To own that worker, use `into_parts()` and drain the returned receiver with `process_sync_task`. The low-level builder starts no periodic saver by default. `BotBuilder` starts with a 30-second saver.
 
-<ParamField path="persistence_manager" type="Arc<PersistenceManager>" required>
-  State manager for device credentials, sessions, and app state
-</ParamField>
-
-<ParamField path="transport_factory" type="Arc<dyn TransportFactory>" required>
-  Factory for creating WebSocket connections
-</ParamField>
-
-<ParamField path="http_client" type="Arc<dyn HttpClient>" required>
-  HTTP client for media operations and version fetching
-</ParamField>
-
-<ParamField path="override_version" type="Option<(u32, u32, u32)>">
-  Optional WhatsApp version override (primary, secondary, tertiary)
-</ParamField>
-
-<ParamField path="Returns" type="(Arc<Client>, Receiver<MajorSyncTask>)">
-  Returns the client Arc and a receiver for history/app state sync tasks
-</ParamField>
-
-### Creating with custom cache configuration
-
-```rust
-use whatsapp_rust::{Client, CacheConfig, CacheEntryConfig};
-use whatsapp_rust::TokioRuntime;
-use std::time::Duration;
-
-let cache_config = CacheConfig {
-    group_cache: CacheEntryConfig::new(None, 500), // No TTL
-    ..Default::default()
-};
-
-let (client, sync_receiver) = Client::new_with_cache_config(
-    Arc::new(TokioRuntime),
-    persistence_manager,
-    transport_factory,
-    http_client,
-    None,
-    cache_config,
-).await;
-```
-
-See [Bot - Cache Configuration Reference](/api/bot#cache-configuration-reference) for available cache options.
-
----
+`ClientOptions` is extensible. Start with `Default` and assign fields; do not construct a literal. It shares version, cache, history-sync, AB props, presence, Noise verification, prekey, resend, and saver policy across builders. `with_options` on Client and `with_client_options` on Bot replace the entire configuration, including saver policy. Later individual setters override that value. Dependencies and callbacks remain separate.
 
 ## Connection Management
+
 
 ### run
 
 ```rust
-pub async fn run(self: &Arc<Self>)
+pub async fn run(self: &Arc<Self>) -> RunCompletionReason
 ```
 
-Main event loop that manages connection lifecycle with automatic reconnection.
+Supervise connection and reconnection until terminal shutdown or a classified exit. Keep the returned outcome: `ShutdownRequested`, `AutoReconnectDisabled { connection, connect_error, protocol_error }`, `Stopped`, or `AlreadyRunning`. Match extensible enums with a fallback arm.
 
-Runs indefinitely until:
-- `disconnect()`, `logout()`, or `signal_shutdown_sync()` is called
-- Auto-reconnect is disabled and connection fails
-- Client receives a fatal stream error (401 unauthorized, 409 conflict, or 516 device removed)
+`ProtocolTerminalReason` distinguishes stream codes, connect failures, and conflicts. `ConflictKind` distinguishes `Replaced`, `DeviceRemoved`, and `Unknown`; an unknown conflict is not proof of credential removal.
 
-<Note>
-If you call `disconnect()`, `logout()`, or `signal_shutdown_sync()` while `run()` is waiting out its reconnect backoff, the client interrupts the wait immediately. The backoff can otherwise run up to the 900s cap (see [Auto-Reconnection](#auto-reconnection)). So without this, awaiting `run()` right after requesting a stop could look like a 15-minute hang. For example, [`bot.run().await?`](/api/bot#run) returns a `BotHandle` immediately — awaiting that handle waits on this same `run()`. A per-connection shutdown does not cut the backoff short; that's the kind `run()` itself reconnects from. Only the three terminal calls above interrupt the wait.
-</Note>
+### Connect admission
 
-**Example:**
-```rust
-let client_clone = client.clone();
-tokio::spawn(async move {
-    client_clone.run().await;
-});
-```
+`with_connect_admission` and `with_connect_admission_arc` install a fast synchronous `ConnectAdmission::delay() -> Duration` callback. The run loop consults it before each dial, including the first and forced reconnects, after normal backoff and pause checks. Its delay is outside connect timeouts. Direct `connect()` calls bypass it.
+
+Pause or shutdown abandons the reservation; resume asks for a new decision. There is no refund callback. Keep host budget bookkeeping local and nonblocking. The library retains its reconnect and rate-limit penalties.
 
 ### connect
 
@@ -122,27 +72,15 @@ Establishes WebSocket connection and performs Noise Protocol handshake. Both the
 
 The Noise handshake response also has a separate **20-second timeout** (`NOISE_HANDSHAKE_RESPONSE_TIMEOUT`).
 
-<Warning>
-**Breaking change in PR #1258:** `connect()` now resolves to `Result<Connection<'_>, ConnectError>` instead of `Result<(), ConnectError>`. Establishing the socket is all `connect()` does — the server's frames queue in the transport channel until the returned [`Connection`](#connection) is driven with [`read_until_disconnected()`](#connection). `Connection` is `#[must_use]`, so the old `client.connect().await?;` now reports an `unused_must_use` warning instead of silently doing nothing (a client that connects and then just waits for events used to wait forever, with no timeout, error, or log to explain why).
+Drive the returned connection with `client.connect().await?.read_until_disconnected().await`, or use `client.run().await` to supervise reconnects. Merely opening a socket does not process server frames.
 
-Migration:
-```rust
-// Before
-client.connect().await?;
-
-// After: drive this one connection directly...
-client.connect().await?.read_until_disconnected().await;
-// ...or, for a session that reconnects, use run() instead of connect()
-client.run().await;
-```
-</Warning>
 
 **Errors (`ConnectError`):**
 - `AlreadyConnected` - a connection is already up, or another `connect()` attempt is already in flight
 - `NotActivated` - construction never activated (only reachable with the `client-lifecycle` feature)
-- `Shutdown` - added in PR #1258. The client has already been shut down (`disconnect()`, `logout()`, or `signal_shutdown_sync()`); shutdown is final, so build a new client rather than reconnecting this one
+- `Shutdown` - added in PR #1258. The client has already been shut down (`shutdown()`, `logout()`, or `signal_shutdown_sync()`); shutdown is final, so build a new client rather than reconnecting this one
 - `Paused` - added in PR #1265. [`pause()`](#pause) is in effect. Unlike `Shutdown` this is not final — [`resume()`](#resume) lifts it and `connect()` works again. `connect()` rechecks the pause at every checkpoint of the connect graph, so an attempt already in flight when `pause()` lands is retracted rather than published.
-- `Timeout { stage, timeout }` - the version fetch or the transport open ran out of time, independently, each under the same 20s budget (`ConnectStage::VersionFetch`/`Transport`). `connect()` itself never reports `ConnectStage::Socket` or `Ready` — those are only produced by `wait_for_socket()`/`wait_for_connected()` below.
+- `Timeout { stage, timeout }` - the version fetch or the transport open ran out of time, independently, each under the same 20s budget (`ConnectStage::VersionFetch`/`Transport`). `connect()` itself never reports `ConnectStage::Socket` or `Ready` — those are only produced by `wait_for_socket_ready()`/`wait_for_session_ready()` below.
 - `Version(anyhow::Error)` / `Transport(anyhow::Error)` - app version resolution or transport open failed outright
 - `Handshake(HandshakeError)` - the Noise handshake failed after the transport was up; check `HandshakeError::is_transient()` to decide whether a retry is worthwhile
 
@@ -164,47 +102,38 @@ Added in PR #1258. An established connection that nothing is reading yet — `co
 [`run()`](#run) performs the same read inside its reconnect loop; reach for `Connection` directly only when a session must not outlive its first connection.
 
 <Warning>
-Dropping a `Connection` without reading it logs a warning and leaves it unread — the socket stays open and the client keeps reporting itself connected, so the next `connect()` is refused until `disconnect()` releases it. Dropping the `read_until_disconnected()` future mid-read (e.g. a wrapping timeout) stops reading without tearing the connection down either, matching what dropping `run()`'s future has always done.
+Dropping a `Connection` without reading it logs a warning and leaves it unread — the socket stays open and the client keeps reporting itself connected, so the next `connect()` is refused until `shutdown()` releases it. Dropping the `read_until_disconnected()` future mid-read (e.g. a wrapping timeout) stops reading without tearing the connection down either, matching what dropping `run()`'s future has always done.
 </Warning>
+
 
 ### logout
 
 ```rust
-pub async fn logout(self: &Arc<Self>)
+pub async fn logout(self: &Arc<Self>) -> LogoutReport
 ```
 
-Deregisters this companion device from WhatsApp and disconnects. This sends a device removal IQ to the server, disables auto-reconnect, disconnects the transport, and emits a `LoggedOut` event.
+Attempt companion deregistration, then perform terminal cleanup even when that request fails. Inspect `deregistration` separately from `shutdown`: `Confirmed`, `Failed { source }`, or `NotAttempted` with an offline or missing-identity reason. Confirmation is an IQ outcome, not proof that local credentials were erased.
 
-<Note>
-As of PR #1090, `logout()` is infallible (`()`, not `Result<()>`). The deregistration IQ is best-effort — it cannot be sent at all while offline — and the local teardown runs either way, so there was nothing for a caller to branch on. A failed IQ is logged at `warn`.
-</Note>
-
-<Warning>
-This does **not** wipe stored keys or credentials. To fully clear session data, delete the storage backend after calling `logout()`.
-</Warning>
-
-**Example:**
-```rust
-// Logout and clean up
-client.logout().await;
-
-// Optionally delete stored credentials
-// std::fs::remove_dir_all("./whatsapp_data")?;
-```
-
-**Behavior:**
-1. Disables auto-reconnect
-2. Sends a `RemoveCompanionDeviceSpec` IQ to deregister the companion device (if connected); a failure here is logged, not returned
-3. Disconnects the transport
-4. Emits `Event::LoggedOut` with `reason: ConnectFailureReason::LoggedOut`
-
-### disconnect
+### shutdown
 
 ```rust
-pub async fn disconnect(self: &Arc<Self>)
+pub async fn shutdown(self: &Arc<Self>) -> ShutdownReport
 ```
 
-Disconnects gracefully and disables auto-reconnect. It signals shutdown (sets the expected-disconnect and stop flags, fires the shutdown notifiers), flushes pending outbound receipts and device state, closes the transport, and then runs `cleanup_connection_state()`. That cleanup resets all connection-scoped state — invalidating per-chat message queues so stale workers exit, flushing then clearing the signal cache (so pending sender-key/identity writes are persisted, not lost), draining pending IQ waiters, and resetting offline sync state. The same `cleanup_connection_state()` also runs from `run()` after the message loop exits; it is idempotent and race-tolerant, so whichever path wins, connection-scoped state is reset once in effect. See [disconnect cleanup](/concepts/architecture#disconnect-cleanup) for the full list of resources cleaned up.
+Shutdown is terminal; create a new client for a new session. The report exposes `inbound`, `outbound`, `device`, `signal_settle`, and `message_secrets`. Inspect storage errors and timeout/interruption outcomes. A completed inbound drain can leave durable replay rows when a hook fails; it does not mean callbacks succeeded. Outbound guards draining does not prove message delivery.
+
+This invocation does not join detached host tasks or callback workers. `pause()` is the reversible way to stop a connection.
+
+### store_release
+
+```rust
+let released = client.store_release();
+let report = client.shutdown().await;
+drop(client);
+released.wait().await;
+```
+
+The sticky `StoreRelease` signal observes release of crate-owned backend holds, including detached saver work. Drop client and persistence-manager owners before waiting. Host backend clones, returned device snapshots, backend-owned I/O, and other stores can outlive this signal. Inspect cleanup results separately; release is not a durability verdict or database-close guarantee.
 
 ### signal_shutdown_sync
 
@@ -233,7 +162,7 @@ Use this for:
 client.reconnect().await;
 
 // Wait for the new connection to be ready
-client.wait_for_connected(Duration::from_secs(30)).await?;
+client.wait_for_session_ready(Duration::from_secs(30)).await?;
 ```
 
 ### reconnect_immediately
@@ -275,7 +204,7 @@ client.pause().await;
 
 // ... later ...
 client.resume();
-client.wait_for_connected(Duration::from_secs(30)).await?;
+client.wait_for_session_ready(Duration::from_secs(30)).await?;
 ```
 
 ### resume
@@ -284,7 +213,7 @@ client.wait_for_connected(Duration::from_secs(30)).await?;
 pub fn resume(&self)
 ```
 
-Added in PR #1265. Releases a [`pause()`](#pause): the run loop reconnects at once, with no backoff owed for the offline window the application chose — provided `run()` is still driving the client with `enable_auto_reconnect` set (see the warning under [`pause()`](#pause); a pause that landed while auto-reconnect was disabled has already ended the loop, and `resume()` has no loop left to restart). Returns once the loop has been told, not once it is connected — wait for that with [`wait_for_connected()`](#wait_for_connected). A true no-op — no state change, no log, no notification — only on a client that was not paused to begin with. Calling it on a client that has since been [`disconnect()`](#disconnect)ed still clears the pause (`is_paused()` becomes `false`) and fires the session-state notifier, but that is all it does: it does not undo the shutdown or bring back a connection. `is_terminal()` stays `true`, and the next `connect()` still refuses with `ConnectError::Shutdown`. Safe to call while a `pause()` is still tearing down; it does not wait for the teardown to finish, since that teardown ends in an untimed socket close.
+Added in PR #1265. Releases a [`pause()`](#pause): the run loop reconnects at once, with no backoff owed for the offline window the application chose — provided `run()` is still driving the client with `enable_auto_reconnect` set (see the warning under [`pause()`](#pause); a pause that landed while auto-reconnect was disabled has already ended the loop, and `resume()` has no loop left to restart). Returns once the loop has been told, not once it is connected — wait for that with [`wait_for_session_ready()`](#wait_for_session_ready). A true no-op — no state change, no log, no notification — only on a client that was not paused to begin with. Calling it on a client that has since been [`disconnect()`](#disconnect)ed still clears the pause (`is_paused()` becomes `false`) and fires the session-state notifier, but that is all it does: it does not undo the shutdown or bring back a connection. `is_terminal()` stays `true`, and the next `connect()` still refuses with `ConnectError::Shutdown`. Safe to call while a `pause()` is still tearing down; it does not wait for the teardown to finish, since that teardown ends in an untimed socket close.
 
 ### is_paused
 
@@ -294,10 +223,10 @@ pub fn is_paused(&self) -> bool
 
 Added in PR #1265. Whether [`pause()`](#pause) is in effect and no connection will be opened by [`run()`](#run) until [`resume()`](#resume).
 
-### wait_for_socket
+### wait_for_socket_ready
 
 ```rust
-pub async fn wait_for_socket(
+pub async fn wait_for_socket_ready(
     &self,
     timeout: std::time::Duration
 ) -> Result<(), ConnectError>
@@ -313,10 +242,10 @@ Waits for the Noise socket to be ready (before login). Useful for pair code flow
   Ok if socket ready, `ConnectError::Timeout { stage: ConnectStage::Socket, timeout }` on timeout
 </ParamField>
 
-### wait_for_connected
+### wait_for_session_ready
 
 ```rust
-pub async fn wait_for_connected(
+pub async fn wait_for_session_ready(
     &self,
     timeout: std::time::Duration
 ) -> Result<(), ConnectError>
@@ -448,7 +377,7 @@ let code = client.pair_with_code(new_options).await?;
 ### set_passkey_authenticator
 
 <Note>
-  Enable the `passkey` feature before calling `set_passkey_authenticator`, `send_passkey_response`, or `send_passkey_confirmation` below — they don't exist without it (opt-in, off by default as of the next release after 0.7.0). See [Feature flags](/installation#feature-flags) and [Authentication — Passkey linking](/concepts/authentication#passkey-linking-shortcake_passkey).
+  Enable the `passkey` feature before calling `set_passkey_authenticator`, `send_passkey_response`, or `send_passkey_confirmation` below — they don't exist without it (opt-in, off by default). See [Feature flags](/installation#feature-flags) and [Authentication — Passkey linking](/concepts/authentication#passkey-linking-shortcake_passkey).
 </Note>
 
 ```rust
@@ -608,10 +537,10 @@ The client includes automatic reconnection handling with Fibonacci backoff.
 
 ```rust
 // Disable auto-reconnect (default: enabled)
-client.enable_auto_reconnect.store(false, Ordering::Relaxed);
+client.set_auto_reconnect(false);
 
 // Check current state
-let enabled = client.enable_auto_reconnect.load(Ordering::Relaxed);
+let enabled = client.auto_reconnect_enabled();
 ```
 
 The consecutive-failure counter used for Fibonacci backoff is internal; read it via [`client.stats().reconnect_errors`](#diagnostics) instead of a public field.
@@ -657,119 +586,12 @@ As of [#1263](https://github.com/oxidezap/whatsapp-rust/pull/1263), the client a
 
 ---
 
+
 ## Messaging
 
-### send_message
+Use `send(SendRequest)` and `edit_message(EditRequest)` for configurable operations. `send_message`, `send_text`, and `forward_message` are default shortcuts. Reactions, revokes, keep, pin, and unpin use `MessageRef`; channel actions use `NewsletterMessageRef`.
 
-```rust
-pub async fn send_message(
-    &self,
-    to: Jid,
-    message: wa::Message
-) -> Result<SendResult, SendError>
-```
-
-Sends an encrypted message to a chat.
-
-<ParamField path="to" type="Jid" required>
-  Recipient JID (user@s.whatsapp.net or group@g.us)
-</ParamField>
-
-<ParamField path="message" type="wa::Message" required>
-  Protobuf message content
-</ParamField>
-
-<ParamField path="Returns" type="Result<SendResult, SendError>">
-  A [`SendResult`](/api/send#sendresult) containing the `message_id` and destination `to` JID
-</ParamField>
-
-**Example:**
-```rust
-use waproto::whatsapp as wa;
-
-let message = wa::Message {
-    conversation: Some("Hello!".to_string()),
-    ..Default::default()
-};
-
-let result = client.send_message(jid, message).await?;
-println!("Sent message ID: {}", result.message_id);
-```
-
-### send_message_with_options
-
-```rust
-pub async fn send_message_with_options(
-    &self,
-    to: Jid,
-    message: wa::Message,
-    options: SendOptions
-) -> Result<SendResult, SendError>
-```
-
-Sends a message with advanced options like a custom message ID, extra stanza nodes, or ephemeral expiration.
-
-<ParamField path="options" type="SendOptions" required>
-  Configuration for message sending behavior. Supports `message_id` (override the auto-generated ID), `extra_stanza_nodes` (custom XML nodes on the stanza), and `ephemeral_expiration` (disappearing message duration in seconds).
-</ParamField>
-
-See [Send API reference](/api/send#sendoptions) for available options.
-
-### edit_message
-
-```rust
-pub async fn edit_message(
-    &self,
-    to: Jid,
-    original_id: impl Into<String>,
-    new_content: wa::Message
-) -> Result<SendResult, SendError>
-```
-
-Edits a previously sent message. `SendResult::message_id` is the edit's own fresh id, and `message` the `protocolMessage` this crate built. See [Send API reference](/api/send#edit_message).
-
-<ParamField path="original_id" type="String" required>
-  ID of the message to edit
-</ParamField>
-
-<ParamField path="new_content" type="wa::Message" required>
-  New message content
-</ParamField>
-
-### edit_message_with_options
-
-```rust
-pub async fn edit_message_with_options(
-    &self,
-    to: impl Into<Jid>,
-    original_id: impl Into<String>,
-    new_content: wa::Message,
-    options: EditOptions
-) -> Result<SendResult, SendError>
-```
-
-Edit-path counterpart of `send_message_with_options`. Accepts an [`EditOptions`](/api/send#editoptions) (built via `EditOptions::default().with_stanza_id(id)`) to pin the outer stanza id to an existing message's id (best-effort — server/client dependent) instead of the fresh id `edit_message` generates.
-
-See [Send API reference](/api/send#edit_message_with_options) for the full `EditOptions` type and its side-effect notes.
-
-### revoke_message
-
-```rust
-pub async fn revoke_message(
-    &self,
-    to: Jid,
-    message_id: impl Into<String>,
-    revoke_type: RevokeType
-) -> Result<SendResult, SendError>
-```
-
-Deletes a message. Use `Sender` to revoke your own message, or `Admin` to revoke another user's message as group admin. `SendResult::message_id` is the revoke's own fresh id, and `message` the `protocolMessage` it carried. See [Send API reference](/api/send#revoke_message).
-
-<ParamField path="revoke_type" type="RevokeType" required>
-  `RevokeType::Sender` (delete your own message) or `RevokeType::Admin { original_sender: Jid }` (admin revoke in groups)
-</ParamField>
-
----
+See [sending](/api/send) for typed IDs, request construction, raw interop paths, and result semantics.
 
 ## Feature APIs
 
@@ -852,7 +674,6 @@ Access group management operations.
 - `acknowledge(jid: &Jid)` - Acknowledge a group
 - `fetch_metadata_batch(jids: &[Jid])` - Batch fetch full group metadata for multiple groups
 - `get_profile_pictures(group_jids: Vec<Jid>, picture_type: PictureType)` - Batch fetch group profile pictures
-- `lookup_profile_picture(group_jid: &Jid, preview: bool, existing_id: Option<&str>)` - Fetch one group's picture with a typed outcome (`Found`, `Unchanged`, `NotFound`, `NotAuthorized`, `RateOverlimit`)
 - `lookup_community_profile_picture(community_jid: &Jid, preview: bool, existing_id: Option<&str>)` - Fetch a community parent group's picture over the community protocol
 
 **Example:**
@@ -929,9 +750,6 @@ Access contact operations.
 **Methods:**
 - `is_on_whatsapp(jids: &[Jid])` - Check if JIDs are registered on WhatsApp (supports PN and LID JIDs)
 - `get_user_info(jids: &[Jid])` - Get profile info for users by JID
-- `get_profile_picture(jid: &Jid, preview: bool)` - Get profile picture URL (preview or full size)
-- `lookup_profile_picture(jid: &Jid, preview: bool, existing_id: Option<&str>)` - Same fetch, but with a typed [`ProfilePictureLookup`](/api/contacts#profilepicturelookup) outcome instead of `Option`
-- `lookup_profile_picture_with_options(options: ProfilePictureLookupOptions<'_>)` - Full protocol surface: cache ID, group invite code, common group fallback, bot persona ID, timeout
 
 ### tc_token
 
@@ -1023,8 +841,7 @@ pub fn mex(&self) -> Mex<'_>
 Access Meta Exchange (GraphQL) operations.
 
 **Methods:**
-- `query(request: MexRequest)` - Execute a GraphQL query
-- `mutate(request: MexRequest)` - Execute a GraphQL mutation
+- `execute(request: MexRequest<V>)` - Execute a descriptor-bound query or mutation
 - `fetch_new_chat_message_capping_info()` - Fetch the new-chat message cap for the current cycle
 
 See [MEX API](/api/mex) for full documentation.
@@ -1118,7 +935,8 @@ Access poll operations.
 **Example:**
 ```rust
 let options = vec!["Yes".to_string(), "No".to_string()];
-let (msg_id, secret) = client.polls().create(&chat_jid, "Agree?", &options, 1).await?;
+let created = client.polls().create(&chat_jid, "Agree?", &options, 1).await?;
+let target = created.poll_ref()?;
 ```
 
 See [Polls API](/api/polls) for full documentation.
@@ -1194,41 +1012,12 @@ See [USync API](/api/usync) for the full `UsyncQuery`/`UsyncResponse` model and 
 
 ---
 
-## Public fields
 
-### http_client
+## Service and configuration access
 
-```rust
-pub http_client: Arc<dyn HttpClient>
-```
+Client implementation state is private. Use `http_client()` to borrow the injected `Arc<dyn HttpClient>`, `auto_reconnect_enabled()` and `set_auto_reconnect(bool)` for reconnect preference, and `has_enc_handler(&str)` to inspect installed custom encryption handlers. Configure those handlers through the builder; they are immutable after construction.
 
-The HTTP client used for media operations, version fetching, and other HTTP requests. This field is public and can be used directly for custom HTTP operations that share the same client configuration.
-
-### enable_auto_reconnect
-
-```rust
-pub enable_auto_reconnect: Arc<AtomicBool>
-```
-
-Controls whether the client automatically reconnects after an unexpected disconnection. Defaults to `true`. Set to `false` to disable auto-reconnect.
-
-### custom_enc_handlers
-
-```rust
-pub custom_enc_handlers: std::sync::OnceLock<HashMap<String, Arc<dyn EncHandler>>>
-```
-
-Custom handlers for encrypted message types. Set once at `Bot::build` and immutable afterward; read lock-free via `.get()`. Register handlers exclusively through `BotBuilder::with_enc_handler()` — direct mutation after build is not possible.
-
-### RECONNECT_BACKOFF_STEP
-
-```rust
-pub const RECONNECT_BACKOFF_STEP: u32 = 4;
-```
-
-The number of Fibonacci steps added to the backoff counter when `reconnect()` is called, creating an approximately 5-second offline window before the next connection attempt. This prevents tight reconnect loops after intentional disconnects.
-
----
+Disabling reconnect wakes backoff but does not close the current socket. Re-enabling does not clear terminal shutdown or a protocol verdict.
 
 ## Client Profile
 
@@ -1333,7 +1122,7 @@ Unified LID-PN lookup that auto-routes based on the JID type. Pass a phone numbe
 
 **Example:**
 ```rust
-use wacore_binary::jid::Jid;
+use whatsapp_rust::wacore_binary::jid::Jid;
 
 // Look up by phone number JID
 let pn_jid: Jid = "15551234567@s.whatsapp.net".parse()?;
@@ -1426,30 +1215,18 @@ If no event handlers are registered, the blob is not retained — only internal 
 pub async fn process_sync_task(self: &Arc<Self>, task: MajorSyncTask)
 ```
 
-Processes a `MajorSyncTask` received from the sync channel returned by `Client::new`. This is the public entry point for handling history sync and app state sync tasks.
+Use `Client::builder().build().await?` to obtain `ClientBuild`. `into_client()` starts the default major-sync worker. Use `into_parts()` only when your host owns the sole receiver and drains it:
 
-The method dispatches to the appropriate internal handler based on the task variant:
-- `MajorSyncTask::HistorySync` — downloads and processes history sync data
-- `MajorSyncTask::AppStateSync` — synchronizes app state (contacts, mutes, pins, etc.)
-
-**Example:**
 ```rust
-let (client, mut sync_receiver) = Client::new(/* ... */).await;
-
-// Process sync tasks from the channel
-tokio::spawn({
-    let client = client.clone();
-    async move {
-        while let Ok(task) = sync_receiver.recv().await {
-            client.process_sync_task(task).await;
-        }
-    }
-});
+let (client, receiver) = build.into_parts();
+while let Ok(task) = receiver.recv().await {
+    let processing: whatsapp_rust::wacore::runtime::BoxFuture<'_, ()> =
+        Box::pin(client.process_sync_task(task));
+    processing.await;
+}
 ```
 
-<Note>
-If you use the [`Bot`](/api/bot) builder, sync task processing is handled automatically. You only need this method when building a custom client setup.
-</Note>
+`process_sync_task` handles history sync and app-state tasks. Failing to drain this receiver prevents major sync from progressing. `Bot` installs the worker automatically.
 
 ### set_skip_history_sync
 
@@ -1593,7 +1370,7 @@ The client maintains an in-memory `AbPropsCache` that stores server-side A/B exp
 Features query the cache by passing a typed `AbProp` constant from the vendored [`wacore::iq::abprops`](/api/wacore#a-b-props-registry) registry. A bool prop is considered enabled when its value is `"1"`, `"true"`, or `"enabled"` (case-insensitive), falling back to the registry default when the server didn't send it.
 
 ```rust
-use wacore::iq::abprops::web;
+use whatsapp_rust::wacore::iq::abprops::web;
 
 if client.ab_props().is_enabled(web::PRIVACY_TOKEN_SENDING_ON_GROUP_CREATE).await {
     // gated behavior
@@ -1622,10 +1399,11 @@ Only flags in the cache's *interest set* are retained when props come in. Every 
 To gate your own code on a flag the library doesn't already watch, register it on the builder before the first `fetch_props()`. `ClientBuilder::with_watched_ab_props` (and the matching [`BotBuilder::with_watched_ab_props`](/api/bot#with_watched_ab_props)) accumulate across calls and take any `IntoIterator<Item = AbProp>`, so you can register single flags or whole slices:
 
 ```rust
-use wacore::iq::abprops::web::AURA_PINNED_CHATS_BENEFIT_ACTIVE;
-use whatsapp_rust::client::ClientBuilder;
+use whatsapp_rust::wacore::iq::abprops::web::AURA_PINNED_CHATS_BENEFIT_ACTIVE;
+use whatsapp_rust::Client;
 
-let client = ClientBuilder::new(persistence_manager)
+let client = Client::builder()
+    .with_persistence_manager(persistence_manager)
     .with_watched_ab_props([AURA_PINNED_CHATS_BENEFIT_ACTIVE])
     .build()
     .await?;
@@ -1656,7 +1434,7 @@ Unlike [`AbPropsCache::is_enabled`](#ab-props-cache), `ab_prop_enabled` does not
 **Example:**
 
 ```rust
-use wacore::iq::abprops::web::AURA_PINNED_CHATS_BENEFIT_ACTIVE;
+use whatsapp_rust::wacore::iq::abprops::web::AURA_PINNED_CHATS_BENEFIT_ACTIVE;
 
 match client.ab_prop_enabled(AURA_PINNED_CHATS_BENEFIT_ACTIVE).await {
     Some(true) => enable_extended_pinned_chats(),
@@ -2045,10 +1823,10 @@ Sends a custom IQ (Info/Query) stanza to the WhatsApp server.
 
 **Example:**
 ```rust
-use wacore::request::{InfoQuery, InfoQueryType};
-use wacore_binary::builder::NodeBuilder;
-use wacore_binary::node::NodeContent;
-use wacore_binary::jid::{Jid, SERVER_JID};
+use whatsapp_rust::wacore::request::{InfoQuery, InfoQueryType};
+use whatsapp_rust::wacore_binary::builder::NodeBuilder;
+use whatsapp_rust::wacore_binary::node::NodeContent;
+use whatsapp_rust::wacore_binary::jid::{Jid, SERVER_JID};
 
 let query_node = NodeBuilder::new("presence")
     .attr("type", "available")
@@ -2188,104 +1966,23 @@ let sent_node = waiter.await.expect("message stanza sent");
 Register the waiter **before** performing the action that produces the outgoing node. When no sent-node waiters are active, this has zero cost (single atomic load per outgoing node). Useful for testing whether `<tctoken>` or `<cstoken>` was attached to a sent stanza.
 </Note>
 
-### register_handler
+
+### subscribe
 
 ```rust
-pub fn register_handler(&self, handler: Arc<dyn EventHandler>)
+let (handler, events) = ChannelEventHandler::with_capacity(256);
+let subscription = client.subscribe(EventInterest::of(&[EventKind::Messages]), handler);
 ```
 
-Registers an event handler for protocol events.
+Keep the returned `Subscription`. Dropping it stops future bus registrations; an existing dispatch snapshot or already queued callback can still finish. `subscribe_handler` uses the handler's registration-time interest hint. `update_interest` changes future filtering; `detach` deliberately leaves a registration installed. See [events](/concepts/events#subscriptions).
 
-<ParamField path="handler" type="Arc<dyn EventHandler>" required>
-  Handler implementing the EventHandler trait
-</ParamField>
+### subscribe_chatstate_handler
 
-**Example:**
-```rust
-use wacore::types::events::{Event, EventHandler, InboundMessage};
-use std::sync::Arc;
+Use `client.chatstate().subscribe_handler(handler)` or `client.subscribe_chatstate_handler(handler)`. Both return the same RAII `Subscription` contract.
 
-struct MyHandler;
+### acquire_raw_node_forwarding
 
-impl EventHandler for MyHandler {
-    fn handle_event(&self, event: Arc<Event>) {
-        match &*event {
-            Event::Messages(batch) => {
-                for InboundMessage { message: msg, info, .. } in batch.iter() {
-                    println!("New message from {}: {:?}", info.source.sender, msg);
-                }
-            }
-            Event::Connected(_) => println!("Connected!"),
-            _ => {}
-        }
-    }
-}
-
-client.register_handler(Arc::new(MyHandler));
-```
-
-**Using ChannelEventHandler:**
-
-For channel-based event processing (useful for testing and custom event loops), use the built-in `ChannelEventHandler`:
-
-```rust
-use wacore::types::events::{ChannelEventHandler, Event};
-
-let (handler, event_rx) = ChannelEventHandler::new();
-client.register_handler(handler);
-
-// Process events asynchronously via async-channel (runtime-agnostic)
-// event_rx yields Arc<Event>
-while let Ok(event) = event_rx.recv().await {
-    match &*event {
-        Event::Connected(_) => break,
-        _ => {}
-    }
-}
-```
-
-See [ChannelEventHandler](/concepts/events#channeleventhandler) for details.
-
-### register_chatstate_handler
-
-```rust
-pub fn register_chatstate_handler(&self, handler: Arc<dyn Fn(ChatStateEvent) + Send + Sync>)
-```
-
-Register a handler for chat state events (typing indicators). Pass the handler in an `Arc` so the event dispatcher can share it across threads. Copy-on-write registration lets event dispatch continue while you register another handler. When no handler is registered, the client uses a lock-free fast path.
-
-<Warning>
-**Breaking change (as of PR #1227):** `register_chatstate_handler` is no longer `async`. Drop the `.await` at call sites: `client.register_chatstate_handler(handler)`.
-</Warning>
-
-### set_raw_node_forwarding
-
-```rust
-pub fn set_raw_node_forwarding(&self, enabled: bool)
-```
-
-Enable or disable raw node forwarding. When enabled, `Event::RawNode` is emitted for every decoded stanza before the stanza router dispatches it. Disabled by default to avoid overhead.
-
-<ParamField path="enabled" type="bool" required>
-  Whether to emit `Event::RawNode` for every incoming stanza
-</ParamField>
-
-**Example:**
-```rust
-// Enable raw protocol access (e.g. for voice call stanzas)
-client.set_raw_node_forwarding(true);
-
-// Handle raw nodes in your event handler
-bot.on_event(|event, _client| async move {
-    if let Event::RawNode(node) = &*event {
-        println!("Raw stanza: {} {:?}", node.tag, node.attrs);
-    }
-});
-```
-
-<Warning>
-Only enable this when you need raw protocol access. Every decoded stanza triggers the event, which adds overhead to the message processing pipeline.
-</Warning>
+Hold `client.acquire_raw_node_forwarding()` while observing `Event::RawNode`. Every lease holder contributes to the forwarding gate; dropping one lease does not disable another consumer.
 
 ### add_stanza_interceptor
 
@@ -2307,7 +2004,7 @@ Register an interceptor that sees each decoded stanza before the built-in pipeli
 </ResponseField>
 
 ```rust
-use wacore::sync_marker::MaybeSendSync;
+use whatsapp_rust::wacore::sync_marker::MaybeSendSync;
 
 pub trait StanzaInterceptor: MaybeSendSync + 'static {
     fn intercept(&self, node: &OwnedNodeRef) -> Interception;
@@ -2336,7 +2033,7 @@ Cost while unused: one relaxed atomic load on the read loop, checked before any 
 **Example:**
 ```rust
 use whatsapp_rust::client::interceptor::{Interception, StanzaInterceptor};
-use wacore_binary::node::OwnedNodeRef;
+use whatsapp_rust::wacore_binary::node::OwnedNodeRef;
 use std::sync::Arc;
 
 struct Vendor;
@@ -2380,10 +2077,10 @@ While no lease is held, nothing is emitted and nothing is cloned — the path co
 
 **Example:**
 ```rust
-use wacore::types::events::{ChannelEventHandler, Event};
+use whatsapp_rust::wacore::types::events::{ChannelEventHandler, Event};
 
 let (handler, event_rx) = ChannelEventHandler::new();
-client.register_handler(handler);
+let _subscription = client.subscribe_handler(handler);
 
 // Register the handler before acquiring the lease: forwarding activates
 // immediately, so a payload decrypted between the two calls would otherwise
@@ -2425,10 +2122,10 @@ While no lease is held, nothing is emitted and nothing is built — each failure
 
 **Example:**
 ```rust
-use wacore::types::events::{ChannelEventHandler, Event};
+use whatsapp_rust::wacore::types::events::{ChannelEventHandler, Event};
 
 let (handler, event_rx) = ChannelEventHandler::new();
-client.register_handler(handler);
+let _subscription = client.subscribe_handler(handler);
 
 // Register the handler before acquiring the lease: forwarding activates
 // immediately, so a failure between the two calls would otherwise dispatch
@@ -2467,10 +2164,10 @@ While no lease is held, nothing is emitted and nothing is cloned — the path co
 
 **Example:**
 ```rust
-use wacore::types::events::{ChannelEventHandler, Event};
+use whatsapp_rust::wacore::types::events::{ChannelEventHandler, Event};
 
 let (handler, event_rx) = ChannelEventHandler::new();
-client.register_handler(handler);
+let _subscription = client.subscribe_handler(handler);
 
 // Register the handler before acquiring the lease: forwarding activates
 // immediately, so a frame sent between the two calls would otherwise dispatch
@@ -2880,10 +2577,10 @@ The two memos are chained: `resolve_skdm_targets_memoized` compares the `Arc` th
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `hits` | `u64` | Entry present, `GroupInfo` identity matched, generation unchanged |
+| `hits` | `u64` | Entry present, `GroupRoutingInfo` identity matched, generation unchanged |
 | `restamps` | `u64` | Generation moved but every change since provably missed this group; served the same devices a hit would, at the cost of the `unchanged_for` scan |
 | `miss_absent` | `u64` | No entry for the group — first send, or a capacity eviction. The memo holds `CacheConfig::group_devices_memo_capacity` groups (default 512, was a fixed 64 before [whatsapp-rust#1400](https://github.com/oxidezap/whatsapp-rust/pull/1400)), least-recently-used evicted first — see [Cache Configuration Reference](/api/bot#cache-configuration-reference) |
-| `miss_group_info` | `u64` | An entry existed but was built from a different `Arc<GroupInfo>` |
+| `miss_group_info` | `u64` | An entry existed but was built from a different `Arc<GroupRoutingInfo>` |
 | `miss_topology` | `u64` | The device topology changed in a way that could have touched this group |
 | `bypassed` | `u64` | Call didn't consult the memo at all (store-backed registry/mapping caches make its freshness contract unenforceable) |
 
@@ -2926,6 +2623,7 @@ if let Some(rate) = window.skdm_targets.hit_rate() {
 ## Error Types
 
 ```rust
+#[non_exhaustive]
 pub enum ClientError {
     NotConnected,
     Socket(SocketError),
@@ -2935,7 +2633,7 @@ pub enum ClientError {
 ```
 
 <Note>
-As of PR #1090, `connect()`/`wait_for_socket()`/`wait_for_connected()` return [`ConnectError`](/api/errors#connecterror) (`ClientError::AlreadyConnected` was removed in favor of `ConnectError::AlreadyConnected`), and `rotate_signed_pre_key()`/`flush_pending_signal_state()` return [`SignalMaintenanceError`](/api/errors#signalmaintenanceerror). See [Error Types](/api/errors) for the full reference across the crate.
+As of PR #1090, `connect()`/`wait_for_socket_ready()`/`wait_for_session_ready()` return [`ConnectError`](/api/errors#connecterror) (`ClientError::AlreadyConnected` was removed in favor of `ConnectError::AlreadyConnected`), and `rotate_signed_pre_key()`/`flush_pending_signal_state()` return [`SignalMaintenanceError`](/api/errors#signalmaintenanceerror). See [Error Types](/api/errors) for the full reference across the crate.
 </Note>
 
 ---
@@ -2947,3 +2645,7 @@ As of PR #1090, `connect()`/`wait_for_socket()`/`wait_for_connected()` return [`
 - [Sending Messages](/guides/sending-messages) - Sending and receiving messages
 - [Group Management](/guides/group-management) - Working with groups
 
+
+## Pictures
+
+Use [`client.pictures().lookup(ProfilePictureRequest)`](/api/pictures) for contact, group, and community lookups. Set and remove operations remain on the owning feature facade.

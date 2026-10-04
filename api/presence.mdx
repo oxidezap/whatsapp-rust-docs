@@ -246,6 +246,7 @@ The `set`, `set_available`, and `set_unavailable` methods return `Result<(), Pre
 ```rust
 #[non_exhaustive]
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum PresenceError {
     #[error("cannot send presence without a push name set")]
     PushNameEmpty,

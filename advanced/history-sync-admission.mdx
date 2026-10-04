@@ -111,13 +111,13 @@ impl HistorySyncAdmission for RejectPeerDataResponses {
 }
 
 let bot = Bot::builder()
-    .with_backend(SqliteStore::new("whatsapp.db").await?)
+    .with_backend(SqliteStore::open("whatsapp.db").await?)
     .with_history_sync_admission(RejectPeerDataResponses)
     .build()
     .await?;
 
-let handle = bot.run().await?;
-handle.await?;
+let handle = bot.spawn();
+handle.await;
 ```
 
 If you already hold the policy behind an `Arc`, use `with_history_sync_admission_arc` to avoid re-boxing:
@@ -126,7 +126,7 @@ If you already hold the policy behind an `Arc`, use `with_history_sync_admission
 let policy: Arc<dyn HistorySyncAdmission> = Arc::new(RejectPeerDataResponses);
 
 let bot = Bot::builder()
-    .with_backend(SqliteStore::new("whatsapp.db").await?)
+    .with_backend(SqliteStore::open("whatsapp.db").await?)
     .with_history_sync_admission_arc(policy)
     .build()
     .await?;
@@ -157,7 +157,7 @@ impl HistorySyncAdmission for MaxChunkBytes {
 
 // Register with a 4 MiB per-chunk cap.
 let bot = Bot::builder()
-    .with_backend(SqliteStore::new("whatsapp.db").await?)
+    .with_backend(SqliteStore::open("whatsapp.db").await?)
     .with_history_sync_admission(MaxChunkBytes(4 * 1024 * 1024))
     .build()
     .await?;

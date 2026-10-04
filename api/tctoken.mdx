@@ -221,7 +221,9 @@ The library automatically includes privacy tokens in outgoing 1:1 message stanza
 client.send_message(jid, message).await?;
 
 // And when fetching profile pictures
-let picture = client.contacts().get_profile_picture(&jid, true).await?;
+let picture = client.pictures().lookup(
+    ProfilePictureRequest::new(ProfilePictureTarget::Contact(&jid), ProfilePictureType::Preview),
+).await?;
 ```
 
 The tctoken (no cstoken fallback) is also attached automatically at three other call sites that use privacy tokens, matching WA Web's `USyncStatusProtocol`/`OutSpamTCTokenMixin`/`StartCall.js`:
@@ -431,7 +433,7 @@ Bucket durations are capped at 180 days. The expiration cutoff is bucket-aligned
 Pruning evaluates the received-token cutoff and the sender-bucket cutoff independently: a row is only removed once its received token is expired-or-absent **and** its sender bucket is expired-or-absent, so recent sender-side rate-limit state is never dropped just because the received token expired (and vice versa).
 
 ```rust
-use wacore::iq::tctoken::{tc_token_expiration_cutoff, is_tc_token_expired};
+use whatsapp_rust::wacore::iq::tctoken::{tc_token_expiration_cutoff, is_tc_token_expired};
 
 // Get the cutoff timestamp for expired received tokens (using defaults)
 let cutoff = tc_token_expiration_cutoff();

@@ -60,8 +60,8 @@ These are equivalent to building `wa::Message { conversation: Some(...) }` and `
 Use the `conversation` field for plain text messages, or `wa::Message::text("...")` for shorter syntax:
 
 ```rust
-use waproto::whatsapp as wa;
-use wacore_binary::jid::Jid;
+use whatsapp_rust::waproto::whatsapp as wa;
+use whatsapp_rust::wacore_binary::jid::Jid;
 
 let to: Jid = "1234567890@s.whatsapp.net".parse()?;
 
@@ -83,7 +83,7 @@ For a DM, `result.recipient_fanout` tells you whether every one of the recipient
 For messages with formatting, links, or context (replies/quotes):
 
 ```rust
-use waproto::whatsapp::message::ExtendedTextMessage;
+use whatsapp_rust::waproto::whatsapp::message::ExtendedTextMessage;
 
 let message = wa::Message {
     extended_text_message: buffa::MessageField::some(ExtendedTextMessage {
@@ -106,7 +106,7 @@ let result = client.send_message(to, message).await?;
 Use `build_quote_context` to create a basic reply:
 
 ```rust
-use wacore::proto_helpers::{build_quote_context, MessageExt};
+use whatsapp_rust::wacore::proto_helpers::{build_quote_context, MessageExt};
 
 // Assume you received the original message
 let original_message: wa::Message = /* ... */;
@@ -140,8 +140,8 @@ For quoted replies that display correctly on all platforms (including iOS), use 
 The function takes both the quoted message's chat (`quoted_chat_jid`) and the chat you're sending into (`target_chat_jid`). For an in-place reply these are the same JID, and `remote_jid` is omitted; for a cross-chat quote (for example, quoting a status update into a DM) they differ, and `remote_jid` is set to the quoted chat:
 
 ```rust
-use wacore::proto_helpers::{build_quote_context_with_info, MessageExt};
-use wacore_binary::jid::Jid;
+use whatsapp_rust::wacore::proto_helpers::{build_quote_context_with_info, MessageExt};
+use whatsapp_rust::wacore_binary::jid::Jid;
 
 let original_message: wa::Message = /* ... */;
 let original_message_id = "3EB0ABC123";
@@ -182,7 +182,7 @@ Pass the same JID for both `quoted_chat_jid` and `target_chat_jid` when replying
 You can add quote context to any message type using `set_context_info`:
 
 ```rust
-use waproto::whatsapp::message::ImageMessage;
+use whatsapp_rust::waproto::whatsapp::message::ImageMessage;
 
 let mut reply = wa::Message {
     image_message: buffa::MessageField::some(ImageMessage {
@@ -209,210 +209,55 @@ reply.set_context_info(context);
 let result = client.send_message(chat_jid, reply).await?;
 ```
 
+
 ## Reactions
 
-### Sending a reaction
-
-Use `client.send_reaction()` to react to a DM, group, or `status@broadcast` message. The helper builds the `ReactionMessage` payload, stamps `sender_timestamp_ms`, and routes the stanza through the standard send path.
-
 ```rust
-use waproto::whatsapp as wa;
-
-let target_key = wa::MessageKey {
-    remote_jid: Some(chat_jid.to_string()),
-    from_me: Some(false),
-    id: Some(message_id_to_react_to.to_string()),
-    // Required for groups and status@broadcast; leave None for DMs.
-    participant: Some(sender_jid.to_string()),
-};
-
-let result = client.send_reaction(&chat_jid, target_key, "👍").await?;
+let target = inbound.message_ref()?;
+client.send_reaction(&target, "👍").await?;
+client.send_reaction(&target, "").await?;
 ```
 
-For groups and `status@broadcast`, `target_key.participant` must point to the original sender so the receipt can be attributed. In DMs, leave `participant` as `None`.
+A reference carries chat, original author, direction, and inbound metadata. In a bot callback, `ctx.react(emoji)` uses the received reference. Group and status routing retain the original author. Community announcement reactions require the captured original secret and fail when it is unavailable.
 
-If you're already inside an event handler, [`MessageContext::react`](/api/bot#react) fills in `chat`, `target_key`, and `participant` from the incoming message automatically:
-
-```rust
-use whatsapp_rust::bot::MessageContext;
-
-for inbound in event.messages() {
-    let ctx = MessageContext::from_inbound(inbound, client.clone());
-    ctx.react("❤️").await?;
-}
-```
-
-### Reactions in Community Announcement Groups
-
-Community Announcement Groups (CAGs) — the default announcement subgroup of a community — require encrypted reactions. `send_reaction` handles this transparently: it detects CAG chats automatically and sends the reaction as an encrypted `enc_reaction_message` envelope instead of a plaintext stanza.
-
-No change to your call is needed. The only requirement is that the target post's `messageSecret` was captured when the post was received. If it was not captured (for example, `msg_secret_policy` is disabled without a resolver, or the post arrived before the current session), the call returns an error rather than emitting a plaintext reaction the channel would reject.
+## Channel comments
 
 ```rust
-// Works for DMs, regular groups, and CAGs — no API difference.
-client.send_reaction(&cag_jid, target_key, "🔥").await?;
+let parent = post.message_ref()?;
+client.comments().send_text(&parent, "Thanks for the update").await?;
 ```
 
-See [Community management — CAG reactions](/guides/communities#community-announcement-group-cag-reactions) for details.
-
-### Removing a reaction
-
-Pass an empty `emoji` to revoke a previous reaction (matches WhatsApp Web's empty-text-as-revoke semantics):
-
-```rust
-client.send_reaction(&chat_jid, target_key, "").await?;
-```
-
-<Note>
-Newsletter (channel) reactions use a different plaintext stanza format. Use [`client.newsletter().send_reaction()`](/api/newsletter#send_reaction) for newsletters instead.
-</Note>
-
-## Channel Comments
-
-Channel comments are encrypted threaded replies under a Community Announcement Group (CAG) post. Use `client.comments()` to send them:
-
-```rust
-use whatsapp_rust::features::Comments;
-
-let parent_key = wa::MessageKey {
-    remote_jid: Some(cag_jid.to_string()),
-    from_me: Some(false),
-    id: Some("3EB0POSTID".to_string()),
-    // participant must be the post author.
-    participant: Some(post_author_jid.to_string()),
-};
-
-// Text comment:
-let result = client.comments()
-    .send_text(&cag_jid, parent_key, "Great post!")
-    .await?;
-println!("Comment sent: {}", result.message_id);
-```
-
-For arbitrary message bodies:
-
-```rust
-let body = wa::Message {
-    extended_text_message: buffa::MessageField::some(wa::message::ExtendedTextMessage {
-        text: Some("Great post!".to_string()),
-        ..Default::default()
-    }),
-    ..Default::default()
-};
-
-let result = client.comments()
-    .send_message(&cag_jid, parent_key, body)
-    .await?;
-```
-
-The `parent_key.participant` field must identify the post author so receivers can derive the HKDF decryption key from the envelope. When `from_me` is `true` and `participant` is absent the library resolves the author to your own identity.
-
-The client decrypts incoming encrypted comments transparently. You receive the comment body as part of an `Event::Messages` batch. You read the parent post key off `InboundMessage::comment_target`:
-
-```rust
-Event::Messages(batch) => {
-    for InboundMessage { message: msg, comment_target, .. } in batch.iter() {
-        if let Some(parent_key) = comment_target {
-            println!("Comment on post: {:?}", parent_key.id);
-            if let Some(text) = msg.text_content() {
-                println!("Text: {}", text);
-            }
-        }
-    }
-}
-```
-
-See [Community management — Channel comments](/guides/communities#channel-comments) for full details.
+Supply a Community Announcement Group post. A generic group reference does not attest subgroup kind. Incoming comment bodies arrive in `Event::Messages`; `InboundMessage::comment_target` retains the original parent key. Raw chat/key interop uses `send_text_raw` or `send_message_raw`.
 
 ## Editing messages
 
-Use [`client.edit_message`](/api/send#edit_message) to replace the content of a message you previously sent. Pass the chat JID, the original message ID, and the new content as a plain `wa::Message` — the client builds the correct wire envelope, resolves the participant JID (LID or PN) for groups, and sends the edit with a fresh stanza ID so the server does not deduplicate it against the original.
-
 ```rust
-let new_content = wa::Message {
-    conversation: Some("This is the edited text".to_string()),
-    ..Default::default()
-};
-
-let edit_id = client.edit_message(
-    chat_jid,
-    &result.message_id,
-    new_content,
+use whatsapp_rust::{EditRequest, EditOptions, StanzaId};
+let target = original_send.message_ref()?;
+let edited = client.edit_message(
+    EditRequest::new(target, Message::text("Corrected text"))
+        .with_options(EditOptions::default().with_stanza_id(StanzaId::new("EDIT-123")?)),
 ).await?;
 ```
 
-<Note>
-Message editing only works for text messages (`conversation` or `extended_text_message`) sent by you within the last 15 minutes.
-</Note>
+The target identifies original own content; the result identifies the new edit envelope. A fresh operation ID is the default. Use `with_secret` for an announcement/event/poll encrypted edit with the original creator and validated secret. Server acceptance and edit windows remain server policy, not a local guarantee.
 
-<Warning>
-Do not hand-roll the edit envelope by wrapping a `ProtocolMessage` inside `Message.edited_message` (a `FutureProofMessage`) and passing it to `send_message`. That shape is the history/storage form; on the wire WhatsApp expects a top-level `protocolMessage` with `type = MESSAGE_EDIT`. `client.edit_message` produces the correct shape — manual envelopes will be silently dropped by the server.
-</Warning>
-
-### Pinning the outer stanza id
-
-`client.edit_message` always mints a fresh outer stanza id — that's what stops the server from deduplicating the edit against the original message. If you need to control that id yourself (for example, to collide it with an existing message so clients re-render that slot), use [`client.edit_message_with_options`](/api/send#edit_message_with_options) with [`EditOptions`](/api/send#editoptions):
+## Deleting messages
 
 ```rust
-use waproto::whatsapp as wa;
-use whatsapp_rust::send::EditOptions;
-
-let edit_id = client.edit_message_with_options(
-    &chat_jid,
-    &original_id,
-    wa::Message {
-        conversation: Some("This is the edited text".to_string()),
-        ..Default::default()
-    },
-    EditOptions::default().with_stanza_id(existing_message_id.clone()),
-).await?;
+client.revoke_message(&original_send.message_ref()?).await?;
+client.revoke_message(&inbound.message_ref()?).await?;
 ```
 
-<Note>
-Pinning `stanza_id` to an id borrowed from another message is best-effort: the server and recipient clients decide whether the collision is honored. The library does not persist retry-cache or outbound-secret state under the borrowed id, so the original message's retry content and secret are left intact. Leave `stanza_id` as `None` (or use plain `edit_message`) unless you specifically need this.
-</Note>
-
-## Deleting messages (revoke)
-
-### Delete your own message
-
-```rust
-use whatsapp_rust::send::RevokeType;
-
-client.revoke_message(
-    chat_jid,
-    message_id,
-    RevokeType::Sender,
-).await?;
-```
-
-See [Send API reference](/api/send#revoke_message) for full details.
-
-### Admin delete (group only)
-
-Group admins can delete messages from other participants:
-
-```rust
-let original_sender: Jid = "1234567890@s.whatsapp.net".parse()?;
-
-client.revoke_message(
-    group_jid,
-    message_id,
-    RevokeType::Admin { original_sender },
-).await?;
-```
-
-<Warning>
-Admin revoke only works in group chats. The `original_sender` must match the JID format (LID or phone number) of the message being deleted.
-</Warning>
+An own-message reference selects sender revocation. A third-party target must be a group message and still requires server-checked admin rights. Explicit raw addressing uses `revoke_message_raw`.
 
 ## Sending to newsletters
 
 Newsletter messages are sent through the same `client.send_message()` method. The library automatically detects newsletter JIDs and sends messages as plaintext (no Signal encryption):
 
 ```rust
-use waproto::whatsapp as wa;
-use wacore_binary::jid::Jid;
+use whatsapp_rust::waproto::whatsapp as wa;
+use whatsapp_rust::wacore_binary::jid::Jid;
 
 let newsletter_jid: Jid = "120363999999999999@newsletter".parse()?;
 
@@ -441,7 +286,7 @@ An album consists of:
 ### Sending an album
 
 ```rust
-use waproto::whatsapp as wa;
+use whatsapp_rust::waproto::whatsapp as wa;
 use whatsapp_rust::proto_helpers::wrap_as_album_child;
 
 let chat_jid: Jid = "1234567890@s.whatsapp.net".parse()?;
@@ -535,11 +380,11 @@ A sticker pack requires:
 ### Sending a sticker pack
 
 ```rust
-use wacore::sticker_pack::{
+use whatsapp_rust::wacore::sticker_pack::{
     StickerInput, StickerPackMetadata,
     create_sticker_pack_zip, build_sticker_pack_message,
 };
-use wacore::download::MediaType;
+use whatsapp_rust::wacore::download::MediaType;
 use whatsapp_rust::upload::UploadOptions;
 
 let chat_jid: Jid = "1234567890@s.whatsapp.net".parse()?;
@@ -655,7 +500,7 @@ Media is relayed from the same CDN blob, so forwarding an image, video, document
 If you need to customize fields (for example, change a caption) before forwarding, you can still build the `wa::Message` yourself and pass it to `send_message`. Reusing the original CDN fields keeps the send instant:
 
 ```rust
-use waproto::whatsapp as wa;
+use whatsapp_rust::waproto::whatsapp as wa;
 
 // Clone the image message, only change the caption
 if let Some(img) = received_message.image_message.as_option() {
@@ -679,11 +524,11 @@ WhatsApp supports disappearing messages that automatically delete after a set du
 
 ### Sending a disappearing message
 
-Use `send_message_with_options` with `ephemeral_expiration` set to the chat's timer value:
+Use `send(SendRequest)` with `ephemeral_expiration` set to the chat's timer value:
 
 ```rust
 use whatsapp_rust::send::SendOptions;
-use waproto::whatsapp as wa;
+use whatsapp_rust::waproto::whatsapp as wa;
 
 let message = wa::Message {
     conversation: Some("This message will disappear!".to_string()),
@@ -692,7 +537,7 @@ let message = wa::Message {
 
 let options = SendOptions::default().with_ephemeral_expiration(604800); // 7 days, matching the chat's timer
 
-let result = client.send_message_with_options(chat_jid, message, options).await?;
+let result = client.send(whatsapp_rust::SendRequest::new(&chat_jid, message).with_options(options)).await?;
 ```
 
 This sets `contextInfo.expiration` on the protobuf message, which tells WhatsApp clients to display the disappearing countdown.
@@ -787,70 +632,20 @@ let result = client.groups().create_group(options).await?;
 
 See [Send API reference](/api/send#sendoptions) for the full `SendOptions` type.
 
-## Send Options
 
-### Specifying a custom message ID
-
-You can override the auto-generated message ID by setting `message_id` via `SendOptions`. This is useful for resending a failed message with the same ID or ensuring idempotency:
+## Send options
 
 ```rust
-use whatsapp_rust::send::SendOptions;
-
-let options = SendOptions::default().with_message_id("3EB0ABC123");
-
-let result = client.send_message_with_options(
-    to,
-    message,
-    options,
-).await?;
-
-// result.message_id will be "3EB0ABC123"
-```
-
-### Overriding the stanza type
-
-The library infers the `<message type="...">` attribute from the protobuf content of every send. If you're sending a message variant the classifier can't recognize, set `stanza_type_override` to force a specific wire type:
-
-```rust
-use whatsapp_rust::{StanzaType, send::SendOptions};
-
-let options = SendOptions::default().with_stanza_type_override(StanzaType::Text);
-
-let result = client.send_message_with_options(
-    to,
-    message,
-    options,
+use whatsapp_rust::{MessageId, SendOptions, SendRequest};
+let sent = client.send(
+    SendRequest::new(&chat_jid, Message::text("Hello"))
+        .with_options(SendOptions::default().with_message_id(MessageId::new("CONTENT-123")?)),
 ).await?;
 ```
 
-Leave this as `None` for every supported message type — the classifier already picks the right value, and the override is not preserved across the retry path. See [Stanza types](/api/send#stanza-types) for the available variants.
+Use the [send reference](/api/send#sendoptions) for expiration, stanza metadata, and group/device freshness. A chosen ID is not an exactly-once or application idempotency guarantee.
 
-### Adding extra stanza nodes
 
-For advanced use cases, you can include custom XML nodes:
-
-```rust
-use whatsapp_rust::send::SendOptions;
-use wacore_binary::builder::NodeBuilder;
-
-let options = SendOptions::default().with_extra_stanza_nodes(vec![
-    NodeBuilder::new("custom")
-        .attr("key", "value")
-        .build(),
-]);
-
-let result = client.send_message_with_options(
-    to,
-    message,
-    options,
-).await?;
-```
-
-See [Send API reference](/api/send#sendoptions) for full details.
-
-<Note>
-`SendOptions` and `EditOptions` are `#[non_exhaustive]` — build them by chaining the `with_*` setters off `::default()` rather than a struct literal (even with `..Default::default()`), since new fields can be added in future releases without breaking existing call sites.
-</Note>
 
 ## Message preparation helpers
 
@@ -859,7 +654,7 @@ See [Send API reference](/api/send#sendoptions) for full details.
 The `prepare_for_quote` method strips nested context info:
 
 ```rust
-use wacore::proto_helpers::MessageExt;
+use whatsapp_rust::wacore::proto_helpers::MessageExt;
 
 let quoted_message = original_message.prepare_for_quote();
 
@@ -878,10 +673,10 @@ This ensures:
 
 ### Preparing messages for forwarding
 
-`prepare_for_forward` is the lower-level helper that powers [`forward_message`](#forwarding-messages). It returns a forward-ready `wa::Message` (forward marker set, score bumped, quote chain stripped, source `message_secret` dropped) without sending anything. Reach for it when you need to attach extra fields — for example, a custom caption or stanza nodes — before calling `send_message_with_options`:
+`prepare_for_forward` is the lower-level helper that powers [`forward_message`](#forwarding-messages). It returns a forward-ready `wa::Message` (forward marker set, score bumped, quote chain stripped, source `message_secret` dropped) without sending anything. Reach for it when you need to attach extra fields — for example, a custom caption or stanza nodes — before passing a `SendRequest` to `send`:
 
 ```rust
-use wacore::proto_helpers::MessageExt;
+use whatsapp_rust::wacore::proto_helpers::MessageExt;
 
 let mut forward = received_message.prepare_for_forward();
 // Tweak the prepared message here if needed, for example overriding a caption.
@@ -941,7 +736,7 @@ match client.send_message(jid.clone(), message).await {
 }
 ```
 
-A DM where every recipient device failed to encrypt — or where the fan-out resolved no recipient device at all for a non-self destination — returns `SendError::NoRecipientDevice` instead of reporting success. (A note to self with no recipient half is the normal shape, since every resolved device is your own, and still returns `Ok`.) Retry with `SendOptions::default().with_device_freshness(Freshness::Refresh)` passed to `send_message_with_options` rather than an immediate resend — a resend with the same cached device list hits the same empty result. See [`NoRecipientDeviceError`](/api/errors#norecipientdeviceerror) for the two ways this can happen and the [Error Types migration guide](/api/errors#from-pr-1299-a-dm-with-no-recipient-device-now-returns-a-typed-error) for the full retry example.
+A DM where every recipient device failed to encrypt — or where the fan-out resolved no recipient device at all for a non-self destination — returns `SendError::NoRecipientDevice` instead of reporting success. (A note to self with no recipient half is the normal shape, since every resolved device is your own, and still returns `Ok`.) Retry with `SendOptions::default().with_device_freshness(Freshness::Refresh)` passed to `send(SendRequest)` rather than an immediate resend — a resend with the same cached device list hits the same empty result. See [`NoRecipientDeviceError`](/api/errors#norecipientdeviceerror) for the two ways this can happen and the [Error Types migration guide](/api/errors#from-pr-1299-a-dm-with-no-recipient-device-now-returns-a-typed-error) for the full retry example.
 
 `SendError::PrimaryDeviceRejected` is narrower: it fires before any encryption is attempted, when the pre-key fetch itself gets back a `406` naming a primary device (device 0, either the recipient's or your own). The named device lists are already refreshed by the time this returns, so an immediate retry resolves them fresh rather than repeating the same fetch. A companion's `406` doesn't fail the fetch, so a send can still return `Ok` with a partial `recipient_fanout` (see above) — this error only fires for the stricter, primary-named case. See [`SendError::PrimaryDeviceRejected`](/api/errors#senderror) for the WA Web parity this matches.
 
@@ -959,7 +754,7 @@ See the [Error Types reference](/api/errors) for the complete `SendError` defini
 - **Media**: Use specific media message types with optional captions
 - **Albums**: Use `album_message` parent + `wrap_as_album_child` for grouped media
 - **Sticker packs**: Use `create_sticker_pack_zip` + `build_sticker_pack_message` with two uploads (ZIP + thumbnail)
-- **Disappearing chats**: Use `send_message_with_options` with `ephemeral_expiration` matching the chat's timer
+- **Disappearing chats**: Use `send(SendRequest)` with `ephemeral_expiration` matching the chat's timer
 - **CAG reactions**: Use `send_reaction` — encryption is applied automatically for CAG chats
 - **Channel comments**: Use `client.comments().send_text()` or `send_message()`
 

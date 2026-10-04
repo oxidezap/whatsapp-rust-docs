@@ -156,7 +156,7 @@ To force a fresh network read, call [`fetch_metadata`](#fetch_metadata) instead.
 ```rust
 use std::sync::Arc;
 use whatsapp_rust::Jid;
-use wacore::client::context::GroupRoutingInfo;
+use whatsapp_rust::wacore::client::context::GroupRoutingInfo;
 
 let group_jid: Jid = "123456789@g.us".parse()?;
 let routing: Arc<GroupRoutingInfo> = client.groups().routing_info(&group_jid).await?;
@@ -1344,12 +1344,12 @@ let results = client.groups().fetch_metadata_batch(&group_jids).await?;
 
 for result in results {
     match result {
-        GroupMetadataResult::Full(metadata) => {
+        GroupMetadataResult::Found(metadata) => {
             let subject = metadata.subject.as_deref().unwrap_or("(no subject)");
             println!("Group: {} — {}", metadata.id, subject);
         }
-        GroupMetadataResult::Truncated { id, size } => {
-            println!("Truncated: {id} ({size} members)");
+        GroupMetadataResult::Truncated { id, participant_count } => {
+            println!("Truncated: {id} ({participant_count} members)");
         }
         GroupMetadataResult::Forbidden(id) => println!("Forbidden: {id}"),
         GroupMetadataResult::NotFound(id) => println!("Not found: {id}"),
@@ -1420,7 +1420,7 @@ pub async fn set_profile_picture(
 **Returns:**
 - `SetProfilePictureResponse` - Contains the new picture ID
 
-Passing empty `image_data` routes to removal, mirroring the own-picture API. Prefer [`remove_profile_picture`](#remove_profile_picture) when removal is the intent.
+Empty `image_data` fails locally. Use [`remove_profile_picture`](#remove_profile_picture) to remove the picture. Non-emptiness is validated; JPEG decoding and cropping remain your responsibility.
 
 **Example:**
 ```rust
@@ -1430,9 +1430,7 @@ let group_jid: Jid = "120363012345678@g.us".parse()?;
 let image_bytes = fs::read("group_avatar.jpg")?;
 
 let response = client.groups().set_profile_picture(&group_jid, image_bytes).await?;
-if let Some(id) = response.id {
-    println!("Group picture updated: {}", id);
-}
+println!("Group picture updated: {}", response.id);
 ```
 
 <Warning>
@@ -1512,77 +1510,10 @@ for pic in pictures {
 }
 ```
 
-### lookup_profile_picture
 
-Fetch a single group's profile picture and preserve the server's outcome instead of collapsing every non-success into `None`. Mirrors [`Contacts::lookup_profile_picture`](/api/contacts#lookup_profile_picture) for group JIDs.
+### Individual picture lookup
 
-```rust
-pub async fn lookup_profile_picture(
-    &self,
-    group_jid: &Jid,
-    preview: bool,
-    existing_id: Option<&str>,
-) -> Result<ProfilePictureLookup, GroupError>
-```
-
-**Parameters:**
-- `group_jid` - Group JID (must end with `@g.us`)
-- `preview` - `true` for the preview thumbnail, `false` for the full-size image
-- `existing_id` - Picture ID you already hold, or `None`. When set, the server returns [`ProfilePictureLookup::Unchanged`](/api/contacts#profilepicturelookup) if the picture has not changed.
-
-**Returns:**
-- [`ProfilePictureLookup`](/api/contacts#profilepicturelookup) - Typed outcome (`Found`, `Unchanged`, `NotFound`, `NotAuthorized`, or `RateOverlimit`).
-
-**Example:**
-```rust
-use whatsapp_rust::ProfilePictureLookup;
-
-let group_jid: Jid = "120363012345678@g.us".parse()?;
-
-match client.groups().lookup_profile_picture(&group_jid, true, None).await? {
-    ProfilePictureLookup::Found(pic) => println!("Group picture: {}", pic.url),
-    ProfilePictureLookup::Unchanged => println!("Cached copy is still current"),
-    ProfilePictureLookup::NotFound => println!("Group has no picture"),
-    ProfilePictureLookup::NotAuthorized => println!("Not allowed to view this picture"),
-    ProfilePictureLookup::RateOverlimit => println!("Rate limit reached; back off before retrying"),
-}
-```
-
-### lookup_community_profile_picture
-
-Fetch a community parent group's profile picture. Communities use the group (`w:g2`) IQ addressed directly to the community JID, which is different from the per-contact/group profile IQ used by [`lookup_profile_picture`](#lookup_profile_picture) — this method sends the community-shaped request.
-
-```rust
-pub async fn lookup_community_profile_picture(
-    &self,
-    community_jid: &Jid,
-    preview: bool,
-    existing_id: Option<&str>,
-) -> Result<ProfilePictureLookup, GroupError>
-```
-
-**Parameters:**
-- `community_jid` - Community parent group JID
-- `preview` - `true` for the preview thumbnail, `false` for the full-size image
-- `existing_id` - Picture ID you already hold, or `None` for an unconditional fetch
-
-**Returns:**
-- [`ProfilePictureLookup`](/api/contacts#profilepicturelookup)
-
-**Example:**
-```rust
-use whatsapp_rust::ProfilePictureLookup;
-
-let community_jid: Jid = "120363012345678@g.us".parse()?;
-
-if let ProfilePictureLookup::Found(pic) = client
-    .groups()
-    .lookup_community_profile_picture(&community_jid, false, None)
-    .await?
-{
-    println!("Community picture: {}", pic.url);
-}
-```
+Use [`client.pictures().lookup(ProfilePictureRequest)`](/api/pictures) with `ProfilePictureTarget::Group` or `Community`. Group batch picture queries remain `get_profile_pictures` because their per-entry outcomes and cost differ.
 
 ### report_messages_to_admins
 
@@ -1741,19 +1672,9 @@ pub enum SubgroupKind {
 
 ### GroupOverviewResult
 
-Per-JID outcome for a group in a [`fetch_overviews`](#fetch_overviews) batch.
+`pub type GroupOverviewResult = GroupLookupResult<GroupOverview>;`
 
-```rust
-#[non_exhaustive]
-pub enum GroupOverviewResult {
-    Found(GroupOverview),
-    Truncated { id: Jid, participant_count: u32 },
-    Forbidden(Jid),  // server refused with 403
-    NotFound(Jid),   // server returned 404
-}
-```
-
-Only `403` maps to `Forbidden` and only `404` to `NotFound`. Any other error code fails the whole batch call rather than being reported as a per-group refusal.
+Uses the shared [lookup outcomes](#groupmetadataresult). `Found` carries only the overview projection. `Truncated` carries identity and `participant_count` without inventing settings or participants.
 
 ### GroupSubject
 
@@ -1901,6 +1822,7 @@ pub enum GroupAppealStatus {
 Options for specifying a participant when creating or modifying a group.
 
 ```rust
+#[non_exhaustive]
 pub struct GroupParticipantOptions {
     pub jid: Jid,
     pub phone_number: Option<Jid>,
@@ -1911,7 +1833,7 @@ pub struct GroupParticipantOptions {
 **Constructors:**
 - `GroupParticipantOptions::new(jid)` - Create from a JID
 - `GroupParticipantOptions::from_phone(phone_number)` - Create from a phone number JID
-- `GroupParticipantOptions::from_lid_and_phone(lid, phone_number)` - Create from a LID and phone number
+- `GroupParticipantOptions::new(lid).with_phone_number(phone_number)` - Attach a phone number to a LID participant
 
 **Builder methods:**
 - `.with_phone_number(jid)` - Attach a phone number JID (for LID participants)
@@ -1976,7 +1898,7 @@ pub struct ParticipantChangeResponse {
 ```rust
 pub struct AddRequestInfo {
     pub code: String,        // v4 invite token
-    pub expiration: i64,     // unix seconds; 0 means the server omitted it
+    pub expiration: u64,     // unix seconds; 0 means the server omitted it
 }
 ```
 
@@ -2011,19 +1933,19 @@ Carries only what the encryption path needs. User-facing fields (subject, descri
 
 ### GroupMetadataResult
 
-Per-JID outcome for a group in a [`fetch_metadata_batch`](#fetch_metadata_batch) response.
+`GroupMetadataResult` aliases `GroupLookupResult<Box<GroupMetadata>>`; `GroupOverviewResult` aliases `GroupLookupResult<GroupOverview>`. Both use:
 
 ```rust
 #[non_exhaustive]
-pub enum GroupMetadataResult {
-    Full(Box<GroupMetadata>),                   // Full group metadata
-    Truncated { id: Jid, size: u32 },           // Server returned only id and size
-    Forbidden(Jid),                             // Server refused with 403
-    NotFound(Jid),                              // Server returned 404
+pub enum GroupLookupResult<T> {
+    Found(T),
+    Truncated { id: Jid, participant_count: u32 },
+    Forbidden(Jid),
+    NotFound(Jid),
 }
 ```
 
-Only `403` maps to `Forbidden` and only `404` to `NotFound`. Any other server error fails the whole batch call rather than being misreported as a missing group.
+`map` transforms a found payload while preserving partial and refusal outcomes. An overview does not become full metadata, and a truncated result does not imply an empty roster. Only 403 and 404 produce the corresponding per-JID outcomes; other errors remain in the outer result. Match with a fallback arm.
 
 ### GrowthLockInfo
 
@@ -2252,3 +2174,9 @@ match client.groups().leave(&group_jid).await {
     Err(e) => eprintln!("Error: {}", e),
 }
 ```
+
+## Constructing group DTOs
+
+Group input and output DTOs are extensible. Use `GroupCreateOptions::new(subject)` and participant constructors, or their builders, instead of external struct literals. Defaults preserve the standard member-add/link modes, approval off, and a zero disappearing timer; setters let you choose another policy explicitly.
+
+For consumer mocks, use `GroupMetadata::new(id)` and `GroupParticipant::new(jid)`, then customize public fields. Optional observations start absent; an empty synthetic roster does not assert completeness. Derive an overview with `GroupOverview::from(&metadata)`. Build routing data with `GroupRoutingInfo::new(participants, addressing_mode)` and its mapping setters. Read public fields normally and include `..` in destructuring patterns; do not manufacture a complete result from a truncated lookup.

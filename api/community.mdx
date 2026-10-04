@@ -32,24 +32,18 @@ pub async fn create(
 **Returns:**
 - `CreateCommunityResult` — Contains the full `metadata: GroupMetadata` for the created community parent group
 
-**Example:**
+
+### Creation example
+
 ```rust
-use whatsapp_rust::features::community::CreateCommunityOptions;
-
-let mut options = CreateCommunityOptions::new("My Community");
-options.description = Some("A great community".to_string());
-options.closed = true;
-
+use whatsapp_rust::{CreateCommunityOptions, GroupDescription};
+let options = CreateCommunityOptions::new("My Community")?
+    .with_description(GroupDescription::new("Community discussions")?);
 let result = client.community().create(options).await?;
-println!("Created community: {} ({})", result.metadata.subject, result.metadata.id);
-if let Some(desc) = &result.metadata.description {
-    println!("Description: {}", desc);
-}
+println!("Created community: {}", result.metadata.id);
 ```
 
-<Note>
-Since v0.6, `community().create()` returns the full `GroupMetadata` instead of just the JID. The library inlines the community description directly into the create stanza (matching WA Web), so the returned metadata already contains it — no separate `set_description` round-trip is needed. If you previously read `result.gid`, switch to `result.metadata.id` (`GroupMetadata` uses `id: Jid`).
-</Note>
+Description is configured by a follow-up IQ. If that step fails, `ConfigurationFailed` retains the created JID and cause. See [partial configuration failure](#partial-configuration-failure).
 
 ### list_participating
 
@@ -133,7 +127,7 @@ pub async fn link_subgroups(
 - `subgroup_jids` — Array of group JIDs to link
 
 **Returns:**
-- `LinkSubgroupsResult` — Contains `linked_jids` (successfully linked) and `failed_groups` (JID + error code pairs)
+- `LinkSubgroupsResult` — Contains `linked_jids` (successfully linked) and `failed_groups` (`SubgroupFailure` entries with `jid` and `code`)
 
 **Example:**
 ```rust
@@ -147,7 +141,9 @@ let result = client.community()
     .await?;
 
 println!("Linked: {:?}", result.linked_jids);
-for (jid, error_code) in &result.failed_groups {
+for failure in &result.failed_groups {
+    let jid = &failure.jid;
+    let error_code = failure.code;
     eprintln!("Failed: {} (error {})", jid, error_code);
 }
 ```
@@ -287,7 +283,7 @@ pub async fn unlink_subgroups(
 - `remove_orphan_members` — Whether to remove members who are only in the community through the unlinked subgroups
 
 **Returns:**
-- `UnlinkSubgroupsResult` — Contains `unlinked_jids` (successfully unlinked) and `failed_groups` (JID + error code pairs)
+- `UnlinkSubgroupsResult` — Contains `unlinked_jids` (successfully unlinked) and `failed_groups` (`SubgroupFailure` entries with `jid` and `code`)
 
 **Example:**
 ```rust
@@ -335,14 +331,14 @@ Fetch participant counts per subgroup via MEX (GraphQL).
 pub async fn get_subgroup_participant_counts(
     &self,
     community_jid: &Jid,
-) -> Result<Vec<(Jid, u32)>, CommunityError>
+) -> Result<Vec<SubgroupFailure>, CommunityError>
 ```
 
 **Parameters:**
 - `community_jid` — JID of the community
 
 **Returns:**
-- `Vec<(Jid, u32)>` — Pairs of subgroup JID and participant count
+- `Vec<SubgroupFailure>` — Pairs of subgroup JID and participant count
 
 **Example:**
 ```rust
@@ -473,32 +469,18 @@ for result in results {
 
 ## Types
 
+
 ### CreateCommunityOptions
 
-Options for creating a new community. Implements `PartialEq` and `Eq`.
-
 ```rust
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CreateCommunityOptions {
-    pub name: String,
-    pub description: Option<String>,
-    pub closed: bool,
-    pub allow_non_admin_sub_group_creation: bool,
-    pub create_general_chat: bool,
-}
+use whatsapp_rust::{CreateCommunityOptions, GroupDescription};
+let mut options = CreateCommunityOptions::new("Team")?
+    .with_description(GroupDescription::new("Team discussions")?);
+options.closed = true;
+let created = client.community().create(options).await?;
 ```
 
-**Fields:**
-- `name` — Community name
-- `description` — Optional description. Since v0.6 it's inlined as a `<description>` child of the create stanza, so the community is created with the description in a single round-trip (no follow-up `set_description` IQ needed).
-- `closed` — Whether the community requires approval to join (default: `false`)
-- `allow_non_admin_sub_group_creation` — Whether non-admin members can create subgroups (default: `false`)
-- `create_general_chat` — Whether to create a general chat subgroup (default: `true`)
-
-**Constructor:**
-```rust
-let options = CreateCommunityOptions::new("My Community");
-```
+`name: GroupSubject` is required. Description is `Option<GroupDescription>`. Construction and execution validate input before remote creation, including unchecked response newtypes reused as inputs. The options are extensible and have no identity-free `Default`. Defaults remain open, admin-only subgroup creation, and general chat enabled. Configure public boolean fields as needed.
 
 ### CreateCommunityResult
 
@@ -630,7 +612,7 @@ Result of linking subgroups to a community. Implements `PartialEq` and `Eq`.
 #[non_exhaustive]
 pub struct LinkSubgroupsResult {
     pub linked_jids: Vec<Jid>,
-    pub failed_groups: Vec<(Jid, u32)>,
+    pub failed_groups: Vec<SubgroupFailure>,
 }
 ```
 
@@ -645,45 +627,20 @@ Result of unlinking subgroups from a community. Implements `PartialEq` and `Eq`.
 #[non_exhaustive]
 pub struct UnlinkSubgroupsResult {
     pub unlinked_jids: Vec<Jid>,
-    pub failed_groups: Vec<(Jid, u32)>,
+    pub failed_groups: Vec<SubgroupFailure>,
 }
 ```
 
 `UnlinkSubgroupsResult` is `#[non_exhaustive]`: struct-literal construction and exhaustive struct destructuring from outside the crate are both disallowed. Field reads are unaffected; add `..` to any exhaustive destructuring patterns.
 
-### GroupType
 
-Classification of a group within the community hierarchy. Implements `PartialEq` and `Eq`.
+### Community hierarchy
 
-```rust
-#[non_exhaustive]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum GroupType {
-    Default,
-    Community,
-    LinkedSubgroup,
-    LinkedAnnouncementGroup,
-    LinkedGeneralGroup,
-}
-```
+Read `metadata.hierarchy()` or `overview.hierarchy`. `GroupHierarchy` preserves standalone, community, and subgroup-with-parent roles. `SubgroupKind` distinguishes regular, announcement, and general chat. Match extensible enums with a fallback. See [group hierarchy](/api/groups#grouphierarchy).
 
-`GroupType` is `#[non_exhaustive]`, so match statements should include a wildcard arm to handle future variants.
+### SubgroupFailure
 
-**Variants:**
-- `Default` — Regular standalone group
-- `Community` — Community parent group
-- `LinkedSubgroup` — A subgroup linked to a community
-- `LinkedAnnouncementGroup` — The default announcement subgroup of a community
-- `LinkedGeneralGroup` — The general chat subgroup of a community
-
-Use the `group_type()` function to classify a group:
-
-```rust
-use whatsapp_rust::features::community::{group_type, GroupType};
-
-let metadata = client.groups().fetch_metadata(&group_jid).await?;
-let gtype = group_type(&metadata);
-```
+Link and unlink results retain successes and `failed_groups: Vec<SubgroupFailure>`. Each failure has `jid` and numeric `code`, including zero or unknown codes. Construct mocks with `SubgroupFailure::new(jid, code)`. Results can contain duplicates and partial successes; do not retry an entire batch as if it were atomic.
 
 ## Error handling
 
@@ -714,3 +671,9 @@ match client.community().deactivate(&community_jid).await {
     Err(e) => eprintln!("Error: {}", e),
 }
 ```
+
+## Partial configuration failure
+
+`CommunityError::ConfigurationFailed { created_jid, step, source }` means creation succeeded but later configuration failed. `CommunityConfigurationStep::SetDescription` currently identifies description failure. Preserve the typed `GroupError` source and use the returned JID; blindly repeating creation can create another community.
+
+To resume the selected configuration explicitly, call `groups().set_description(&created_jid, Some(description), PreviousDescription::Resolve)`. Resolve the current token because the failed IQ may already have committed. There is no rollback, atomicity, automatic retry, or durable cancellation guarantee.

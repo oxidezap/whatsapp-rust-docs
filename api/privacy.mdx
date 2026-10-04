@@ -204,7 +204,7 @@ This sets the account's stored preference, replicated to your other linked devic
 A change made on a linked device arrives as [`Event::DisableLinkPreviewsUpdate`](/concepts/events#disablelinkpreviewsupdate):
 
 ```rust
-use wacore::types::events::Event;
+use whatsapp_rust::wacore::types::events::Event;
 
 .on_event(|event, _client| async move {
     match &*event {

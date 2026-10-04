@@ -415,6 +415,7 @@ In-flight addresses are exposed as [`ensure_inflight`](/api/client#memory_report
 `prepare_dm_stanza` returns a `PreparedDmStanza` struct containing the stanza node and the locally computed phash for server ACK validation:
 
 ```rust
+#[non_exhaustive]
 pub struct PreparedDmStanza {
     pub node: Node,
     /// Locally computed phash from the sent device set. Not sent on the
@@ -971,7 +972,7 @@ let branch_output = SendBranchOutput {
 // On DM phash mismatch:
 if !jid.is_group() && !jid.is_status_broadcast() {
     client.invalidate_device_cache(&jid.user).await;
-    if let Some(own_pn) = &client.persistence_manager.get_device_snapshot().pn {
+    if let Some(own_pn) = &persistence_manager.get_device_snapshot().pn {
         client.invalidate_device_cache(&own_pn.user).await;
     }
 }

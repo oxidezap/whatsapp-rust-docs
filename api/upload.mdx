@@ -46,7 +46,8 @@ pub async fn upload(
   
   ```rust
   #[non_exhaustive]
-  pub struct UploadResponse {
+  #[non_exhaustive]
+pub struct UploadResponse {
       pub url: String,
       pub direct_path: String,
       pub media_key: [u8; 32],
@@ -110,8 +111,8 @@ pub async fn upload(
 ### Example: upload and send image
 
 ```rust
-use wacore::download::MediaType;
-use waproto::whatsapp as wa;
+use whatsapp_rust::wacore::download::MediaType;
+use whatsapp_rust::waproto::whatsapp as wa;
 use std::fs;
 
 // Read image file
@@ -145,7 +146,7 @@ println!("Image sent: {}", result.message_id);
 ### Example: upload video with progress
 
 ```rust
-use wacore::download::MediaType;
+use whatsapp_rust::wacore::download::MediaType;
 use std::fs;
 
 let video_bytes = fs::read("video.mp4")?;
@@ -162,8 +163,8 @@ println!("  Path: {}", upload.direct_path);
 ### Example: upload document
 
 ```rust
-use wacore::download::MediaType;
-use waproto::whatsapp as wa;
+use whatsapp_rust::wacore::download::MediaType;
+use whatsapp_rust::waproto::whatsapp as wa;
 use std::fs;
 use std::path::Path;
 
@@ -197,8 +198,8 @@ let result = client.send_message(chat_jid, message).await?;
 ### Example: upload audio (voice note)
 
 ```rust
-use wacore::download::MediaType;
-use waproto::whatsapp as wa;
+use whatsapp_rust::wacore::download::MediaType;
+use whatsapp_rust::waproto::whatsapp as wa;
 
 let audio_bytes = fs::read("voice.ogg")?;
 let upload = client.upload(audio_bytes, MediaType::Audio, Default::default()).await?;
@@ -229,7 +230,7 @@ let result = client.send_message(chat_jid, message).await?;
 The `whatsapp_rust::media` module turns an [`UploadResponse`](#upload) into a ready-to-send `wa::Message`, so you don't hand-assemble the CDN/crypto fields (url, direct_path, media_key, file_sha256, file_enc_sha256, file_length, media_key_timestamp, streaming_sidecar) on every send. Each builder takes the upload result plus a typed options struct with sensible MIME defaults.
 
 ```rust
-use wacore::download::MediaType;
+use whatsapp_rust::wacore::download::MediaType;
 use whatsapp_rust::media::{self, ImageOptions, VideoOptions, AudioOptions, DocumentOptions};
 use std::fs;
 
@@ -237,9 +238,10 @@ let chat_jid: Jid = "15551234567@s.whatsapp.net".parse()?;
 let image_bytes = fs::read("photo.jpg")?;
 
 let upload = client.upload(image_bytes, MediaType::Image, Default::default()).await?;
-let msg = media::image_message(upload, ImageOptions {
-    caption: Some("Check out this photo!".to_string()),
-    ..Default::default()
+let msg = media::image_message(upload, {
+    let mut options = ImageOptions::default();
+    options.caption = Some("Check out this photo!".to_string());
+    options
 });
 client.send_message(chat_jid, msg).await?;
 ```
@@ -254,7 +256,7 @@ client.send_message(chat_jid, msg).await?;
 The `video_message` and `audio_message` builders carry the upload's `streaming_sidecar` (progressive-playback HMAC table) when present. For fields the options structs don't expose (e.g. explicit image `width`/`height`), assemble the proto by hand as shown above.
 
 ```rust
-use wacore::download::MediaType;
+use whatsapp_rust::wacore::download::MediaType;
 use whatsapp_rust::media::{self, AudioOptions};
 use std::fs;
 
@@ -263,11 +265,12 @@ let opus_bytes = fs::read("voice.ogg")?;
 let waveform_bytes: Vec<u8> = vec![]; // optional PCM waveform preview
 
 let upload = client.upload(opus_bytes, MediaType::Audio, Default::default()).await?;
-let msg = media::audio_message(upload, AudioOptions {
-    ptt: Some(true),
-    duration_seconds: Some(8),
-    waveform: Some(waveform_bytes),
-    ..Default::default()
+let msg = media::audio_message(upload, {
+    let mut options = AudioOptions::default();
+    options.ptt = Some(true);
+    options.duration_seconds = Some(8);
+    options.waveform = Some(waveform_bytes);
+    options
 });
 client.send_message(chat_jid, msg).await?;
 ```
@@ -317,7 +320,7 @@ let options = UploadOptions::new().with_streaming_sidecar(true);
 
 ```rust
 use whatsapp_rust::upload::UploadOptions;
-use wacore::download::MediaType;
+use whatsapp_rust::wacore::download::MediaType;
 
 // Upload the sticker pack ZIP first
 let zip_upload = client.upload(
@@ -351,8 +354,8 @@ pub struct MediaEncryptor { /* ... */ }
 ### Creating an encryptor
 
 ```rust
-use wacore::upload::MediaEncryptor;
-use wacore::download::MediaType;
+use whatsapp_rust::wacore::upload::MediaEncryptor;
+use whatsapp_rust::wacore::download::MediaType;
 
 // Initialize with a random media key
 let enc = MediaEncryptor::new(MediaType::Image)?;
@@ -434,8 +437,8 @@ let info = enc.finalize_to_writer(&mut writer)?;
 ### Example: Chunk-based encryption to Vec
 
 ```rust
-use wacore::upload::MediaEncryptor;
-use wacore::download::MediaType;
+use whatsapp_rust::wacore::upload::MediaEncryptor;
+use whatsapp_rust::wacore::download::MediaType;
 
 let mut enc = MediaEncryptor::new(MediaType::Image)?;
 let mut encrypted = Vec::new();
@@ -453,8 +456,8 @@ println!("Original size: {} bytes", info.file_length);
 ### Example: Streaming encryption to a writer
 
 ```rust
-use wacore::upload::MediaEncryptor;
-use wacore::download::MediaType;
+use whatsapp_rust::wacore::upload::MediaEncryptor;
+use whatsapp_rust::wacore::download::MediaType;
 use std::fs::File;
 
 let mut enc = MediaEncryptor::new(MediaType::Video)?;
@@ -507,8 +510,8 @@ pub fn encrypt_media_streaming<R: Read, W: Write>(
 ### Example: Encrypt from file to file
 
 ```rust
-use wacore::upload::encrypt_media_streaming;
-use wacore::download::MediaType;
+use whatsapp_rust::wacore::upload::encrypt_media_streaming;
+use whatsapp_rust::wacore::download::MediaType;
 use std::fs::File;
 
 let reader = File::open("large_video.mp4")?;
@@ -606,8 +609,8 @@ The flow is two steps you own:
 2. Pass that storage (as an `UploadSource`) plus the `EncryptedMediaInfo` to `upload_stream`. The method never touches disk itself.
 
 ```rust
-use wacore::upload::{encrypt_media_streaming, UploadSource};
-use wacore::download::MediaType;
+use whatsapp_rust::wacore::upload::{encrypt_media_streaming, UploadSource};
+use whatsapp_rust::wacore::download::MediaType;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use tempfile::NamedTempFile;

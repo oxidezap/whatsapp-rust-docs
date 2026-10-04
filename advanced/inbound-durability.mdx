@@ -73,7 +73,7 @@ impl InboundDurabilityHook for MyStore {
 }
 
 let bot = Bot::builder()
-    .with_backend(SqliteStore::new("whatsapp.db").await?)
+    .with_backend(SqliteStore::open("whatsapp.db").await?)
     // Opt in — without this call the client keeps its default at-most-once behavior.
     .with_inbound_durability_hook(MyStore { /* ... */ })
     .on_message(|ctx| async move {
@@ -90,7 +90,7 @@ let bot = Bot::builder()
 ```rust
 use async_trait::async_trait;
 use std::sync::Arc;
-use wacore::types::events::InboundMessage;
+use whatsapp_rust::wacore::types::events::InboundMessage;
 
 #[async_trait]
 pub trait InboundDurabilityHook {
