@@ -3,6 +3,13 @@ title: Receiving Messages
 description: Learn how to handle incoming messages, decrypt content, and send receipts in whatsapp-rust
 ---
 
+<Note>
+Examples on this page target [source snapshot `ff7acad`](https://github.com/oxidezap/whatsapp-rust/tree/ff7acaddf80169013b0fd06df65296db7e4a8ca3), not a crates.io release. Use the [current API migration guide](/guides/migrating-current-api) to select the matching dependency.
+</Note>
+
+
+
+
 ## Overview
 
 This guide covers message event handling, decryption, and receipt management in whatsapp-rust.
@@ -17,7 +24,7 @@ Use the typed registrars on `BotBuilder` — they extract the relevant payload b
 use whatsapp_rust::prelude::*;
 
 let bot = Bot::builder()
-    .with_backend(SqliteStore::new("whatsapp.db").await?)
+    .with_backend(SqliteStore::open("whatsapp.db").await?)
     .on_qr_code(|code, _timeout| async move {
         println!("Scan to pair:\n{code}");
     })
@@ -536,7 +543,7 @@ MessageRetransmission::new(chat, requester, message, message_id, retry_count)
 - `requester` — the requesting device's JID. Retransmissions are always pairwise to this one device. Group and broadcast retries never fan out to the full audience — this matches the requesting participant's own retry receipt.
 - `message` / `message_id` / `retry_count` — the original message content, its original ID, and the retry count carried on the requesting receipt. The client preserves `message_id` verbatim on the outgoing stanza. It preserves `retry_count` too, except on the status route — see below, where the wire format has no field for it.
 - `with_recipient` — only accepted for a direct retransmission. Set it when `requester` is one of your own companion devices: a self-device retransmission must say which device the message is actually addressed to. Leave it unset otherwise. When you do set it, `requester` must be a local companion device or a bot. This mirrors the `recipient` attribute WA Web propagates on self-device and bot retry receipts.
-- `with_group_metadata_freshness` — for group retransmissions, selects the [`Freshness`](/api/groups#freshness) policy used to load the group's participant list and addressing mode. Use `CachePreferred` (default) to reuse a cached snapshot, or `Refresh` to force a fresh fetch first.
+- `with_group_metadata_freshness` — for group retransmissions, selects the [`Freshness`](/api/groups#routing_info) policy used to load the group's participant list and addressing mode. Use `CachePreferred` (default) to reuse a cached snapshot, or `Refresh` to force a fresh fetch first.
 
 `retransmit_message` validates every field before touching Signal ratchet state. `chat` and `requester` must be non-empty. `message_id` must be non-empty. `retry_count` must fall in `1..MAX_RETRY_COUNT`. `requester` must be a user device JID, not a group/broadcast/server JID. `recipient` is rejected outside the direct+local/bot case described above. Any violation returns `SendError::InvalidRequest` before ratchet advancement or persistence.
 
@@ -735,7 +742,7 @@ impl InboundDurabilityHook for MyStore {
 }
 
 let bot = Bot::builder()
-    .with_backend(SqliteStore::new("whatsapp.db").await?)
+    .with_backend(SqliteStore::open("whatsapp.db").await?)
     .with_inbound_durability_hook(MyStore)
     .build()
     .await?;
@@ -936,3 +943,11 @@ Spawn tasks for long-running operations:
 - [Group Management](/guides/group-management) - Handle group events
 - [Community management](/guides/communities) - CAG reactions and channel comments
 - [Inbound Durability Hook](/advanced/inbound-durability) - At-least-once message delivery
+
+## Current references and replay
+
+Use `InboundMessage::message_ref()` for chat actions and `newsletter_ref()` for channels. Construct non-exhaustive inbound DTOs with builders in host fixtures. Preserve wildcard arms when matching extensible enums. See [migration](/guides/migrating-current-api#hooks-and-backend-reads).
+
+PDO placeholder recovery remains event-only. A later encrypted retry still must complete its durability hook even when the equivalent user event was already dispatched. The retry can promote that recovery to committed state without publishing the same event again. Distinct user payloads in an SKDM-bearing retry retain separate dispatch claims; adding an SKDM envelope does not make their user content identical. Hooks and event consumers still need idempotent `(chat, sender, id)` handling.
+
+[PDO retry and durability regression scenarios](https://github.com/oxidezap/whatsapp-rust/blob/ff7acaddf80169013b0fd06df65296db7e4a8ca3/src/message/tests.rs)

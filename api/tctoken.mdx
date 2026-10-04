@@ -3,6 +3,13 @@ title: TC Token
 description: Manage trusted contact privacy tokens and cstoken fallback
 ---
 
+<Note>
+Examples on this page target [source snapshot `ff7acad`](https://github.com/oxidezap/whatsapp-rust/tree/ff7acaddf80169013b0fd06df65296db7e4a8ca3), not a crates.io release. Use the [current API migration guide](/guides/migrating-current-api) to select the matching dependency.
+</Note>
+
+
+
+
 The `TcToken` feature provides APIs for issuing and managing trusted contact privacy tokens (TC tokens). These tokens are used for privacy-gated operations like sending messages and fetching profile pictures.
 
 The library also supports **cstoken** (client-side token / NCT) as a fallback when no TC token exists for a recipient. This matches WhatsApp Web's `MsgCreateFanoutStanza.js` behavior.
@@ -221,7 +228,10 @@ The library automatically includes privacy tokens in outgoing 1:1 message stanza
 client.send_message(jid, message).await?;
 
 // And when fetching profile pictures
-let picture = client.contacts().get_profile_picture(&jid, true).await?;
+let picture = client.pictures().lookup(whatsapp_rust::ProfilePictureRequest::new(
+    whatsapp_rust::ProfilePictureTarget::Contact(&jid),
+    whatsapp_rust::ProfilePictureType::Preview,
+)).await?;
 ```
 
 The tctoken (no cstoken fallback) is also attached automatically at three other call sites that use privacy tokens, matching WA Web's `USyncStatusProtocol`/`OutSpamTCTokenMixin`/`StartCall.js`:
@@ -288,7 +298,7 @@ When a contact sends you a privacy token, the library handles it automatically:
 4. Stores the token in the backend, preserving any `sender_timestamp` already recorded by the post-send issuance path
 5. Re-subscribes presence for the sender to pick up the updated token
 
-The same newer-wins rule (older writes rejected, a byte-less placeholder always accepts the first real token) is also enforced **atomically inside the store itself** — see [`store_received_tc_token`](/api/store#tctoken-storage). This is what closes the cross-source race between this notification path and history-sync's tc-token candidates: both call the same store method, so whichever call lands last can never clobber a fresher token, without needing a lock shared across the two paths.
+The same newer-wins rule (older writes rejected, a byte-less placeholder always accepts the first real token) is also enforced **atomically inside the store itself** — see [`store_received_tc_token`](/api/store#backend). This is what closes the cross-source race between this notification path and history-sync's tc-token candidates: both call the same store method, so whichever call lands last can never clobber a fresher token, without needing a lock shared across the two paths.
 
 <Note>
 A byte-less placeholder (written by post-send issuance before any real token has been received) is always replaced by the contact's first real token, even if the placeholder's own timestamp is newer — the newer-wins rule only blocks a stale write once a real token is on record.
@@ -298,13 +308,13 @@ A byte-less placeholder (written by post-send issuance before any real token has
 
 Tokens can arrive keyed by phone number before a contact's LID is known — for example, a token received while the peer was still PN-only. `resolve_tc_token_key` keys token lookups: it returns the LID as soon as a PN↔LID mapping exists for that contact, and the PN before that. So the moment the client learns a mapping, a token still filed under the PN becomes unreachable through this lookup — the send path then behaves as if no token had ever arrived, even though one is stored.
 
-To prevent that, the client migrates a PN-keyed token to the LID key as part of LID discovery, alongside the device-registry and Signal-session re-keying that already happens there (see [LID-PN mappings](/concepts/storage#lid-pn-mappings)):
+To prevent that, the client migrates a PN-keyed token to the LID key as part of LID discovery, alongside the device-registry and Signal-session re-keying that already happens there (see [LID-PN mappings](/concepts/storage#cache-coherence)):
 
 1. Read any token stored under the phone number
 2. If found, write it under the LID — **newer-wins**, so a token already stored under the LID (e.g. from a message that arrived after the mapping was learned) is never regressed by the older PN-keyed one
 3. Only after that write succeeds, delete the PN-keyed row
 
-The newer-wins guarantee in step 2 relies on [`store_received_tc_token`](/api/store#tctoken-storage) being atomic. The built-in backends guarantee this: `SqliteStore` performs the check-and-write inside an `IMMEDIATE` transaction, and `InMemoryBackend` performs it under its state lock. A custom [`Store`](/api/store) backend that keeps the default read-modify-write implementation of that method is not protected: a concurrently-arriving LID-keyed token can land between the migration's read and write, and the migration's write would then clobber it.
+The newer-wins guarantee in step 2 relies on [`store_received_tc_token`](/api/store#backend) being atomic. The built-in backends guarantee this: `SqliteStore` performs the check-and-write inside an `IMMEDIATE` transaction, and `InMemoryBackend` performs it under its state lock. A custom [`Store`](/api/store) backend that keeps the default read-modify-write implementation of that method is not protected: a concurrently-arriving LID-keyed token can land between the migration's read and write, and the migration's write would then clobber it.
 
 The sender-side issuance timestamp isn't carried over in the migration. Normally this just means one extra post-send issuance later — but the [identity-change reissuance](#identity-change-reissuance) flow also reads `sender_timestamp` to decide whether a token was ever issued to the sender. If a contact's identity changes before the next send re-populates the timestamp, that flow sees no prior issuance and skips reissuing, rather than the token being lost outright ([#1345](https://github.com/oxidezap/whatsapp-rust/pull/1345)).
 

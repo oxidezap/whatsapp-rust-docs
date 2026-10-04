@@ -1,212 +1,51 @@
 ---
-title: Events
-description: Create WhatsApp event messages and collect encrypted RSVPs
+title: Calendar events
+description: Create an event and send RSVP responses with its named creation result
 ---
 
-The `Events` feature creates WhatsApp **event** messages — the scheduled-event bubble with a date, location, and join link. It also sends RSVPs. Like polls, an event carries a per-message `message_secret`. Responders derive their RSVP encryption key from that secret. Keep the secret so you can send and decrypt responses later.
-
-## Access
-
-Access event operations through the client:
-
-```rust
-let events = client.events();
-```
-
-## Methods
-
-### create
-
-Create and send an event message.
-
-```rust
-pub async fn create(
-    &self,
-    to: &Jid,
-    params: EventCreationParams,
-) -> Result<(SendResult, Vec<u8>)>
-```
-
-<ParamField path="to" type="&Jid" required>
-  Recipient JID — a direct message or group chat.
-</ParamField>
-
-<ParamField path="params" type="EventCreationParams" required>
-  Event details. Only `name` is required; everything else is optional. See [EventCreationParams](#eventcreationparams).
-</ParamField>
-
-<ResponseField name="(send_result, message_secret)" type="(SendResult, Vec<u8>)">
-  A [`SendResult`](/api/send#sendresult) and the event's 32-byte `message_secret`. **Store the secret** — it is required to decrypt the RSVPs that come back. A fresh secret is generated per event and attached as `messageContextInfo.messageSecret`; WhatsApp Web rejects an event without one.
-</ResponseField>
-
-**Example:**
-
-```rust
-use whatsapp_rust::features::EventCreationParams;
-
-let chat: Jid = "120363012345678@g.us".parse()?;
-
-let (sent, secret) = client.events().create(&chat, EventCreationParams {
-    name: "Team offsite".to_string(),
-    description: Some("Bring a laptop".to_string()),
-    start_time: Some(1_760_000_000),     // unix seconds
-    end_time: Some(1_760_010_000),
-    location: None,
-    extra_guests_allowed: Some(true),
-    ..Default::default()
-}).await?;
-
-// Persist `secret` keyed by `sent.message_id` so you can decrypt RSVPs later.
-println!("Event sent: {}", sent.message_id);
-```
-
-### respond
-
-RSVP to an event. The RSVP is end-to-end encrypted against the event's `message_secret`.
-
-```rust
-pub async fn respond(
-    &self,
-    chat_jid: &Jid,
-    event_msg_id: &str,
-    event_creator_jid: &Jid,
-    message_secret: &[u8],
-    response: EventResponseType,
-    extra_guest_count: Option<i32>,
-) -> Result<SendResult>
-```
-
-<ParamField path="chat_jid" type="&Jid" required>
-  Chat JID where the event was sent.
-</ParamField>
-
-<ParamField path="event_msg_id" type="&str" required>
-  Message ID of the event creation message.
-</ParamField>
-
-<ParamField path="event_creator_jid" type="&Jid" required>
-  JID of the user who created the event. It keys the RSVP's encryption derivation and AAD, so it must match the creator exactly.
-</ParamField>
-
-<ParamField path="message_secret" type="&[u8]" required>
-  The 32-byte secret from the event creation message.
-</ParamField>
-
-<ParamField path="response" type="EventResponseType" required>
-  `Going`, `NotGoing`, or `Maybe`. See [EventResponseType](#eventresponsetype).
-</ParamField>
-
-<ParamField path="extra_guest_count" type="Option<i32>">
-  Number of additional guests you're bringing, when the event allows extra guests.
-</ParamField>
-
-<ResponseField name="SendResult" type="SendResult">
-  Result of the RSVP send. See [SendResult](/api/send#sendresult).
-</ResponseField>
-
-**Example:**
-
-```rust
-use whatsapp_rust::features::EventResponseType;
-
-let creator: Jid = "15551234567@s.whatsapp.net".parse()?;
-
-client.events()
-    .respond(
-        &chat,
-        &event_msg_id,
-        &creator,
-        &message_secret,
-        EventResponseType::Going,
-        Some(2), // bringing two guests
-    )
-    .await?;
-```
-
 <Note>
-The responder (self) JID also keys the derivation, so it must use the creator's namespace: your own LID for a LID-addressed event, your PN otherwise (falling back to PN when your LID isn't known). The library resolves this for you, mirroring the poll-vote path.
+Examples on this page target [source snapshot `ff7acad`](https://github.com/oxidezap/whatsapp-rust/tree/ff7acaddf80169013b0fd06df65296db7e4a8ca3), not a crates.io release. Use the [current API migration guide](/guides/migrating-current-api) to select the matching dependency.
 </Note>
 
-## Decrypting inbound RSVPs
 
-When you receive an `EncEventResponseMessage`, decrypt it with the event's secret using the helpers in `wacore::event`:
 
-```rust
-use wacore::event::decrypt_event_response_with_secret;
+## Create an event
 
-let response = decrypt_event_response_with_secret(
-    &enc_payload,
-    &iv,
-    &message_secret,       // the secret you stored at create() time
-    &event_msg_id,
-    &event_creator_jid,    // creator (non-AD form)
-    &responder_jid,        // who sent the RSVP (non-AD form)
-)?;
-
-println!("RSVP: {:?}", response.response);            // Going / NotGoing / Maybe
-println!("Extra guests: {:?}", response.extra_guest_count);
-```
-
-| Function | Description |
-|----------|-------------|
-| `encrypt_event_response_with_secret(response, secret, stanza_id, creator, responder) -> (Vec<u8>, [u8; 12])` | Encrypt an `EventResponseMessage` against the event secret. Returns `(payload_with_tag, iv)`. |
-| `decrypt_event_response_with_secret(payload, iv, secret, stanza_id, creator, responder) -> EventResponseMessage` | Decrypt an inbound RSVP. The creator + responder JIDs must match what the responder used, or decryption fails (rather than silently mis-decrypting). |
-
-Both are thin wrappers over the shared `secret_enc_addon` machinery specialized for the `"Event Response"` use-case, matching WhatsApp Web's `WAWebAddonEncryption`.
-
-## Types
-
-### EventCreationParams
+Use the builder for the non-exhaustive `EventCreationParams`. Only the name is required; creation rejects a blank name before sending. Times are Unix seconds.
 
 ```rust
-#[derive(Debug, Clone, Default)]
-pub struct EventCreationParams {
-    pub name: String,
-    pub description: Option<String>,
-    pub start_time: Option<i64>,
-    pub end_time: Option<i64>,
-    pub join_link: Option<String>,
-    pub location: Option<wa::message::LocationMessage>,
-    pub is_scheduled_call: Option<bool>,
-    pub extra_guests_allowed: Option<bool>,
+use whatsapp_rust::{Client, Jid, EventCreationParams, EventResponseType};
+
+async fn schedule(client: &Client, chat: &Jid) -> whatsapp_rust::anyhow::Result<()> {
+    let params = EventCreationParams::builder()
+        .name("Launch".to_owned())
+        .description("Release planning".to_owned())
+        .start_time(1_800_000_000)
+        .build();
+    let created = client.events().create(chat, params).await?;
+    client.events().respond(
+        &created.event_ref()?, EventResponseType::Going, None,
+    ).await?;
+    println!("{}", created.send_result().message_id);
+    Ok(())
 }
 ```
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `name` | `String` | Event title (required; must not be empty). |
-| `description` | `Option<String>` | Free-text description. |
-| `start_time` | `Option<i64>` | Start time in unix seconds. |
-| `end_time` | `Option<i64>` | End time in unix seconds. |
-| `join_link` | `Option<String>` | Call/join link. |
-| `location` | `Option<LocationMessage>` | Event location. |
-| `is_scheduled_call` | `Option<bool>` | Mark the event as a scheduled call. |
-| `extra_guests_allowed` | `Option<bool>` | Allow responders to bring extra guests. |
+## Store the result
 
-### EventResponseType
+`CreatedEvent` owns the send result, crypto creator and `MessageSecret`. Use `event_ref()` to borrow those for an RSVP. Use `into_parts()` when transferring ownership to storage. Do not destructure the result as the old tuple or infer the crypto creator from a PN/LID display alias.
 
-`whatsapp_rust` re-exports this enum from the generated proto.
+`Debug` redacts the whole creation result. Explicitly reading its secret or nested protobuf exposes sensitive data.
 
-```rust
-pub enum EventResponseType {
-    Unknown,   // 0
-    Going,     // 1
-    NotGoing,  // 2
-    Maybe,     // 3
-}
-```
+## Respond to a received event
 
-## Error handling
+Combine `InboundMessage::message_ref()` with the original creator and validated secret using `EventRef::new`. `respond(&EventRef, response, extra_guests)` produces an encrypted RSVP. `respond_raw` is the explicit byte/ID interoperability entry point.
 
-All methods return `Result<T, anyhow::Error>`. Common errors:
+For manual RSVP decryption, the core helper `wacore::event::decrypt_event_response_with_secret` requires that same parent association. Do not reuse a vote's secret or a new send's ID.
 
-- **Empty event name** when calling `create`.
-- **Not logged in** — the responder's own JID can't be determined.
-- **`message_secret` not 32 bytes** — encryption/decryption rejects the wrong size.
-- **GCM tag verification failed** — wrong secret, wrong creator/responder JID, or a tampered payload.
+## Edit an event
 
-## See also
+Use `EditRequest::new(target, replacement).with_secret(created.creator(), created.secret())`. The target addresses the original content; the returned send result describes the edit operation. Read the [send task reference](/api/send#edit_message) before overriding operation IDs.
 
-- [Polls](/api/polls) — the closest analog; also uses a per-message secret
-- [Send API](/api/send) — low-level send operations
-- [Events](/concepts/events) — event types emitted on receive
+## Source reference
+[Event builder and facade](https://github.com/oxidezap/whatsapp-rust/blob/ff7acaddf80169013b0fd06df65296db7e4a8ca3/src/features/events.rs) · [CreatedEvent and EventRef](https://github.com/oxidezap/whatsapp-rust/blob/ff7acaddf80169013b0fd06df65296db7e4a8ca3/src/features/creation.rs) · [Core RSVP helpers](https://github.com/oxidezap/whatsapp-rust/blob/ff7acaddf80169013b0fd06df65296db7e4a8ca3/wacore/src/event.rs)

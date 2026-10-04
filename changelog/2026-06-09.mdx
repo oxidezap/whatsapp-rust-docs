@@ -35,11 +35,11 @@ See the [Events API reference](/api/events) for the full field list.
 
 **Quiz polls (`Polls::create_quiz`)**
 
-`client.polls().create_quiz(to, name, options, correct_index)` sends a single-select quiz poll with one correct answer (`correct_index` is the 0-based index into `options`). It returns `(SendResult, message_secret)` just like [`create`](/api/polls#create), and votes decrypt the same way. See [`create_quiz`](/api/polls#create_quiz).
+`client.polls().create_quiz(to, name, options, correct_index)` sends a single-select quiz poll with one correct answer (`correct_index` is the 0-based index into `options`). It returns `(SendResult, message_secret)` just like [`create`](/api/polls#create-and-vote), and votes decrypt the same way. See [`create_quiz`](/api/polls#create-and-vote).
 
 **1:1 disappearing-message timer (`Client::set_chat_disappearing_timer`)**
 
-Turn disappearing messages on or off for a direct chat with `client.set_chat_disappearing_timer(chat, duration_secs)` (`0` disables). It sends an `EPHEMERAL_SETTING` protocol message and is 1:1-only — use [`Groups::set_ephemeral`](/api/groups#set_ephemeral) for groups. See [`set_chat_disappearing_timer`](/api/send#set_chat_disappearing_timer).
+Turn disappearing messages on or off for a direct chat with `client.set_chat_disappearing_timer(chat, duration_secs)` (`0` disables). It sends an `EPHEMERAL_SETTING` protocol message and is 1:1-only — use [`Groups::set_ephemeral`](/api/groups#settings) for groups. See [`set_chat_disappearing_timer`](/api/send#sendoptions).
 
 **Save or rename contacts (`ChatActions::save_contact`)**
 
@@ -66,7 +66,7 @@ See [`set_follower_mute`](/api/newsletter#set_follower_mute).
 
 **Message-secret encrypted edits (`Client::edit_message_encrypted`)**
 
-`client.edit_message_encrypted(to, original_id, new_content)` edits a message via the `secret_encrypted_message` (`MESSAGE_EDIT`) path instead of the plaintext `protocolMessage` edit. This is the form Community Announcement Groups require and what WhatsApp Web sends when `message_edit_to_message_secret_sender_enabled` is on. Newsletters are rejected — use [`Newsletter::edit_message`](/api/newsletter#edit_message). See [`edit_message_encrypted`](/api/send#edit_message_encrypted).
+`client.edit_message_encrypted(to, original_id, new_content)` edits a message via the `secret_encrypted_message` (`MESSAGE_EDIT`) path instead of the plaintext `protocolMessage` edit. This is the form Community Announcement Groups require and what WhatsApp Web sends when `message_edit_to_message_secret_sender_enabled` is on. Newsletters are rejected — use [`Newsletter::edit_message`](/api/newsletter#edit_message). See [`edit_message_encrypted`](/api/send#edit_message).
 
 **High-level media message builders (`whatsapp_rust::media`)**
 
@@ -106,7 +106,7 @@ The `pub custom_enc_handlers` field type changed from `Arc<async_lock::RwLock<Ha
 
 **`get_participating` returns `HashMap<Jid, GroupMetadata>`**
 
-[`Groups::get_participating`](/api/groups#get_participating) is now keyed by `Jid` instead of `String`. Bind the key as a `Jid`; call `.to_string()` if you need the old string form.
+[`Groups::get_participating`](/api/groups#list_participating) is now keyed by `Jid` instead of `String`. Bind the key as a `Jid`; call `.to_string()` if you need the old string form.
 
 **`download_from_params` takes a `DownloadParams` struct**
 

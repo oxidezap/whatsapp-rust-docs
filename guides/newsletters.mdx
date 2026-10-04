@@ -3,6 +3,13 @@ title: Newsletters (channels)
 description: Learn how to create, manage, and interact with WhatsApp newsletter channels in whatsapp-rust
 ---
 
+<Note>
+Examples on this page target [source snapshot `ff7acad`](https://github.com/oxidezap/whatsapp-rust/tree/ff7acaddf80169013b0fd06df65296db7e4a8ca3), not a crates.io release. Use the [current API migration guide](/guides/migrating-current-api) to select the matching dependency.
+</Note>
+
+
+
+
 ## Overview
 
 Newsletters (also called channels) are broadcast-style messaging in WhatsApp. Unlike groups, newsletter messages are **plaintext** (no Signal E2E encryption) and flow one-way from admins to subscribers.
@@ -136,91 +143,11 @@ The library automatically detects that the recipient is a newsletter JID and sen
 For media messages (images, videos, etc.), you must upload the media separately using the newsletter-specific upload endpoint before sending. Text messages work directly.
 </Note>
 
-### Reactions
+### Reactions, votes, edits and revokes
 
-Send a reaction to a specific newsletter message using its `server_id`:
+For a fetched newsletter message, use `message.message_ref(&newsletter_jid)?`; for an inbound envelope use `inbound.newsletter_ref()?`. Pass the result to the newsletter facade.
 
-```rust
-// React with thumbs up
-client.newsletter()
-    .send_reaction(&newsletter_jid, server_id, "👍")
-    .await?;
-
-// Remove reaction (empty string)
-client.newsletter()
-    .send_reaction(&newsletter_jid, server_id, "")
-    .await?;
-```
-
-See [Send API reference](/api/send#send_message) for details.
-
-### Poll votes
-
-Vote in a channel poll with its `server_id` and the SHA-256 hashes of the chosen option names. Each call replaces your previous selection, and an empty list removes your vote:
-
-```rust
-use wacore::poll::compute_option_hash;
-
-// Vote for two options
-let vote_id = client.newsletter()
-    .send_poll_vote(
-        &newsletter_jid,
-        poll_server_id,
-        &[compute_option_hash("Rust"), compute_option_hash("Go")],
-    )
-    .await?;
-
-// Remove your vote
-client.newsletter()
-    .send_poll_vote(&newsletter_jid, poll_server_id, &[])
-    .await?;
-```
-
-Hash option names exactly as they appear in the poll. You can also reuse the `option_hash` values from fetched [poll tallies](#fetching-message-history). See [`send_poll_vote`](/api/newsletter#send_poll_vote) for details.
-
-Poll tallies count every follower, so they can't confirm your own vote. To read back your current reaction and vote on recent messages, use `get_my_addons`:
-
-```rust
-let addons = client.newsletter()
-    .get_my_addons(&newsletter_jid, 20)
-    .await?;
-
-if let Some(mine) = addons.iter().find(|a| a.server_id == poll_server_id) {
-    if let Some(vote) = &mine.poll_vote {
-        // Empty after you remove your vote
-        println!("You selected {} option(s)", vote.option_hashes.len());
-    }
-}
-```
-
-See [`get_my_addons`](/api/newsletter#get_my_addons) for details.
-
-### Editing and revoking messages
-
-Channels use a plaintext edit/revoke flow that's separate from DM and group messages. Call the helpers on `client.newsletter()` and pass the original message's `message_id` (the wire stanza id returned by `send_message`, **not** the `server_id` used for reactions):
-
-```rust
-use waproto::whatsapp as wa;
-
-// Edit a text message
-let new_body = wa::Message {
-    conversation: Some("Updated announcement".to_string()),
-    ..Default::default()
-};
-
-client.newsletter()
-    .edit_message(&newsletter_jid, message_id.clone(), new_body)
-    .await?;
-
-// Revoke (delete) it
-client.newsletter()
-    .revoke_message(&newsletter_jid, message_id)
-    .await?;
-```
-
-<Warning>
-Don't call `Client::edit_message` or `Client::revoke_message` with a newsletter JID. The E2E send path now rejects channel JIDs outright (including from `pin_message`) so you get a clear error rather than a malformed encrypted stanza. Always go through `client.newsletter()` for channel edits and revokes.
-</Warning>
+Reactions and poll votes use its server content ID and return a new operation `StanzaId`. Edits and revokes use its client content `MessageId`. The IDs are independent and optional; a missing required domain is rejected, not guessed from another field. Use the [newsletter action examples](/api/newsletter#send_reaction) and [migration guide](/guides/migrating-current-api#message-actions-and-identity).
 
 ## Fetching message history
 

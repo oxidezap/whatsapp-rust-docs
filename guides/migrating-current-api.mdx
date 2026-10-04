@@ -1,0 +1,101 @@
+---
+title: Current API migration
+description: Migrate older consumers to typed requests, references, constructors and validated store reads
+---
+
+<Note>
+Examples on this page target [source snapshot `ff7acad`](https://github.com/oxidezap/whatsapp-rust/tree/ff7acaddf80169013b0fd06df65296db7e4a8ca3), not a crates.io release. Use the [current API migration guide](/guides/migrating-current-api) to select the matching dependency.
+</Note>
+
+
+
+## Select a matching source
+
+The task examples in this update target the pinned Git source linked above. The package still declares `0.7.0`, but that does not make every main-branch change part of the published `0.7` crate. Do not copy these examples into a released dependency without checking its API.
+
+For this snapshot, pin the Git dependency:
+
+```toml
+[dependencies]
+whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "ff7acaddf80169013b0fd06df65296db7e4a8ca3" }
+tokio = { version = "1.53", features = ["macros", "rt-multi-thread"] }
+```
+
+For a crates.io release, select that exact version in [Rustdoc](https://docs.rs/whatsapp-rust). Source links on these task pages use an immutable commit. Rustdoc and source own exact signatures; these pages explain the task and its decisions.
+
+## Sends and edits
+
+| Older usage | Current usage |
+| --- | --- |
+| `send_message_with_options(chat, message, options)` | `send(SendRequest::new(&chat, message).with_options(options))` |
+| Positional `edit_message(chat, id, content)` and options overload | `edit_message(EditRequest::new(target, content).with_options(options))` |
+| Encrypted edit with separate byte/ID arguments | `EditRequest::with_secret(original_creator, &MessageSecret)` |
+| Complete `SendOptions` or `EditOptions` literal | `Default` plus `with_*` setters |
+| String content ID | Validate with `MessageId::new`; use `as_str()` at a string boundary |
+| Edit operation ID reused as target | Keep the original target and the returned operation separate |
+
+Default `send_text`, `send_message` and `forward_message` shortcuts remain. See [sending tasks](/api/send).
+
+## Message actions and identity
+
+Obtain `MessageRef` from `InboundMessage`, `MessageContext` or `SendResult`. For stored addressing use `MessageRef::new(chat, MessageId, original_sender, from_me)?`; received group/status content requires its original sender. Construction is validation, not a permission grant.
+
+Reactions, revokes, pins and keeps take the reference. Explicit `*_raw` methods remain for byte/string interoperability. Do not infer crypto creators from PN/LID aliases. Newsletter content uses `NewsletterMessageRef`, whose optional `MessageId` and `ServerMessageId` are independent; reactions/poll votes require the server content ID, while edits/revokes require the client content ID. An outer `StanzaId` is neither of those.
+
+## Polls and events
+
+| Older usage | Current usage |
+| --- | --- |
+| Creation `(send_result, secret)` tuple | `CreatedPoll` / `CreatedEvent`; named accessors or `into_parts()` |
+| Poll vote with positional ID/creator/secret | `vote(&PollRef, selected_options)` |
+| `decrypt_vote_ref(ciphertext, poll, voter)` | `decrypt_vote(ciphertext, poll, voter)` |
+| Byte/ID `decrypt_vote` | `decrypt_vote_raw` |
+| Positional event RSVP | `respond(&EventRef, response, extra_guests)` |
+| `EventCreationParams` literal | Required-name builder |
+| Raw secret bytes carried everywhere | Validate once with `MessageSecret::try_from` |
+
+Preserve the original creator, secret and addressing metadata together. Named results redact `Debug`, including their secret-bearing nested protobuf. Exporting the bytes is still sensitive. See [polls](/api/polls) and [events](/api/events).
+
+## Groups and communities
+
+Use `GroupCreateOptions::new(subject)` or its required-subject builder; there is no `Default`. Build participants with `GroupParticipantOptions::new(jid)`. Mock extensible outputs with `GroupMetadata::new` and `GroupParticipant::new`, then set supported fields. Use `..` when destructuring non-exhaustive DTOs.
+
+Batch metadata and overview aliases share `GroupLookupResult<T>` states; `.map` changes only a found payload. Preserve truncated, forbidden and missing outcomes. Overview, metadata and routing projections have different costs and purposes.
+
+`CreateCommunityOptions::new(name)` is fallible and stores `GroupSubject`. Descriptions use `GroupDescription`. Creation returns `result.metadata.id`; subgroup failures are `SubgroupFailure { jid, code, .. }` records. Use subgroup/link constructors and `SubgroupVisibility` for explicit visibility.
+
+Handle `CommunityError::ConfigurationFailed` by resuming configuration on `created_jid`. Repeating creation after a failed description can create a duplicate. See [groups](/api/groups) and [communities](/api/community).
+
+## Pictures and status
+
+| Older usage | Current usage |
+| --- | --- |
+| Single picture lookup on contacts/groups | `pictures().lookup(ProfilePictureRequest::new(target, size))` |
+| Implicit community retry | Explicit `ProfilePictureTarget::Community` policy |
+| `RateOverlimit` lookup outcome | Preserved 429 `ContactError::Iq` rejection |
+| Boolean preview argument | `ProfilePictureType::Preview` / `Full` |
+| `StatusSendOptions` literal or string ID override | `Default` and typed builders |
+| Arbitrary integer status font | Generated `FontType` |
+| Status content ID used as an operation ID | Separate `MessageId` and `StanzaId` options |
+
+An `Unchanged` picture result supplies no bytes. Status audience snapshots do not select recipients automatically. See [pictures](/api/pictures) and [status](/api/status).
+
+## Hooks and backend reads
+
+`InboundMessage` and `MessageBatch` are non-exhaustive; construct fixtures with builders and keep wildcard arms when matching extensible enums. Use the message's reference accessor so comment threading and ephemeral metadata survive.
+
+A custom `Backend` must implement all five storage traits. The three required `MsgSecretStore` methods are `put_msg_secrets`, `get_stored_msg_secret` and `delete_expired_msg_secrets`. The named read returns `Option<StoredMessageSecret>` with a validated `MessageSecret` and `Option<i64>` parent timestamp. Unknown time is `None`; it is not the Unix epoch or the retention deadline. `get_msg_secret_with_ts` has been removed. The byte-only `get_msg_secret` is a default projection of the validated named read.
+
+Use `StoredMessageSecret::from_stored_bytes` to map malformed persisted bytes to `StoreError::InvalidMessageSecret`; never pad/truncate them or silently invent a timestamp. Preserve expiry and timestamp merge rules on writes. See [storage](/api/store#msgsecretstore) and [custom backends](/guides/custom-backends).
+
+The durability hook must commit idempotently by `(chat, sender, message_id)` before returning success. PDO placeholder recovery is event-only, but a later encrypted retry still crosses the durability gate even if its equivalent event was already published. See [inbound durability](/advanced/inbound-durability).
+
+## Maintain one reference
+
+Put new public construction and host-trait proofs in the existing consolidated consumer, not another crate. Consumer task examples belong here; exact signatures and low-level invariants belong in source Rustdoc. When changing the source pin, compile the examples against that revision and verify native, published MSRV and WASM feature profiles before updating claims.
+
+## SQLite database and account scope
+
+Use `SqliteStore::open` for the default account. Rename `SqliteStoreConfig` to `SqliteDatabaseConfig` and open `SqliteDatabase` when configuring the pool or managing accounts. Select an account with `database.store(id)`, provision a chosen unused ID with `provision_device`, or allocate one with `create_device`. Enumeration, reset and removal belong to the database facade.
+
+Selection does not create a row, and provisioning is not an idempotent ensure. Stop the selected account's background tasks before reset/removal; retained handles are not revoked. Database-wide adapters and reports keep their own scope. See [storage tasks](/api/store).

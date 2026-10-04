@@ -23,7 +23,7 @@ use whatsapp_rust::prelude::*;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let bot = Bot::builder()
-        .with_backend(SqliteStore::new("whatsapp.db").await?)
+        .with_backend(SqliteStore::open("whatsapp.db").await?)
         .on_qr_code(|code, _timeout| async move {
             println!("Scan this QR code with WhatsApp:\n{code}");
         })
@@ -51,7 +51,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
   The bot needs persistent storage for session data, keys, and state:
 
   ```rust
-  let backend = SqliteStore::new("whatsapp.db").await?;
+  let backend = SqliteStore::open("whatsapp.db").await?;
   ```
 
   This creates a SQLite database file named `whatsapp.db` in your current directory. The session will persist across restarts.
@@ -184,7 +184,7 @@ use whatsapp_rust::prelude::*;
 use whatsapp_rust::pair_code::PairCodeOptions;
 
 let bot = Bot::builder()
-    .with_backend(SqliteStore::new("whatsapp.db").await?)
+    .with_backend(SqliteStore::open("whatsapp.db").await?)
     .with_pair_code(PairCodeOptions {
         phone_number: "15551234567".to_string(),
         ..Default::default()
@@ -334,7 +334,7 @@ use whatsapp_rust::prelude::*;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let bot = Bot::builder()
-        .with_backend(SqliteStore::new("whatsapp.db").await?)
+        .with_backend(SqliteStore::open("whatsapp.db").await?)
         .on_message(|ctx| async move {
             let _ = ctx.reply("hello").await;
         })
@@ -384,7 +384,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         })
         .init();
 
-    let store = SqliteStore::new("whatsapp.db").await?;
+    let store = SqliteStore::open("whatsapp.db").await?;
     info!("SQLite backend initialized");
 
     let bot = Bot::builder()

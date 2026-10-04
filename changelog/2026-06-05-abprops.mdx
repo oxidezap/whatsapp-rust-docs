@@ -6,7 +6,7 @@ description: "Vendored, auto-generated A/B-props registry replaces hand-maintain
 ## Breaking changes
 
 **`AbPropsCache` now takes typed `AbProp` constants**
-The hand-maintained `wacore::iq::props::config_codes` module is gone. Cache lookups now take a typed `AbProp` from the vendored [`wacore::iq::abprops`](/api/wacore#a-b-props-registry) registry instead of a raw `u32` code, which lets the cache reuse each flag's `value_type` and `default` from the WA Web bundle. If you were calling `client.ab_props().is_enabled(PRIVACY_TOKEN_ON_GROUP_CREATE)` against a numeric constant, switch to the named flag:
+The hand-maintained `wacore::iq::props::config_codes` module is gone. Cache lookups now take a typed `AbProp` from the vendored [`wacore::iq::abprops`](/api/wacore#ab-props-registry) registry instead of a raw `u32` code, which lets the cache reuse each flag's `value_type` and `default` from the WA Web bundle. If you were calling `client.ab_props().is_enabled(PRIVACY_TOKEN_ON_GROUP_CREATE)` against a numeric constant, switch to the named flag:
 
 ```rust
 use wacore::iq::abprops::web;
@@ -49,4 +49,4 @@ println!(
 
 Call `watch` before the first `fetch_props()` (i.e. before `client.connect()`), otherwise the flag's value will be dropped from the very first response.
 
-See [AB props cache](/api/client#ab-props-cache) and the [`abprops` registry](/api/wacore#a-b-props-registry) for the full API.
+See [AB props cache](/api/client#ab-props-cache) and the [`abprops` registry](/api/wacore#ab-props-registry) for the full API.

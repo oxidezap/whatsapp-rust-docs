@@ -3,6 +3,13 @@ title: "Bot"
 description: "High-level builder for creating WhatsApp bots with event handlers"
 ---
 
+<Note>
+Examples on this page target [source snapshot `ff7acad`](https://github.com/oxidezap/whatsapp-rust/tree/ff7acaddf80169013b0fd06df65296db7e4a8ca3), not a crates.io release. Use the [current API migration guide](/guides/migrating-current-api) to select the matching dependency.
+</Note>
+
+
+
+
 The `Bot` provides a simplified, ergonomic API for building WhatsApp bots. It handles client setup, event routing, and background sync tasks automatically.
 
 <Note>
@@ -84,18 +91,18 @@ Sets the storage backend (required).
 ```rust
 use whatsapp_rust::store::SqliteStore;
 
-let backend = Arc::new(SqliteStore::new("whatsapp.db").await?);
+let backend = Arc::new(SqliteStore::open("whatsapp.db").await?);
 let bot = Bot::builder()
     .with_backend(backend)
     // ...
 ```
 
 <Tip>
-For multi-account scenarios, use `SqliteStore::new_for_device(path, device_id)` to create isolated storage per account.
+For multi-account scenarios, open `SqliteDatabase` and select or provision an account; see [account lifecycle](/api/store#account-lifecycle).
 </Tip>
 
 <Tip>
-A bot that pairs once and stays connected for weeks is the single-long-lived-session profile, and `SqliteStore`'s defaults are tuned for the opposite one (many small per-session stores in a process). See [Memory and Thread Tuning](/concepts/storage#memory-and-thread-tuning-sqlitestoreconfig) for the cache size, reader count, and mmap setting that profile wants, and pass them with `SqliteStore::with_config` ([whatsapp-rust#1411](https://github.com/oxidezap/whatsapp-rust/pull/1411)).
+A bot that pairs once and stays connected for weeks is the single-long-lived-session profile, and `SqliteStore`'s defaults are tuned for the opposite one (many small per-session stores in a process). See [Memory and Thread Tuning](/concepts/storage#tune-database-resources) for the cache size, reader count, and mmap setting that profile wants, and pass them with `SqliteStore::with_config` ([whatsapp-rust#1411](https://github.com/oxidezap/whatsapp-rust/pull/1411)).
 </Tip>
 
 ### with_transport_factory
@@ -679,7 +686,7 @@ Register extra A/B props for the [`AbPropsCache`](/api/client#ab-props-cache) to
 The client discards every prop it does not watch while the catalog streams in, so the set is fixed on the builder before the first fetch. Calls accumulate.
 
 <ParamField path="props" type="impl IntoIterator<Item = AbProp>" required>
-  Typed flags from [`wacore::iq::abprops`](/api/wacore#a-b-props-registry). Pass a single-element array, a slice, or any iterator.
+  Typed flags from [`wacore::iq::abprops`](/api/wacore#ab-props-registry). Pass a single-element array, a slice, or any iterator.
 </ParamField>
 
 **Example:**
@@ -749,7 +756,7 @@ Pair code runs concurrently with QR code pairing — whichever completes first w
 </Note>
 
 <Tip>
-The `companion_platform_display` shown on the phone is derived automatically from the resolved `platform_id` and a **canonicalized** OS derived from the device's `os` string: web variants emit `<Browser> (<OS>)` (Android `PlatformType`s map to `Chrome`, so they show as `Chrome (Android)` by default); explicit `AndroidPhone`/`AndroidTablet`/`AndroidAmbiguous` overrides emit `Android (<OS>)`. The OS is coerced into a small server-safe set (`Windows`/`Mac OS`/`Linux`/`Android`/`iOS`) because the pair-code server rejects a non-OS display with `bad-request` — an arbitrary branding `os` string falls back to `Linux`. Set `PairCodeOptions::display_os` to send a real, non-canonical OS name verbatim instead. See [Authentication — companion_platform_display](/concepts/authentication#companion-platform-display) for the full classification table.
+The `companion_platform_display` shown on the phone is derived automatically from the resolved `platform_id` and a **canonicalized** OS derived from the device's `os` string: web variants emit `<Browser> (<OS>)` (Android `PlatformType`s map to `Chrome`, so they show as `Chrome (Android)` by default); explicit `AndroidPhone`/`AndroidTablet`/`AndroidAmbiguous` overrides emit `Android (<OS>)`. The OS is coerced into a small server-safe set (`Windows`/`Mac OS`/`Linux`/`Android`/`iOS`) because the pair-code server rejects a non-OS display with `bad-request` — an arbitrary branding `os` string falls back to `Linux`. Set `PairCodeOptions::display_os` to send a real, non-canonical OS name verbatim instead. See [Authentication — companion_platform_display](/concepts/authentication#companion_platform_display) for the full classification table.
 </Tip>
 
 ### on_pair_code_refresh
@@ -1181,27 +1188,11 @@ use whatsapp_rust::bot::MessageContext;
 
 ### edit_message
 
-```rust
-pub async fn edit_message(
-    &self,
-    original_message_id: impl Into<String>,
-    new_message: wa::Message
-) -> Result<SendResult, SendError>
-```
-
-Edits a message in the same chat. See [`Client::edit_message`](/api/send#edit_message) for what the returned `SendResult` describes.
+`ctx.edit_message(MessageId, replacement)` edits your own content in the context's chat. Validate a stored string with `MessageId::new` first. For custom operation options or encrypted edits, use `ctx.client.edit_message(EditRequest)`.
 
 ### revoke_message
 
-```rust
-pub async fn revoke_message(
-    &self,
-    message_id: String,
-    revoke_type: RevokeType
-) -> Result<SendResult, SendError>
-```
-
-Deletes a message in the same chat. See [`Client::revoke_message`](/api/send#revoke_message) for what the returned `SendResult` describes.
+`ctx.revoke_message(&MessageRef)` preserves the target's author and ownership scope. To revoke the context's message, pass `&ctx.message_ref()?`. `revoke_message_raw` is the explicit ID/scope interoperability path.
 
 ### react
 
@@ -1211,7 +1202,7 @@ pub async fn react(&self, emoji: &str) -> Result<SendResult, SendError>
 
 Sends an emoji reaction to the incoming message. The chat JID, target message ID, and group/status `participant` are taken from the context — you only supply the emoji. Pass an empty string (`""`) to remove a previously sent reaction.
 
-Internally this calls [`Client::send_reaction`](/api/send#send_reaction) with `self.message_key()` as the target.
+Internally this calls [`Client::send_reaction`](/api/send#send_reaction) with `self.message_ref()?` as the target.
 
 **Example:**
 ```rust
@@ -1247,7 +1238,7 @@ use std::sync::Arc;
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     // Set up storage
-    let backend = Arc::new(SqliteStore::new("bot.db").await?);
+    let backend = Arc::new(SqliteStore::open("bot.db").await?);
 
     // Build bot
     let mut bot = Bot::builder()

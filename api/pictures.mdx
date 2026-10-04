@@ -1,0 +1,54 @@
+---
+title: Profile pictures
+description: Look up contact, group and community pictures with an explicit route and outcome
+---
+
+<Note>
+Examples on this page target [source snapshot `ff7acad`](https://github.com/oxidezap/whatsapp-rust/tree/ff7acaddf80169013b0fd06df65296db7e4a8ca3), not a crates.io release. Use the [current API migration guide](/guides/migrating-current-api) to select the matching dependency.
+</Note>
+
+
+
+## Choose a route
+
+`client.pictures().lookup(ProfilePictureRequest)` replaces single-picture lookups on contacts and groups. Select `Contact`, `Group` or `Community` explicitly; the client does not perform an automatic community fallback.
+
+```rust
+use whatsapp_rust::{Client, ContactError, Jid, ProfilePictureLookup,
+    ProfilePictureRequest, ProfilePictureTarget, ProfilePictureType};
+
+async fn picture(client: &Client, group: &Jid) -> Result<(), ContactError> {
+    let result = client.pictures().lookup(ProfilePictureRequest::new(
+        ProfilePictureTarget::Group(group), ProfilePictureType::Full,
+    )).await?;
+    match result {
+        ProfilePictureLookup::Found(picture) => println!("{}", picture.url),
+        ProfilePictureLookup::Unchanged => {},
+        ProfilePictureLookup::NotFound => {},
+        ProfilePictureLookup::NotAuthorized => {},
+        _ => {},
+    }
+    Ok(())
+}
+```
+
+Use `Preview` when you need the smaller picture. Use `Community` for a community parent; its route differs from a normal group's route.
+
+## Revalidate a cached picture
+
+Build the request with `.existing_id(Some(cached_id))` only when you have the corresponding cached bytes. `Unchanged` carries no fresh URL and does not prove that your cache still has those bytes. Omit the existing ID to obtain a fresh result when local bytes are missing.
+
+`into_found()` deliberately drops every non-found state. Use a match when your cache or UI must distinguish unchanged, missing and unauthorized results.
+
+## Preserve errors
+
+A server 429 remains `ContactError::Iq(IqError::ServerError { .. })` with its original stanza and optional backoff. It is not a `ProfilePictureLookup::RateOverlimit` result. Do not turn it into a missing picture or immediately retry without considering the rejection.
+
+Request builders also accept optional timeout, common-group context, invite and persona ID. Only supported fields are sent on the selected route. Contact privacy-token discovery remains part of contact lookup.
+
+## Mutations and batches
+
+Set/remove pictures through `profile()` or `groups()` as documented by their facade. `groups().get_profile_pictures` remains a separate batch API with per-entry outcomes; it is not a loop over this facade. See [groups](/api/groups#get_profile_pictures).
+
+## Source reference
+[Routes, request builders and rejection classification](https://github.com/oxidezap/whatsapp-rust/blob/ff7acaddf80169013b0fd06df65296db7e4a8ca3/src/features/pictures.rs) · [Picture outcomes and IQ specification](https://github.com/oxidezap/whatsapp-rust/blob/ff7acaddf80169013b0fd06df65296db7e4a8ca3/wacore/src/iq/contacts.rs)

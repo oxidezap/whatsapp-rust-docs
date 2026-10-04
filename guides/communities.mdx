@@ -1,450 +1,51 @@
 ---
 title: Community management
-description: Learn how to create communities, manage subgroups, query community metadata, send encrypted CAG reactions, and post channel comments in whatsapp-rust
+description: Create a community safely and manage linked subgroups without losing partial failures
 ---
 
-## Overview
-
-Communities are parent groups that contain linked subgroups. They use the `w:g2` IQ namespace for mutations and MEX (GraphQL) for metadata queries.
-
-This guide covers creating communities, linking and unlinking subgroups, querying subgroup metadata, identifying group types, sending encrypted reactions to Community Announcement Groups, and posting channel comments.
-
-## Accessing the Community API
-
-All community operations are accessed through the `community()` method:
-
-```rust
-let community = client.community();
-```
-
-See [Community API reference](/api/community) for the full API.
-
-## Creating a community
-
-```rust
-use whatsapp_rust::features::community::CreateCommunityOptions;
-
-let options = CreateCommunityOptions::new("My Community");
-
-let result = client.community().create(options).await?;
-println!("Community created: {}", result.gid);
-```
-
-By default, `create_general_chat` is `true`, so a general chat subgroup is created alongside the community.
-
-See [Community API reference](/api/community#create) for details.
-
-### Community creation options
-
-Customize the community with `CreateCommunityOptions`:
-
-```rust
-use whatsapp_rust::features::community::CreateCommunityOptions;
-
-let mut options = CreateCommunityOptions::new("My Community");
-options.description = Some("Welcome to the community!".to_string());
-options.closed = true;
-options.allow_non_admin_sub_group_creation = false;
-options.create_general_chat = true;
-
-let result = client.community().create(options).await?;
-```
-
 <Note>
-If a description is provided, it is set via a follow-up IQ after creation — the group create stanza does not support inline descriptions for communities.
+Examples on this page target [source snapshot `ff7acad`](https://github.com/oxidezap/whatsapp-rust/tree/ff7acaddf80169013b0fd06df65296db7e4a8ca3), not a crates.io release. Use the [current API migration guide](/guides/migrating-current-api) to select the matching dependency.
 </Note>
 
-## Deactivating a community
 
-Deactivate (delete) a community. Subgroups are unlinked but not deleted:
 
-```rust
-client.community().deactivate(&community_jid).await?;
-```
+## Create once
 
-See [Community API reference](/api/community#deactivate) for details.
+Build validated `CreateCommunityOptions` and use `result.metadata.id` as the created JID. If optional description configuration fails after creation, handle `ConfigurationFailed` and resume on its `created_jid`. The [community task reference](/api/community#create) includes a complete recovery example.
 
-## Managing subgroups
+Creation defaults include a general chat. Change supported options explicitly after construction when your application needs a different policy. Do not recreate an existing parent to repair its description.
 
-### Link existing groups
-
-Link existing groups as subgroups of a community:
+## Link groups and inspect every result
 
 ```rust
-let subgroup_jids = vec![
-    "120363001111111@g.us".parse()?,
-    "120363002222222@g.us".parse()?,
-];
+use whatsapp_rust::{Client, Jid};
 
-let result = client.community()
-    .link_subgroups(&community_jid, &subgroup_jids)
-    .await?;
-
-println!("Linked: {:?}", result.linked_jids);
-
-for (jid, error_code) in &result.failed_groups {
-    eprintln!("Failed to link {}: error code {}", jid, error_code);
-}
-```
-
-See [Community API reference](/api/community#link_subgroups) for details.
-
-### Create a new subgroup
-
-Create a brand new group that's already linked as a subgroup of a community, in a single call:
-
-```rust
-let participants = vec![
-    "15551234567@s.whatsapp.net".parse()?,
-];
-
-let result = client.community()
-    .create_subgroup("Announcements", &participants, &community_jid)
-    .await?;
-
-println!("Created subgroup: {} ({})", result.metadata.subject, result.metadata.id);
-```
-
-This is a shortcut for creating a group and then calling `link_subgroups` — both steps happen in a single round-trip instead of two.
-
-See [Community API reference](/api/community#create_subgroup) for details.
-
-### Hidden subgroups
-
-Every subgroup has a visibility fixed at creation or link time. `SubgroupVisibility::Visible` (the default) lists the subgroup in the community's subgroup list for everyone. `SubgroupVisibility::Hidden` omits it for users who are not members, so only members and admins see it.
-
-Visibility is set once. WhatsApp does not support changing a subgroup's visibility later; to swap a linked group between visible and hidden you must unlink and re-link it.
-
-Create a subgroup as hidden with [`create_subgroup_with_options`](/api/community#create_subgroup_with_options):
-
-```rust
-use whatsapp_rust::features::community::{CreateSubgroupOptions, SubgroupVisibility};
-
-let participants = vec!["15551234567@s.whatsapp.net".parse()?];
-
-let options = CreateSubgroupOptions::new("Mods only", &participants, community_jid.clone())
-    .with_visibility(SubgroupVisibility::Hidden);
-
-let result = client.community()
-    .create_subgroup_with_options(options)
-    .await?;
-```
-
-Link a mix of visible and hidden groups in a single request with [`link_subgroups_with_options`](/api/community#link_subgroups_with_options):
-
-```rust
-use whatsapp_rust::features::community::{LinkSubgroupOptions, SubgroupVisibility};
-
-let options = vec![
-    LinkSubgroupOptions::new(
-        "120363001111111@g.us".parse()?,
-        SubgroupVisibility::Visible,
-    ),
-    LinkSubgroupOptions::new(
-        "120363002222222@g.us".parse()?,
-        SubgroupVisibility::Hidden,
-    ),
-];
-
-let result = client.community()
-    .link_subgroups_with_options(&community_jid, &options)
-    .await?;
-```
-
-`get_subgroups` reports each subgroup's current visibility on [`CommunitySubgroup::is_hidden_group`](/api/community#communitysubgroup).
-
-### Unlink subgroups
-
-Unlink subgroups from a community:
-
-```rust
-let result = client.community()
-    .unlink_subgroups(
-        &community_jid,
-        &subgroup_jids,
-        true, // remove_orphan_members
-    )
-    .await?;
-
-println!("Unlinked: {:?}", result.unlinked_jids);
-```
-
-When `remove_orphan_members` is `true`, members who are only in the community through the unlinked subgroups are removed from the community.
-
-See [Community API reference](/api/community#unlink_subgroups) for details.
-
-### Remove participants from a community
-
-Remove participants directly from a community (as opposed to from a single subgroup):
-
-```rust
-let to_remove = vec!["15551234567@s.whatsapp.net".parse()?];
-
-let results = client.community()
-    .remove_participants(&community_jid, &to_remove)
-    .await?;
-
-for result in results {
-    println!("{}: status {:?}", result.jid, result.status);
-}
-```
-
-See [Community API reference](/api/community#remove_participants) for details.
-
-### Join a subgroup
-
-Join a linked subgroup via the parent community:
-
-```rust
-let metadata = client.community()
-    .join_subgroup(&community_jid, &subgroup_jid)
-    .await?;
-
-println!("Joined: {} ({} participants)",
-    metadata.subject, metadata.participants.len());
-```
-
-See [Community API reference](/api/community#join_subgroup) for details.
-
-## Querying community information
-
-### List communities you're in
-
-Fetch all parent/community groups the logged-in account currently participates in. Use [`list_participating`](/api/community#list_participating) for the slim overview shape (id, subject, hierarchy, participant count) or [`fetch_participating_metadata`](/api/community#fetch_participating_metadata) when you need the full state:
-
-```rust
-let overviews = client.community().list_participating().await?;
-
-for overview in overviews {
-    let subject = overview.subject.as_deref().unwrap_or("(no subject)");
-    let count = overview.participant_count.unwrap_or(0);
-    println!("{}: {subject} ({count} participants)", overview.id);
-}
-```
-
-See [Community API reference](/api/community#list_participating) for details.
-
-### List subgroups
-
-Fetch all subgroups of a community via MEX (GraphQL):
-
-```rust
-let subgroups = client.community()
-    .get_subgroups(&community_jid)
-    .await?;
-
-for sg in &subgroups {
-    println!("{}: {} (default: {}, general: {}, hidden: {})",
-        sg.id, sg.subject, sg.is_default_sub_group, sg.is_general_chat, sg.is_hidden_group);
-    if let Some(count) = sg.participant_count {
-        println!("  Participants: {}", count);
+async fn link(client: &Client, parent: &Jid, children: &[Jid]) -> whatsapp_rust::anyhow::Result<()> {
+    let result = client.community().link_subgroups(parent, children).await?;
+    for jid in &result.linked_jids {
+        println!("linked {jid}");
     }
-}
-```
-
-See [Community API reference](/api/community#get_subgroups) for details.
-
-### Get subgroup participant counts
-
-Fetch participant counts per subgroup without fetching full subgroup details:
-
-```rust
-let counts = client.community()
-    .get_subgroup_participant_counts(&community_jid)
-    .await?;
-
-for (jid, count) in &counts {
-    println!("{}: {} participants", jid, count);
-}
-```
-
-See [Community API reference](/api/community#get_subgroup_participant_counts) for details.
-
-### Query linked group metadata
-
-Query a specific linked subgroup's metadata from the parent community:
-
-```rust
-let metadata = client.community()
-    .query_linked_group(&community_jid, &subgroup_jid)
-    .await?;
-
-println!("Subject: {}", metadata.subject);
-println!("Participants: {}", metadata.participants.len());
-```
-
-See [Community API reference](/api/community#query_linked_group) for details.
-
-### Get all participants across subgroups
-
-Fetch all participants across all linked groups of a community:
-
-```rust
-let participants = client.community()
-    .get_linked_groups_participants(&community_jid)
-    .await?;
-
-for p in &participants {
-    println!("{} (admin: {})", p.jid, p.is_admin);
-}
-```
-
-See [Community API reference](/api/community#get_linked_groups_participants) for details.
-
-## Identifying group types
-
-Use the `group_type` function to classify a group within the community hierarchy:
-
-```rust
-use whatsapp_rust::features::community::{group_type, GroupType};
-
-let metadata = client.groups().fetch_metadata(&group_jid).await?;
-
-match group_type(&metadata) {
-    GroupType::Community => println!("This is a community parent group"),
-    GroupType::LinkedSubgroup => println!("This is a linked subgroup"),
-    GroupType::LinkedAnnouncementGroup => println!("This is the default announcement subgroup"),
-    GroupType::LinkedGeneralGroup => println!("This is the general chat subgroup"),
-    GroupType::Default => println!("This is a regular group"),
-    _ => println!("Unknown group type"),
-}
-```
-
-The classification is based on these `GroupMetadata` fields:
-
-| Field | Description |
-|-------|-------------|
-| `is_parent_group` | `true` for community parent groups |
-| `parent_group_jid` | JID of the parent community (for subgroups) |
-| `is_default_sub_group` | `true` for the default announcement subgroup |
-| `is_general_chat` | `true` for the general chat subgroup |
-| `allow_non_admin_sub_group_creation` | Whether non-admin members can create subgroups |
-
-See [Groups API reference](/api/groups#fetch_metadata) for all `GroupMetadata` fields. Prefer the [`GroupHierarchy`](/api/groups#grouphierarchy) enum on [`GroupOverview`](/api/groups#groupoverview) when you only need the hierarchy classification — `group_type(&metadata)` is a projection of the same information.
-
-## Community Announcement Group (CAG) reactions
-
-The default announcement subgroup of a community — the one where `is_default_sub_group` is `true` — is a Community Announcement Group (CAG). CAGs require encrypted reactions; plaintext reactions are silently dropped by the server.
-
-`client.send_reaction()` handles this transparently. The same call works for DMs, regular groups, and CAGs with no change to your code:
-
-```rust
-let target_key = wa::MessageKey {
-    remote_jid: Some(cag_jid.to_string()),
-    from_me: Some(false),
-    id: Some("3EB0POSTID".to_string()),
-    // participant must be the post author.
-    participant: Some(post_author_jid.to_string()),
-};
-
-// send_reaction takes target_key by value; clone it to reuse for removal.
-client.send_reaction(&cag_jid, target_key.clone(), "🔥").await?;
-
-// Remove a reaction with an empty emoji:
-client.send_reaction(&cag_jid, target_key, "").await?;
-```
-
-For CAG chats the library checks the internal `is_community_announce` flag on its send-path routing snapshot (populated from metadata and cached). When `true`, the reaction is encrypted with the target post's `messageSecret` (captured when the post was received) and shipped as an `enc_reaction_message` envelope. If the parent secret is not available the call fails with a descriptive error rather than emitting a plaintext reaction the channel would drop.
-
-Incoming encrypted reactions from CAG posts are decrypted transparently by the receive path and surfaced as a normal `reaction_message` event. The `key` field is filled from the envelope's `target_message_key`, so your event handler looks identical to a regular group reaction:
-
-```rust
-Event::Messages(batch) => {
-    for InboundMessage { message: msg, .. } in batch.iter() {
-        if let Some(reaction) = msg.reaction_message.as_option() {
-            println!("Reaction: {:?}", reaction.text);
-            println!("On post:  {:?}", reaction.key.as_option().and_then(|k| k.id.as_deref()));
-        }
+    for failure in &result.failed_groups {
+        eprintln!("{}: {}", failure.jid, failure.code);
     }
+    Ok(())
 }
 ```
 
-## Channel comments
+Use `CreateSubgroupOptions` or `LinkSubgroupOptions` with `SubgroupVisibility` when visibility matters. Keep successful and failed entries separate when deciding which ones to retry. Query subgroup pagination and membership approval rather than treating a returned container as a complete joined membership list.
 
-Post encrypted threaded replies under a CAG post using `client.comments()`:
+## Address announcement posts
 
-```rust
-use whatsapp_rust::features::Comments;
+Use an inbound post's `message_ref()` for reactions and comments so its original author and context remain available. A group's visible addressing namespace is not necessarily the creator identity used for encryption. Store the original creator and secret if you need an encrypted edit or a manually reconstructed reference.
 
-let parent_key = wa::MessageKey {
-    remote_jid: Some(cag_jid.to_string()),
-    from_me: Some(false),
-    id: Some("3EB0POSTID".to_string()),
-    // participant must point to the post author so receivers can derive the
-    // decryption key from the envelope. The library resolves the author
-    // automatically when from_me is true and participant is omitted.
-    participant: Some(post_author_jid.to_string()),
-};
+`client.comments().send_text(&target, text)` posts a typed comment. For an already captured parent secret, the comments facade also exposes a typed path using the exact creator and secret; consult its source before bypassing store resolution. A new comment gets its own secret so add-ons can address that comment.
 
-// Send a text comment:
-let result = client.comments()
-    .send_text(&cag_jid, parent_key.clone(), "Great post!")
-    .await?;
-println!("Comment sent: {}", result.message_id);
-```
+For received comments, `InboundMessage::comment_target` identifies the parent post. `InboundMessage::message_ref()` still addresses the comment itself.
 
-For arbitrary message bodies, use `send_message`:
+## Read metadata and pictures
 
-```rust
-let body = wa::Message {
-    extended_text_message: buffa::MessageField::some(wa::message::ExtendedTextMessage {
-        text: Some("Great post!".to_string()),
-        ..Default::default()
-    }),
-    ..Default::default()
-};
+Use `groups().list_participating` or community overviews for listing. Fetch full metadata only when you need it; use group routing information for encryption fanout. These projections have different network, cache and identity-resolution costs.
 
-let result = client.comments()
-    .send_message(&cag_jid, parent_key, body)
-    .await?;
-```
+Single community parent pictures use `pictures().lookup` with `ProfilePictureTarget::Community`. There is no implicit fallback from the normal group route.
 
-Comments require the parent post's `messageSecret` to have been captured when the post was received (via `msg_secret_policy`). If it was not captured the call returns an error explaining that the secret is missing.
-
-Each comment carries a fresh `messageSecret` of its own so it can receive encrypted reactions. The comment's secret is persisted under the comment's own id and sender.
-
-### Receiving comments
-
-The client decrypts incoming encrypted comments transparently on the receive path. You receive the decrypted body as part of a normal `Event::Messages` batch. The inner `Message` proto has no slot for the parent post key, so you read the threading link off `InboundMessage::comment_target` instead:
-
-```rust
-Event::Messages(batch) => {
-    for InboundMessage { message: msg, comment_target, .. } in batch.iter() {
-        if let Some(parent_key) = comment_target {
-            // This is a channel comment.
-            println!("Comment on post: {:?}", parent_key.id);
-
-            if let Some(text) = msg.text_content() {
-                println!("Comment text: {}", text);
-            }
-        }
-    }
-}
-```
-
-`comment_target` is `None` for all other message types.
-
-## Error handling
-
-Community mutations return `anyhow::Error`, while MEX-based queries (`get_subgroups`, `get_subgroup_participant_counts`) return `MexError`:
-
-```rust
-use whatsapp_rust::features::mex::MexError;
-
-match client.community().get_subgroups(&community_jid).await {
-    Ok(subgroups) => println!("Found {} subgroups", subgroups.len()),
-    Err(MexError::PayloadParsing(msg)) => {
-        eprintln!("Parse error: {}", msg);
-    }
-    Err(e) => eprintln!("Error: {}", e),
-}
-```
-
-## Next steps
-
-- [Community API reference](/api/community) — Full API details and types
-- [Group management](/guides/group-management) — Manage individual groups
-- [Sending messages](/guides/sending-messages#reactions) — Reactions API overview
-- [Receiving messages](/guides/receiving-messages) — Handle message events including comments
-- [Events](/concepts/events) — Handle group update events
-- [MEX API](/api/mex) — Understand the GraphQL layer used by community queries
+See [community operations](/api/community), [group projections](/api/groups), [pictures](/api/pictures) and [migration](/guides/migrating-current-api).

@@ -2,10 +2,12 @@
 name: "API docs sync"
 on:
   push:
-    - repo: "jlucaso1/whatsapp-rust"
+    - repo: "oxidezap/whatsapp-rust"
 context:
-  - repo: "jlucaso1/whatsapp-rust"
+  - repo: "oxidezap/whatsapp-rust"
 automerge: true
 ---
 
-Update docs accordly with the updated things
+Read the changed source and identify its exact commit and publication status before adapting task examples. Keep repository links canonical. Update the current API migration guide for removals and changed ID/secret/store contracts. Preserve distinct projections, partial failures and durability boundaries.
+
+Use the library's Rustdoc and pinned source for exact signatures; do not recreate exhaustive DTO or overload catalogs in MDX. Compile changed Rust examples against the cited revision, check MDX and internal links, and update all affected task pages together. Never describe unreleased main-branch APIs as a published crates.io version merely because Cargo.toml retains that version number.

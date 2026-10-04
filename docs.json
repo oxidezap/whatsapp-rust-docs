@@ -10,12 +10,12 @@
   "navbar": {
     "primary": {
       "type": "github",
-      "href": "https://github.com/jlucaso1/whatsapp-rust"
+      "href": "https://github.com/oxidezap/whatsapp-rust"
     }
   },
   "footer": {
     "socials": {
-      "github": "https://github.com/jlucaso1/whatsapp-rust"
+      "github": "https://github.com/oxidezap/whatsapp-rust"
     }
   },
   "navigation": {
@@ -47,6 +47,7 @@
               {
                 "group": "Guides",
                 "pages": [
+                  "guides/migrating-current-api",
                   "guides/sending-messages",
                   "guides/receiving-messages",
                   "guides/media-handling",
@@ -103,6 +104,7 @@
                 "pages": [
                   "api/groups",
                   "api/contacts",
+                  "api/pictures",
                   "api/presence",
                   "api/chatstate",
                   "api/blocking",
@@ -204,7 +206,7 @@
         "language": "pt",
         "tabs": [
           {
-            "tab": "Documentação",
+            "tab": "Documenta\u00e7\u00e3o",
             "groups": [
               {
                 "group": "Primeiros Passos",

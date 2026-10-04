@@ -85,7 +85,7 @@ impl RetryAdmission for AlwaysAdmit {
 }
 
 let bot = Bot::builder()
-    .with_backend(SqliteStore::new("whatsapp.db").await?)
+    .with_backend(SqliteStore::open("whatsapp.db").await?)
     .build()
     .await?;
 

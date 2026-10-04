@@ -21,7 +21,7 @@ use wacore::types::events::{Event, InboundMessage, PairingQrCode};
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Inicializa o backend de armazenamento
-    let backend = Arc::new(SqliteStore::new("whatsapp.db").await?);
+    let backend = Arc::new(SqliteStore::open("whatsapp.db").await?);
 
     // Constrói o bot
     let mut bot = Bot::builder()
@@ -59,7 +59,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
   O bot precisa de armazenamento persistente para dados de sessão, chaves e estado:
 
   ```rust
-  let backend = Arc::new(SqliteStore::new("whatsapp.db").await?);
+  let backend = Arc::new(SqliteStore::open("whatsapp.db").await?);
   ```
 
   Isso cria um arquivo de banco SQLite chamado `whatsapp.db` no diretório atual. A sessão será persistida entre reinicializações.
@@ -381,7 +381,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         })
         .init();
 
-    let backend = Arc::new(SqliteStore::new("whatsapp.db").await?);
+    let backend = Arc::new(SqliteStore::open("whatsapp.db").await?);
     info!("SQLite backend initialized");
 
     let mut bot = Bot::builder()

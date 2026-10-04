@@ -796,9 +796,9 @@ See [Contacts API](/api/contacts) for details.
 
 ## Automatic business stanza detection
 
-When sending interactive business messages (native-flow buttons for payments, CTAs, catalogs, etc.), the library automatically injects a `<biz>` stanza child node on the outgoing message. This means you can send `InteractiveMessage` with `NativeFlowMessage` content through `send_message` or `send_message_with_options` without manually constructing business protocol nodes.
+When sending interactive business messages (native-flow buttons for payments, CTAs, catalogs, etc.), the library automatically injects a `<biz>` stanza child node on the outgoing message. This means you can send `InteractiveMessage` with `NativeFlowMessage` content through `send_message` or `send(SendRequest)` without manually constructing business protocol nodes.
 
-See [Send API - Automatic business node detection](/api/send#automatic-business-node-detection) for the full list of supported button-to-flow mappings.
+See [Send API - Automatic business node detection](/api/business) for the full list of supported button-to-flow mappings.
 
 ## See also
 
@@ -806,4 +806,4 @@ See [Send API - Automatic business node detection](/api/send#automatic-business-
 - [MEX API](/api/mex) - GraphQL transport used by catalog, collections, and order lookup
 - [Contacts API](/api/contacts) - Check `is_business` flag on contacts
 - [Events](/concepts/events#businessstatusupdate) - Business status update events
-- [Send API](/api/send#automatic-business-node-detection) - Auto-detected `<biz>` stanza nodes
+- [Send API](/api/business) - Auto-detected `<biz>` stanza nodes

@@ -61,7 +61,7 @@ pub trait HttpClient: MaybeSendSync {
 </Note>
 
 <Note>
-`supports_upload_streaming` / `execute_upload` were added in v0.6 to back [`Client::upload_stream`](/api/upload#upload-stream-constant-memory). Both have safe defaults (returning `false` / an error), so existing custom `HttpClient` implementations keep compiling — implement them only if you want constant-memory uploads through your client. `UreqHttpClient` implements both. `UploadBody` is `Box<dyn std::io::Read + Send>`.
+`supports_upload_streaming` / `execute_upload` were added in v0.6 to back [`Client::upload_stream`](/api/upload#upload_stream-constant-memory). Both have safe defaults (returning `false` / an error), so existing custom `HttpClient` implementations keep compiling — implement them only if you want constant-memory uploads through your client. `UreqHttpClient` implements both. `UploadBody` is `Box<dyn std::io::Read + Send>`.
 </Note>
 
 <Warning>

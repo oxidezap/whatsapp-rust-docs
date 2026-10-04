@@ -88,7 +88,7 @@ use wacore::types::events::{Event, PairingQrCode};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let backend = Arc::new(SqliteStore::new("whatsapp.db").await?);
+    let backend = Arc::new(SqliteStore::open("whatsapp.db").await?);
 
     let mut bot = Bot::builder()
         .with_backend(backend)
@@ -927,7 +927,7 @@ client.set_client_profile(ClientProfile::android("13")).await;
 client.connect().await?.read_until_disconnected().await;
 ```
 
-Internally this dispatches `DeviceCommand::SetClientProfile(profile)` through the persistence manager (see [State Management](/advanced/state-management#deviceCommand-pattern)).
+Internally this dispatches `DeviceCommand::SetClientProfile(profile)` through the persistence manager (see [State Management](/advanced/state-management#devicecommand-pattern)).
 
 ### Key Derivation
 

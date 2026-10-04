@@ -23,7 +23,7 @@ client.forward_message(destination_jid, &received).await?;
 
 If you need to tweak the prepared body before sending (custom caption, extra stanza nodes), use the underlying `MessageExt::prepare_for_forward` helper directly and pass the result to `send_message_with_options`.
 
-See [`forward_message`](/api/send#forward_message) and the [Forwarding messages guide](/guides/sending-messages#forwarding-messages) for details.
+See [`forward_message`](/api/send#forwarding-and-metadata) and the [Forwarding messages guide](/guides/sending-messages#forward-without-copying-a-secret) for details.
 
 **Send played receipts for voice and video notes**
 
@@ -66,7 +66,7 @@ println!("New picture ID: {:?}", response.id);
 client.groups().remove_profile_picture(&group_jid).await?;
 ```
 
-See [Groups API reference](/api/groups#set_profile_picture) and the [Group management guide](/guides/group-management#set-or-remove-the-group-picture) for details.
+See [Groups API reference](/api/groups#get_profile_pictures) and the [Group management guide](/guides/group-management#look-up-pictures-explicitly) for details.
 
 ---
 

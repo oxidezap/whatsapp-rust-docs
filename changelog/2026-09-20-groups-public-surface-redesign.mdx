@@ -9,7 +9,7 @@ description: "Breaking: query_info and GroupInfo are internal now. New GroupOver
 
 The `Groups` API is now split into three purpose-built views so no caller can mistake the send-path routing cache for display data.
 
-- **`GroupOverview`** — new slim, display-oriented type: `id`, `subject`, [`hierarchy`](/api/groups#grouphierarchy), and `participant_count`. Canonical source of subject, community hierarchy, parent, and subgroup kind for high-level callers.
+- **`GroupOverview`** — new slim, display-oriented type: `id`, `subject`, [`hierarchy`](/api/groups#source-reference), and `participant_count`. Canonical source of subject, community hierarchy, parent, and subgroup kind for high-level callers.
 - **`GroupMetadata`** — unchanged full object, still the entry point for participants, roles, and settings.
 - **Routing snapshots** — the old `GroupInfo` (now `GroupRoutingInfo`) is `pub(crate)`. It powers the send path only; sending a message consults it for you.
 
@@ -22,17 +22,17 @@ New enums: `GroupHierarchy { Standalone, Community, Subgroup { parent, kind } }`
 | `Groups::query_info` / `query_info_with_freshness` | removed (routing is internal; sending consults it for you) |
 | `Groups::get_participating` | [`list_participating`](/api/groups#list_participating) — returns `Vec<GroupOverview>` |
 | `Groups::get_metadata` | [`fetch_metadata`](/api/groups#fetch_metadata) |
-| `Groups::batch_get_info` | [`fetch_metadata_batch`](/api/groups#fetch_metadata_batch) |
+| `Groups::batch_get_info` | [`fetch_metadata_batch`](/api/groups#choose-a-projection) |
 | `BatchGroupResult` | `GroupMetadataResult` |
 | `GroupInfo` | `GroupRoutingInfo` (crate-private) |
 | `GroupInfoResponse` | `GroupMetadataResponse` |
-| `Community::get_participating` | [`list_participating`](/api/community#list_participating) / [`fetch_participating_metadata`](/api/community#fetch_participating_metadata) |
+| `Community::get_participating` | [`list_participating`](/api/community#query-and-manage) / [`fetch_participating_metadata`](/api/community#query-and-manage) |
 
 ### New APIs
 
-- [`Groups::fetch_overviews(&[Jid])`](/api/groups#fetch_overviews) — batch fetch slim overviews for a chosen set of groups. Returns `Found` / `Truncated` / `Forbidden` / `NotFound` per JID. Same wire request as `fetch_metadata_batch`, but each `<group>` node is parsed with a slim parser that never materializes participants.
-- [`Groups::resolve_participant_addresses(&mut GroupMetadata)`](/api/groups#resolve_participant_addresses) — opt-in LID → PN backfill. `fetch_metadata` no longer runs this implicitly; call it at the callsite when you need PN-keyed display data. The extra cache/database cost now reads at the point of use.
-- [`Community::list_participating`](/api/community#list_participating) — parent-community-only overview list.
+- [`Groups::fetch_overviews(&[Jid])`](/api/groups#choose-a-projection) — batch fetch slim overviews for a chosen set of groups. Returns `Found` / `Truncated` / `Forbidden` / `NotFound` per JID. Same wire request as `fetch_metadata_batch`, but each `<group>` node is parsed with a slim parser that never materializes participants.
+- [`Groups::resolve_participant_addresses(&mut GroupMetadata)`](/api/groups#fetch_metadata) — opt-in LID → PN backfill. `fetch_metadata` no longer runs this implicitly; call it at the callsite when you need PN-keyed display data. The extra cache/database cost now reads at the point of use.
+- [`Community::list_participating`](/api/community#query-and-manage) — parent-community-only overview list.
 
 ### Behavior changes
 
