@@ -95,7 +95,7 @@ let params = DownloadParams::encrypted(
     &file_enc_sha256,      // file_enc_sha256
     12345,                 // file_length
     MediaType::Image,      // media_type
-);
+)?;
 
 let data = client.download(&params).await?;
 
@@ -114,7 +114,7 @@ let params = DownloadParams::encrypted(
     &file_enc_sha256,
     file_length,
     MediaType::Video,
-);
+)?;
 
 let file = File::create("large_video.mp4")?;
 let file = client.download_to_writer(&params, file).await?;
@@ -141,7 +141,7 @@ let params = DownloadParams::encrypted(
     &file_enc_sha256,
     file_length,
     MediaType::Image,
-);
+)?;
 
 let data = downloader.download(&params).await?;
 ```
@@ -244,7 +244,7 @@ let params = DownloadParams::encrypted(
     &thumbnail_enc_sha256,
     thumbnail_length,
     MediaType::LinkThumbnail,
-);
+)?;
 
 let thumbnail = client.download(&params).await?;
 ```
@@ -416,6 +416,8 @@ pub enum MediaType {
     StickerPackThumbnail,
     LinkThumbnail,
     ProductCatalogImage,
+    MusicArtwork,
+    NewsletterMusicArtwork,
 }
 ```
 
@@ -442,7 +444,7 @@ let encrypted = MediaType::ProductCatalogImage.is_encrypted();
 ```
 
 <Note>
-`ProductCatalogImage` is the only unencrypted media type. It uploads to `/product/image` instead of the `/mms/` prefix used by other types. This matches WhatsApp Web's behavior where `CreateMediaKeys.js` skips encryption for product catalog images.
+`ProductCatalogImage` and `NewsletterMusicArtwork` are explicitly plaintext media types. For downloads of other types, key presence selects encryption, except `MusicArtwork`, which always requires it. Use `DownloadParams::plaintext` for stored newsletter metadata without a key. Product catalog images upload to `/product/image`.
 </Note>
 
 ## Encryption Details
@@ -550,30 +552,27 @@ Never skip SHA256 verification! The library automatically verifies both encrypte
 ### Download Errors
 
 ```rust
-use anyhow::Result;
+use whatsapp_rust::{Client, download::{ClientDownloadError, Downloadable}};
 
 async fn safe_download(
     client: &Client,
     downloadable: &dyn Downloadable,
-) -> Result<Vec<u8>> {
+) -> Result<Vec<u8>, ClientDownloadError> {
     match client.download(downloadable).await {
-        Ok(data) => {
-            println!("✅ Downloaded {} bytes", data.len());
-            Ok(data)
-        }
-        Err(e) => {
-            if e.to_string().contains("invalid mac") {
-                eprintln!("❌ Media corrupted (MAC mismatch)");
-            } else if e.to_string().contains("status") {
-                eprintln!("❌ Download failed (HTTP error)");
-            } else {
-                eprintln!("❌ Download error: {:?}", e);
+        Ok(data) => Ok(data),
+        Err(error) => {
+            match &error {
+                ClientDownloadError::ReferenceRejected(_) => eprintln!("Media reference rejected"),
+                ClientDownloadError::Preparation(_) => eprintln!("Invalid media metadata"),
+                _ => eprintln!("Download failed: {error:?}"),
             }
-            Err(e)
+            Err(error)
         }
     }
 }
 ```
+
+Download errors redact opaque backend text in `Display` and `Debug`. Match typed variants instead of parsing diagnostic strings. Explicit access to the source chain can expose signed URLs; see [safe diagnostics](/api/download#safe-diagnostics).
 
 ### Upload Errors
 
@@ -589,7 +588,7 @@ async fn safe_upload(
             Ok(upload)
         }
         Err(e) => {
-            eprintln!("❌ Upload failed: {:?}", e);
+            eprintln!("Upload failed"); // The returned source may contain signed URLs.
             Err(e)
         }
     }

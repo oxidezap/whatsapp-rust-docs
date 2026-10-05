@@ -442,28 +442,31 @@ This only removes the message from your own devices. The other party can still s
 
 ### message_range
 
-Construct a `SyncActionMessageRange` for multi-device conflict resolution. In most cases you can pass `None` instead — only WhatsApp Web with a full message database populates this.
+Build a range from `(MessageRef, timestamp)` pairs. Arrays, vectors, and iterators preserve their input order. Pass `[]` for an empty range. The helper preserves both range timestamps and each message timestamp.
 
 ```rust
-pub fn message_range(
+pub fn message_range<'a>(
     last_message_timestamp: i64,
     last_system_message_timestamp: Option<i64>,
-    messages: Vec<(wa::MessageKey, i64)>,
+    messages: impl IntoIterator<Item = (MessageRef<'a>, i64)>,
 ) -> SyncActionMessageRange
 ```
 
-### message_key
-
-Construct a `MessageKey` for use with `message_range`.
-
 ```rust
-pub fn message_key(
-    id: impl Into<String>,
-    remote_jid: &Jid,
-    from_me: bool,
-    participant: Option<&Jid>,
-) -> wa::MessageKey
+use whatsapp_rust::{message_range, MessageRef, SyncActionMessageRange};
+
+fn range_for(target: MessageRef<'_>, timestamp: i64) -> SyncActionMessageRange {
+    message_range(timestamp, None, [(target, timestamp)])
+}
+
+fn empty_range(timestamp: i64) -> SyncActionMessageRange {
+    message_range(timestamp, None, [])
+}
 ```
+
+Pass the reference directly; clone it if you need to reuse it. The helper projects the key without retaining the message body or client. For operations with an optional range, you can still pass `None`.
+
+The free `message_key` factory is removed. Use `MessageRef::to_raw_key` for explicit protobuf interop. The `MessageContext::message_key` and `SendResult::message_key` accessors remain available.
 
 ## Generic app state action
 

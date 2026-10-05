@@ -469,7 +469,7 @@ pub enum TcTokenError {
 
 ### MediaReuploadError
 
-Reupload errors distinguish missing local LID, conflicting requests, receipt ACK timeout or rejection, and notification timeout. Client and internal causes use `Arc` so coalesced callers retain the same cause. See [reupload errors](/api/media-reupload#error-handling).
+Reupload errors distinguish missing local LID, conflicting requests, phased timeout or waiter closure, and receipt rejection with its optional numeric code and original response. Client and internal causes use `Arc` so coalesced callers retain the same cause. See [reupload errors](/api/media-reupload#error-handling).
 
 ### PresenceError
 
