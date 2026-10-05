@@ -84,7 +84,7 @@ pub fn encrypted(
 ) -> Result<Self, DownloadPreparationError>
 ```
 
-The key and both SHA-256 hashes must each contain 32 bytes. Explicitly plaintext media types, including `NewsletterMusicArtwork`, return `RequiresPlaintext`.
+The key and both SHA-256 hashes must each contain 32 bytes. Explicitly plaintext media types, including `ProductCatalogImage` and `NewsletterMusicArtwork`, return `RequiresPlaintext`.
 
 ### DownloadParams::plaintext
 
@@ -97,7 +97,7 @@ pub fn plaintext(
 ) -> Result<Self, DownloadPreparationError>
 ```
 
-The plaintext hash must contain 32 bytes. This constructor stores no media key or encrypted hash. It supports ordinary image and video types for newsletter media, plus `NewsletterMusicArtwork`. `MusicArtwork` returns `RequiresEncryption`.
+The plaintext hash must contain 32 bytes. This constructor stores no media key or encrypted hash. It supports ordinary image and video types for newsletter media, plus `ProductCatalogImage` and `NewsletterMusicArtwork`. `MusicArtwork` returns `RequiresEncryption`.
 
 ```rust
 use whatsapp_rust::download::{DownloadParams, DownloadPreparationError, Downloadable, MediaType};
