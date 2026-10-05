@@ -47,7 +47,7 @@ Match with a fallback arm because the enum is extensible. `ErrorChainExt` recove
 
 ## Automatic retry and URL re-derivation
 
-For session-derived routes, the client performs applicable host failover and can refresh the media host list once after a reference rejection. Static URLs bypass session acquisition and their first reference rejection is terminal. Inspect `ClientDownloadError` for the final classification; a refreshed empty host list preserves the original rejection status. The standalone `MediaDownloader` cannot ask a client for refreshed hosts.
+For session-derived routes, the client performs applicable host failover and can refresh the media host list once after HTTP 401. HTTP 403/404/410 are terminal reference rejections. Static URLs bypass session acquisition and their first reference rejection is terminal. Inspect `ClientDownloadError` for the final classification; a refreshed empty host list preserves the original rejection status. The standalone `MediaDownloader` cannot ask a client for refreshed hosts.
 
 Local writer failures do not trigger CDN retry or refresh. A consumed sink may have changed before failure; use the cleanup and cancellation boundaries above rather than publish partial output.
 
@@ -69,31 +69,9 @@ Only an actual newsletter JID selects plaintext channel artwork. Other chats req
 
 ## DownloadParams
 
-A `Downloadable` built from raw CDN fields, for re-downloading media without the original message.
-
-```rust
-pub struct DownloadParams {
-    pub direct_path: String,
-    pub media_key: Option<Vec<u8>>,
-    pub file_sha256: Vec<u8>,
-    pub file_enc_sha256: Option<Vec<u8>>,
-    pub file_length: u64,
-    pub media_type: MediaType,
-}
-```
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `direct_path` | `String` | WhatsApp CDN path (e.g. `/v/t62.7118-24/12345_67890`) |
-| `media_key` | `Option<Vec<u8>>` | 32-byte media key. `None` for plaintext (newsletter/channel) media |
-| `file_sha256` | `Vec<u8>` | SHA-256 of the decrypted file |
-| `file_enc_sha256` | `Option<Vec<u8>>` | SHA-256 of the encrypted file (encrypted media only) |
-| `file_length` | `u64` | Original file size in bytes |
-| `media_type` | `MediaType` | `Image`, `Video`, `Audio`, `Document`, `Sticker`, … |
+Store validated, owned CDN metadata without keeping the original message. Fields are private. Both constructors copy the input slices and return `Result<DownloadParams, DownloadPreparationError>`.
 
 ### DownloadParams::encrypted
-
-Convenience constructor for encrypted (E2EE) media — fills `media_key` and `file_enc_sha256` as `Some(...)`.
 
 ```rust
 pub fn encrypted(
@@ -103,10 +81,59 @@ pub fn encrypted(
     file_enc_sha256: &[u8],
     file_length: u64,
     media_type: MediaType,
-) -> Self
+) -> Result<Self, DownloadPreparationError>
 ```
 
-`DownloadParams` implements [`Downloadable`](#downloadable-trait), so it works with `download`, `download_to_writer`, and [`MediaDownloader`](#mediadownloader).
+The key and both SHA-256 hashes must each contain 32 bytes. Explicitly plaintext media types, including `ProductCatalogImage` and `NewsletterMusicArtwork`, return `RequiresPlaintext`.
+
+### DownloadParams::plaintext
+
+```rust
+pub fn plaintext(
+    direct_path: impl Into<String>,
+    file_sha256: &[u8],
+    file_length: u64,
+    media_type: MediaType,
+) -> Result<Self, DownloadPreparationError>
+```
+
+The plaintext hash must contain 32 bytes. This constructor stores no media key or encrypted hash. It supports ordinary image and video types for newsletter media, plus `ProductCatalogImage` and `NewsletterMusicArtwork`. `MusicArtwork` returns `RequiresEncryption`.
+
+```rust
+use whatsapp_rust::download::{DownloadParams, DownloadPreparationError, Downloadable, MediaType};
+
+fn stored_image(
+    path: &str,
+    key: &[u8],
+    plaintext_hash: &[u8],
+    encrypted_hash: &[u8],
+    length: u64,
+) -> Result<DownloadParams, DownloadPreparationError> {
+    let params = DownloadParams::encrypted(
+        path, key, plaintext_hash, encrypted_hash, length, MediaType::Image,
+    )?;
+    assert_eq!(params.file_length(), Some(length));
+    Ok(params)
+}
+
+fn stored_channel_image(
+    path: &str,
+    hash: &[u8],
+    length: u64,
+) -> Result<DownloadParams, DownloadPreparationError> {
+    DownloadParams::plaintext(path, hash, length, MediaType::Image)
+}
+```
+
+Import `Downloadable` to read `direct_path()`, `media_key()`, `file_sha256()`, `file_enc_sha256()`, `file_length()`, and `app_info()`. Construct a new value to change metadata. Replace struct literals with the appropriate constructor and handle its error, usually with `?`.
+
+These constructors validate lengths and encryption mode. URL and route validation still happens when preparing the request. `DownloadParams` has no static-URL field; use the original message or a custom `Downloadable` to retain a static URL. The container works with `download`, `download_to_writer`, and [`MediaDownloader`](#mediadownloader).
+
+### Metadata validation
+
+`DownloadUtils::validate_download_metadata(&dyn Downloadable)` returns `Result<(), DownloadPreparationError>`. Client downloads perform this check before requesting a media session, and request preparation checks it before HTTP. Present hashes must contain 32 bytes. Required metadata depends on encryption mode and whether a static URL is available. Optional hashes remain optional where the transport permits them.
+
+The owned container's 32-byte key requirement does not change the raw `Downloadable` key contract. Static URLs still bypass the media-session IQ. Missing fields, invalid hashes, and incompatible modes return local preparation errors; use a fallback arm when matching the non-exhaustive `DownloadPreparationError`.
 
 ---
 
@@ -158,7 +185,7 @@ impl MediaDownloader {
   The CDN hosts to try, in order. See [`MediaRoute`](#mediaroute-and-mediahost) below.
 </ParamField>
 
-`download` and `download_to_writer` mirror `Client::download` and `Client::download_to_writer`; same streaming/buffered branching, same retry-on-another-host behavior across the route's hosts, same writer contract for the streaming variant. A `Client` can refresh its media host list once after a reference rejection. `MediaDownloader` has no session to refresh, so a reference rejection is terminal on the first attempt.
+`download` and `download_to_writer` mirror `Client::download` and `Client::download_to_writer`; same streaming/buffered branching, same retry-on-another-host behavior across the route's hosts, same writer contract for the streaming variant. A `Client` can refresh its media host list once after HTTP 401. HTTP 403/404/410 are terminal reference rejections. `MediaDownloader` has no session to refresh, so a reference rejection is terminal on the first attempt.
 
 ### Example: download after the session is gone
 
@@ -180,7 +207,7 @@ let params = DownloadParams::encrypted(
     &file_enc_sha256,
     file_length,
     MediaType::Image,
-);
+)?;
 
 let bytes = downloader.download(&params).await?;
 ```
@@ -226,7 +253,7 @@ fn download_route() -> MediaRoute {
 
 Use `MediaRoute::default_hosts()` when you need the built-in `DEFAULT_MEDIA_HOSTS`. A connected client obtains hosts from its media session. A retained route can be used after disconnect while the media reference remains valid.
 
-`DownloadUtils::prepare_download_requests` preserves existing query parameters, percent encoding, and fragments while adding the existing media `token` parameter. Relative media paths remain on the selected HTTPS route origin. Download URLs do not receive session auth. Supply URI-encoded direct paths: malformed percent escapes, raw whitespace, backslashes, and raw non-ASCII characters are rejected. References cannot add credentials or change the selected HTTPS origin.
+`DownloadUtils::prepare_download_requests` preserves existing query parameters, percent encoding, and fragments while adding the existing media `token` parameter. Relative media paths remain on the selected HTTPS route origin. Download URLs do not receive session auth. Supply URI-encoded direct paths: malformed percent escapes, raw whitespace, backslashes, and raw non-ASCII characters are rejected. References cannot add credentials or change the selected HTTPS origin. Equivalent IPv6 literal spellings compare as addresses; scheme and port restrictions still apply.
 
 ---
 
@@ -502,3 +529,7 @@ use whatsapp_rust::download::DownloadUtils;
 | `copy_and_validate_plaintext_to_writer(reader, expected_sha256, writer)` | Streams plaintext media to a writer while validating SHA-256 hash |
 | `prepare_download_requests(downloadable, route)` | Builds CDN request URLs with host failover. Takes a hosts-only [`MediaRoute`](#mediaroute-and-mediahost) |
 | `get_media_keys(media_key, app_info)` | Derives IV, cipher key, and MAC key via HKDF |
+
+## Safe diagnostics
+
+`ClientDownloadError` and `MediaDownloadError` omit opaque cause text from both `Display` and `Debug`. Library media tracing records safe classifications and typed facts such as HTTP status or I/O kind. Original causes remain accessible through `Error::source` and downcasting. Explicitly formatting those causes can still expose signed URLs or other backend data.

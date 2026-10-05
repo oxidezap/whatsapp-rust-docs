@@ -469,7 +469,7 @@ pub enum TcTokenError {
 
 ### MediaReuploadError
 
-Reupload errors distinguish missing local LID, conflicting requests, receipt ACK timeout or rejection, and notification timeout. Client and internal causes use `Arc` so coalesced callers retain the same cause. See [reupload errors](/api/media-reupload#error-handling).
+Reupload errors distinguish missing local LID, conflicting requests, phased timeout or waiter closure, and receipt rejection with its optional numeric code and original response. Client and internal causes use `Arc` so coalesced callers retain the same cause. See [reupload errors](/api/media-reupload#error-handling).
 
 ### PresenceError
 
@@ -581,7 +581,7 @@ pub enum SignalMaintenanceError {
 
 ### MessageEditError
 
-Returned by `EncryptedEdit::original_sender_jid`, `SecretEncrypted::original_sender_jid`, and `SecretEncrypted::original_sender_for_dispatch` — the target-key sender resolvers used when decrypting `secret_encrypted_message` envelopes (message edits, poll edits/add-option, event edits). Added in PR #1090, replacing bare `anyhow::Error`. Read the [pinned target-key resolvers](https://github.com/oxidezap/whatsapp-rust/blob/93e5c7f75cdad98472efd218d9bff8a464cf47a7/wacore/src/proto_helpers.rs) when handling an encrypted add-on.
+Returned by `EncryptedEdit::original_sender_jid`, `SecretEncrypted::original_sender_jid`, and `SecretEncrypted::original_sender_for_dispatch` — the target-key sender resolvers used when decrypting `secret_encrypted_message` envelopes (message edits, poll edits/add-option, event edits). Added in PR #1090, replacing bare `anyhow::Error`. Read the [pinned target-key resolvers](https://github.com/oxidezap/whatsapp-rust/blob/d804acaec1439e54c43c129e2f90d45016506abe/wacore/src/proto_helpers.rs) when handling an encrypted add-on.
 
 ```rust
 #[non_exhaustive]

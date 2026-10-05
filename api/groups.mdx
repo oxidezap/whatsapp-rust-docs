@@ -4,7 +4,7 @@ description: Choose group projections, construct inputs and manage group state
 ---
 
 <Note>
-Examples on this page target [source snapshot `93e5c7f`](https://github.com/oxidezap/whatsapp-rust/tree/93e5c7f75cdad98472efd218d9bff8a464cf47a7), not a crates.io release. Use the [current API guide](/guides/current-api) to select the matching dependency.
+Examples on this page target [source snapshot `d804acae`](https://github.com/oxidezap/whatsapp-rust/tree/d804acaec1439e54c43c129e2f90d45016506abe), not a crates.io release. Use the [current API guide](/guides/current-api) to select the matching dependency.
 </Note>
 
 ## Choose a projection
@@ -116,8 +116,8 @@ Use typed modes and the source reference for exact arguments:
 Use the [pictures facade](/api/pictures) for a single normal group or community parent. Group picture mutations remain `set_profile_picture` and `remove_profile_picture`.
 
 ## Source reference
-[Facade, projections, history outcomes and DTO constructors](https://github.com/oxidezap/whatsapp-rust/blob/93e5c7f75cdad98472efd218d9bff8a464cf47a7/src/features/groups.rs) · [Core group inputs, typed modes and IQ contracts](https://github.com/oxidezap/whatsapp-rust/blob/93e5c7f75cdad98472efd218d9bff8a464cf47a7/wacore/src/iq/groups.rs)
+[Facade, projections, history outcomes and DTO constructors](https://github.com/oxidezap/whatsapp-rust/blob/d804acaec1439e54c43c129e2f90d45016506abe/src/features/groups.rs) · [Core group inputs, typed modes and IQ contracts](https://github.com/oxidezap/whatsapp-rust/blob/d804acaec1439e54c43c129e2f90d45016506abe/wacore/src/iq/groups.rs)
 
 ## GroupError
 
-Group operations return their typed `GroupError`, preserving IQ, storage and validation causes. Description conflicts require reconciling current state before another update. Keep a fallback arm when matching this extensible enum. See [the pinned error definition](https://github.com/oxidezap/whatsapp-rust/blob/93e5c7f75cdad98472efd218d9bff8a464cf47a7/src/features/groups.rs) and [error-chain recovery](/api/errors#error-chain-recovery).
+Group operations return their typed `GroupError`, preserving IQ, storage and validation causes. Description conflicts require reconciling current state before another update. Keep a fallback arm when matching this extensible enum. See [the pinned error definition](https://github.com/oxidezap/whatsapp-rust/blob/d804acaec1439e54c43c129e2f90d45016506abe/src/features/groups.rs) and [error-chain recovery](/api/errors#error-chain-recovery).

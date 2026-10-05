@@ -41,6 +41,8 @@ async fn recover_batch(
 
 Identical requests share one recovery, both within a batch and across concurrent callers. Identity includes the message ID, normalized target and participant, direction, and media key. Reusing an in-flight ID for a different target or key returns `Conflict(MessageId)`. In a batch, the first occurrence reserves that ID; identical later entries share its result, including duplicates beyond the concurrency window.
 
+The batch reserves every input before execution and runs at most 32 distinct operations at once. Duplicate subscribers share a slot. Completed operations free capacity even while an earlier input remains pending; results are placed back into input order.
+
 Dropping one caller leaves other subscribers running. Dropping the last subscriber removes the operation and its waiters immediately. Completion, failure, and timeout release the registration too. `client.memory_report().await.media_reuploads` counts distinct in-flight operations, not their coalesced subscribers.
 
 ## Protocol flow
@@ -51,7 +53,7 @@ Dropping one caller leaves other subscribers running. Dropping the last subscrib
 4. Wait for the matching receipt ACK. Sending through the transport alone does not confirm this step. A server rejection returns `Rejected`.
 5. Await and decrypt the notification. A notification received during send or ACK processing remains buffered. The encrypted notification must contain the matching stanza ID.
 
-The send/ACK phase has a 30-second timeout. After a successful ACK, the notification phase has its own 30-second timeout. An early notification cannot hide a rejected receipt.
+`MediaReuploadPhase::SendAndAck` has a 30-second budget that includes `send_node` and ACK waiting. After a successful ACK, `MediaReuploadPhase::Notification` has its own 30-second budget. An early notification cannot hide a rejected receipt.
 
 ## Types
 
@@ -83,10 +85,28 @@ A successful request returns this result; inspect the variant before retrying th
 | --- | --- |
 | `NotLoggedIn` | Local LID is unavailable; nothing is sent |
 | `Conflict(MessageId)` | Another target or media key owns the in-flight wire ID |
-| `AckTimeout` | Send/receipt-ACK phase timed out |
-| `Rejected(String)` | Matching receipt ACK carried a rejection |
-| `Timeout` | Media-retry notification timed out after the ACK |
+| `Timeout { phase }` | The named send/ACK or notification budget expired |
+| `Cancelled { phase }` | The waiter channel closed in that phase |
+| `Rejected { code, response }` | Matching receipt ACK carried a rejection; retains `Option<u16>` and the original `RejectionStanza` |
 | `Client(Arc<ClientError>)` | Shared client or transport failure |
 | `Internal(Arc<anyhow::Error>)` | Shared encryption, parsing, or other internal cause |
 
 Client and internal errors retain their original causes for all subscribers. `std::error::Error::source()` exposes the underlying typed cause rather than the sharing `Arc`, so error-chain inspection and downcasting remain available. An invalid encrypted notification is an error, including a missing or mismatched stanza ID.
+
+`MediaReuploadPhase` is also non-exhaustive and is exported from the crate root. Replace `AckTimeout` with `Timeout { phase: MediaReuploadPhase::SendAndAck }` and the former unit `Timeout` with the `Notification` phase. `Cancelled` means waiter-channel closure. Dropping your future returns no error and follows the subscriber cleanup rules above.
+
+`Rejected` preserves the complete response, including unknown fields and the raw error code. Missing, nonnumeric, or out-of-range codes produce `None`. Read `response.as_arc()` only when you need the original stanza. `Debug` redacts its contents and opaque client/internal causes; explicit source access and reupload error `Display` can still expose those causes.
+
+```rust
+use whatsapp_rust::{MediaReuploadError, MediaReuploadPhase};
+
+fn failure_kind(error: &MediaReuploadError) -> &'static str {
+    match error {
+        MediaReuploadError::Timeout { phase: MediaReuploadPhase::SendAndAck } => "send or ACK timeout",
+        MediaReuploadError::Timeout { phase: MediaReuploadPhase::Notification } => "notification timeout",
+        MediaReuploadError::Cancelled { .. } => "waiter closed",
+        MediaReuploadError::Rejected { .. } => "receipt rejected",
+        _ => "other failure",
+    }
+}
+```

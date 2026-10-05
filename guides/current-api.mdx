@@ -5,7 +5,7 @@ description: Choose supported requests, message references and storage boundarie
 
 ## Select a matching source
 
-These examples use the merged source snapshot [93e5c7f](https://github.com/oxidezap/whatsapp-rust/tree/93e5c7f75cdad98472efd218d9bff8a464cf47a7). The package's declared version does not prove that a main-branch API exists in the published crate. Use the pinned dependency from [installation](/installation) to compile these examples. For a released dependency, select its exact version in [Rustdoc](https://docs.rs/whatsapp-rust).
+These examples use the merged source snapshot [d804acae](https://github.com/oxidezap/whatsapp-rust/tree/d804acaec1439e54c43c129e2f90d45016506abe). The package's declared version does not prove that a main-branch API exists in the published crate. Use the pinned dependency from [installation](/installation) to compile these examples. For a released dependency, select its exact version in [Rustdoc](https://docs.rs/whatsapp-rust).
 
 ## Sends and edits
 
@@ -17,7 +17,7 @@ Pass `EditRequest::new(target, replacement)` to `edit_message`. Encrypted edits 
 
 Obtain `MessageRef` from `InboundMessage`, `MessageContext` or `SendResult`. For stored addressing, validate `MessageRef::new(chat, MessageId, original_sender, from_me)?`. Group and status references retain the original author. Construction validates shape and does not grant server permissions.
 
-Reactions, revokes, pins, keeps, stars and local message deletion take that reference. Message labels take the reference's chat and typed `MessageId`. Channel actions take `NewsletterMessageRef`: edits and revokes require the client `MessageId`; reactions and poll votes require the observed `ServerMessageId`. An outer `StanzaId` identifies the operation for ACK correlation. These IDs have separate purposes.
+Reactions, revokes, pins, keeps, stars and local message deletion take that reference. Message labels take the reference's chat and typed `MessageId`. Build app-state ranges with `message_range(last, system, [(target, timestamp)])`; the helper accepts typed references directly. Channel actions take `NewsletterMessageRef`: edits and revokes require the client `MessageId`; reactions and poll votes require the observed `ServerMessageId`. An outer `StanzaId` identifies the operation for ACK correlation. These IDs have separate purposes.
 
 ## Waiters, activity, and media
 
@@ -25,9 +25,9 @@ Keep the `NodeWaiter` returned by `wait_for_node` or `wait_for_sent_node` until 
 
 Global availability uses `PresenceStatus`; chat activity uses `ChatActivity` in both outgoing calls and events. See [chatstate](/api/chatstate) and [receipt JSON persistence](/api/receipt#json-persistence).
 
-Reupload requests contain a `MessageRef` and a 32-byte media key. Identical concurrent requests share a recovery; conflicting uses of the same ID return an error. See [media reupload](/api/media-reupload).
+Reupload requests contain a `MessageRef` and a 32-byte media key. Identical concurrent requests share a recovery; conflicting uses of the same ID return an error. Batch capacity counts distinct operations. Errors retain the failed phase or original rejection response. See [media reupload](/api/media-reupload).
 
-Download routes contain only hosts. Use `MediaRoute::new(hosts)` or `default_hosts()`. Downloadable values and writers follow platform send bounds. See [download](/api/download).
+Build stored download metadata with the fallible `DownloadParams::encrypted` or `plaintext` constructor. Fields are private; import `Downloadable` for read access. Download routes contain only hosts. Use `MediaRoute::new(hosts)` or `default_hosts()`. Downloadable values and writers follow platform send bounds. See [download](/api/download).
 
 ## Push-name completion
 

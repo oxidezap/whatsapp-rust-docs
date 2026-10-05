@@ -4,7 +4,7 @@ description: Opt in to at-least-once message delivery by deferring the transport
 ---
 
 <Note>
-Examples on this page target [source snapshot `93e5c7f`](https://github.com/oxidezap/whatsapp-rust/tree/93e5c7f75cdad98472efd218d9bff8a464cf47a7), not a crates.io release. Use the [current API guide](/guides/current-api) to select the matching dependency.
+Examples on this page target [source snapshot `d804acae`](https://github.com/oxidezap/whatsapp-rust/tree/d804acaec1439e54c43c129e2f90d45016506abe), not a crates.io release. Use the [current API guide](/guides/current-api) to select the matching dependency.
 </Note>
 
 ## Overview
@@ -266,4 +266,4 @@ Use `InboundMessage::message_ref()` for chat actions and `newsletter_ref()` for 
 
 PDO placeholder recovery remains event-only. A later encrypted retry still must complete its durability hook even when the equivalent user event was already dispatched. The retry can promote that recovery to committed state without publishing the same event again. Distinct user payloads in an SKDM-bearing retry retain separate dispatch claims; adding an SKDM envelope does not make their user content identical. Hooks and event consumers still need idempotent `(chat, sender, id)` handling.
 
-[PDO retry and durability regression scenarios](https://github.com/oxidezap/whatsapp-rust/blob/93e5c7f75cdad98472efd218d9bff8a464cf47a7/src/message/tests.rs)
+[PDO retry and durability regression scenarios](https://github.com/oxidezap/whatsapp-rust/blob/d804acaec1439e54c43c129e2f90d45016506abe/src/message/tests.rs)

@@ -957,7 +957,7 @@ let request = MediaReuploadRequest { target, media_key: &media_key_bytes };
 let result = client.media_reupload().request(&request).await?;
 ```
 
-`request_many` preserves order and cardinality. Identical requests share one recovery; conflicting targets or keys with the same ID return `Conflict`. The request requires the local LID, waits for a receipt ACK, then waits for the media-retry notification. See [media reupload](/api/media-reupload) for cancellation, timeout, and result handling.
+`request_many` runs up to 32 distinct operations and restores input order and cardinality. Duplicate subscribers do not consume extra operation slots. Identical requests share one recovery; conflicting targets or keys with the same ID return `Conflict`. The request requires the local LID, waits for a receipt ACK, then waits for the media-retry notification. See [media reupload](/api/media-reupload) for cancellation, timeout, and result handling.
 
 ### signal
 

@@ -4,7 +4,7 @@ description: Learn how to implement custom storage, transport, and HTTP backends
 ---
 
 <Note>
-Examples on this page target [source snapshot `93e5c7f`](https://github.com/oxidezap/whatsapp-rust/tree/93e5c7f75cdad98472efd218d9bff8a464cf47a7), not a crates.io release. Use the [current API guide](/guides/current-api) to select the matching dependency.
+Examples on this page target [source snapshot `d804acae`](https://github.com/oxidezap/whatsapp-rust/tree/d804acaec1439e54c43c129e2f90d45016506abe), not a crates.io release. Use the [current API guide](/guides/current-api) to select the matching dependency.
 </Note>
 
 
@@ -42,7 +42,7 @@ For crash replay, implement the pending-inbound methods on `ProtocolStore`. Stor
 
 Device-scoped operations must isolate one account from another. The scope of `DeviceStore::resource_report` depends on the adapter. SQLite reports the shared database pool through this legacy trait method; count it once per database. Use `SqliteStore::scoped_resource_report()` for an account and `SqliteDatabase::resource_report()` for the database-wide report. Register an owned adapter with `with_backend` or an `Arc<dyn Backend>` with `with_backend_arc`.
 
-[Storage trait reference](https://github.com/oxidezap/whatsapp-rust/blob/93e5c7f75cdad98472efd218d9bff8a464cf47a7/wacore/src/store/traits.rs) · [SQLite reference implementation](https://github.com/oxidezap/whatsapp-rust/blob/93e5c7f75cdad98472efd218d9bff8a464cf47a7/storages/sqlite-storage/src/lib.rs)
+[Storage trait reference](https://github.com/oxidezap/whatsapp-rust/blob/d804acaec1439e54c43c129e2f90d45016506abe/wacore/src/store/traits.rs) · [SQLite reference implementation](https://github.com/oxidezap/whatsapp-rust/blob/d804acaec1439e54c43c129e2f90d45016506abe/storages/sqlite-storage/src/lib.rs)
 
 ## Custom Runtime
 
@@ -407,7 +407,7 @@ Implement the `HttpClient` trait for custom HTTP operations:
 <Warning>
 Make `self.send_request(&request)` below return `Ok` for a completed exchange, even a 4xx/5xx status. Reserve `Err` for two cases: the exchange never starts at all (DNS failure, connection refused, a TLS error, a timeout), or a body read fails after a 2xx status (for example, the body exceeds a size cap you enforce).
 
-Media download and upload read `status_code` off the `Ok` response. Session-derived downloads can refresh CDN hosts and re-derive the URL once after a reference rejection (401/403/404/410); their routes carry no auth token. Static URLs and standalone `MediaDownloader` cannot refresh a session. Uploads refresh authentication tokens on 401/403. Both paths can move to the next CDN host for other failures such as 5xx. Turning a non-2xx response into `Err` hides its status from this handling. See [HTTP Client Trait](/api/http-client#httpclient-trait), including how `UreqHttpClient` preserves non-2xx responses.
+Media download and upload read `status_code` off the `Ok` response. Session-derived downloads can refresh CDN hosts and re-derive the URL once after HTTP 401. HTTP 403/404/410 are terminal reference rejections. Download routes carry no auth token. Static URLs and standalone `MediaDownloader` cannot refresh a session. Uploads refresh authentication tokens on 401/403. Both paths can move to the next CDN host for other failures such as 5xx. Turning a non-2xx response into `Err` hides its status from this handling. See [HTTP Client Trait](/api/http-client#httpclient-trait), including how `UreqHttpClient` preserves non-2xx responses.
 </Warning>
 
 ```rust
