@@ -2452,6 +2452,7 @@ Entry counts plus estimated retained heap bytes for the client's internal collec
 | `delivery_receipt_queue` | `usize` | Delivery receipts queued for their worker, same shape as `transport_ack_queue` ([#1116](https://github.com/oxidezap/whatsapp-rust/pull/1116)) |
 | `response_waiters` | `usize` | Active IQ response waiters |
 | `node_waiters` | `usize` | Active node waiters |
+| `media_reuploads` | `usize` | Distinct in-flight media-reupload operations. Coalesced subscribers share one entry; this is not a subscriber count. |
 | `sent_node_waiters` | `usize` | Waiters parked on outgoing nodes, the pre-encryption counterpart of `node_waiters`. Each retains a filter and a oneshot sender ([#1235](https://github.com/oxidezap/whatsapp-rust/pull/1235)) |
 | `pending_retries` | `usize` | Pending message retries |
 | `pending_lid_refreshes` | `usize` | Numbers with a `refresh_lid` re-resolve in flight, keyed by `(connection_generation, PN-side JID)`. Counts active reservations, not distinct peers — the same phone number can hold more than one across a reconnect, since an old generation's entry is only released by the task that took it. A value that stays high across repeated samples points at refreshes not completing rather than at request volume alone — though sustained turnover across many peers can also hold it up, since a completed reservation can be replaced by a fresh one between samples ([#1313](https://github.com/oxidezap/whatsapp-rust/pull/1313)) |

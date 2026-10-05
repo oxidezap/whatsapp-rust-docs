@@ -41,7 +41,7 @@ async fn recover_batch(
 
 Identical requests share one recovery, both within a batch and across concurrent callers. Identity includes the message ID, normalized target and participant, direction, and media key. Reusing an in-flight ID for a different target or key returns `Conflict(MessageId)`. In a batch, the first occurrence reserves that ID; identical later entries share its result, including duplicates beyond the concurrency window.
 
-Dropping one caller leaves other subscribers running. Dropping the last subscriber removes the operation and its waiters immediately. Completion, failure, and timeout release the registration too.
+Dropping one caller leaves other subscribers running. Dropping the last subscriber removes the operation and its waiters immediately. Completion, failure, and timeout release the registration too. `client.memory_report().await.media_reuploads` counts distinct in-flight operations, not their coalesced subscribers.
 
 ## Protocol flow
 
@@ -89,4 +89,4 @@ A successful request returns this result; inspect the variant before retrying th
 | `Client(Arc<ClientError>)` | Shared client or transport failure |
 | `Internal(Arc<anyhow::Error>)` | Shared encryption, parsing, or other internal cause |
 
-Client and internal errors retain their original causes for all subscribers. An invalid encrypted notification is an error, including a missing or mismatched stanza ID.
+Client and internal errors retain their original causes for all subscribers. `std::error::Error::source()` exposes the underlying typed cause rather than the sharing `Arc`, so error-chain inspection and downcasting remain available. An invalid encrypted notification is an error, including a missing or mismatched stanza ID.
