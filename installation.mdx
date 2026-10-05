@@ -24,7 +24,7 @@ Before installing whatsapp-rust, ensure you have:
 
 ```toml Cargo.toml
 [dependencies]
-whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "93e5c7f75cdad98472efd218d9bff8a464cf47a7" }
+whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "d804acaec1439e54c43c129e2f90d45016506abe" }
 tokio = { version = "1.53", features = ["macros", "rt-multi-thread"] }
 ```
 
@@ -52,7 +52,7 @@ The same holds for git consumers — no need to pin every sibling crate:
 
 ```toml Cargo.toml
 [dependencies]
-whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "93e5c7f75cdad98472efd218d9bff8a464cf47a7" }
+whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "d804acaec1439e54c43c129e2f90d45016506abe" }
 tokio = { version = "1.53", features = ["macros", "rt-multi-thread"] }
 ```
 
@@ -60,7 +60,7 @@ If you need to declare a sibling crate explicitly (for example to enable a crate
 
 ```toml Cargo.toml
 [dependencies]
-whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "93e5c7f75cdad98472efd218d9bff8a464cf47a7" }
+whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "d804acaec1439e54c43c129e2f90d45016506abe" }
 # Only needed for crate-specific features not exposed through whatsapp-rust:
 # whatsapp-rust-sqlite-storage is re-exported by whatsapp-rust; add a direct Git dependency only if needed.
 # whatsapp-rust-tokio-transport is re-exported by whatsapp-rust; add a direct Git dependency only if needed.
@@ -124,7 +124,7 @@ To use whatsapp-rust in a WASM browser environment, enable the `js` feature on `
 
 ```toml Cargo.toml
 [dependencies]
-wacore = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "93e5c7f75cdad98472efd218d9bff8a464cf47a7", default-features = false, features = ["js"] }
+wacore = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "d804acaec1439e54c43c129e2f90d45016506abe", default-features = false, features = ["js"] }
 ```
 
 <Note>
@@ -134,8 +134,8 @@ wacore = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "93e5c7f75cd
 
   ```toml Cargo.toml
   [dependencies]
-  whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "93e5c7f75cdad98472efd218d9bff8a464cf47a7", default-features = false, features = ["voip-mlow"] }
-  wacore = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "93e5c7f75cdad98472efd218d9bff8a464cf47a7", default-features = false, features = ["js"] }
+  whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "d804acaec1439e54c43c129e2f90d45016506abe", default-features = false, features = ["voip-mlow"] }
+  wacore = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "d804acaec1439e54c43c129e2f90d45016506abe", default-features = false, features = ["js"] }
   ```
 </Note>
 
@@ -151,7 +151,7 @@ The `waproto` crate has its own feature flags:
 
 ```toml Cargo.toml
 [dependencies]
-waproto = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "93e5c7f75cdad98472efd218d9bff8a464cf47a7", features = ["serde-snake-case"] }
+waproto = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "d804acaec1439e54c43c129e2f90d45016506abe", features = ["serde-snake-case"] }
 ```
 
 The `whatsapp-rust-sqlite-storage` crate has its own feature flags:
@@ -168,7 +168,7 @@ To keep the `SqliteStore` while linking against your own SQLite, disable default
 
 ```toml Cargo.toml
 [dependencies]
-whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "93e5c7f75cdad98472efd218d9bff8a464cf47a7", default-features = false, features = [
+whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "d804acaec1439e54c43c129e2f90d45016506abe", default-features = false, features = [
     "sqlite-storage",
     "tokio-transport",
     "tokio-runtime",
@@ -184,7 +184,7 @@ If you depend on `whatsapp-rust-sqlite-storage` directly, the same rule applies 
 
 ```toml Cargo.toml
 [dependencies]
-whatsapp-rust-sqlite-storage = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "93e5c7f75cdad98472efd218d9bff8a464cf47a7", default-features = false }
+whatsapp-rust-sqlite-storage = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "d804acaec1439e54c43c129e2f90d45016506abe", default-features = false }
 ```
 
 <Note>
@@ -247,7 +247,7 @@ If you want to use only specific features:
 
 ```toml Cargo.toml
 [dependencies]
-whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "93e5c7f75cdad98472efd218d9bff8a464cf47a7", default-features = false, features = ["sqlite-storage", "tokio-transport"] }
+whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "d804acaec1439e54c43c129e2f90d45016506abe", default-features = false, features = ["sqlite-storage", "tokio-transport"] }
 ```
 
 ## Verify installation

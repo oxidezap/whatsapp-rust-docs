@@ -673,7 +673,7 @@ let _file = client.download_to_writer(video, progress_writer).await?;
 
 ### Automatic retry and failover
 
-For session-derived download routes, a reference rejection (401/403/404/410) can trigger one media-session refresh and URL re-derivation with refreshed hosts. Download routes carry no auth token. Static URLs bypass session refresh, and `MediaDownloader` returns a reference rejection immediately because it has no session.
+For session-derived download routes, HTTP 401 can trigger one media-session refresh and URL re-derivation with refreshed hosts. HTTP 403/404/410 are terminal reference rejections; refreshing hosts cannot renew a signed reference. Download routes carry no auth token. Static URLs bypass session refresh, and `MediaDownloader` returns a reference rejection immediately because it has no session.
 
 Transport, HTTP, or integrity failures can fall over to another host. Local writer failures are terminal. Inspect the typed [download errors](/api/download#clientdownloaderror) and publish the destination only after success; cleanup after cancellation is not guaranteed.
 
@@ -711,7 +711,7 @@ async fn download_with_retry(
 
 ### Automatic management
 
-The client caches media connection information. Downloads use its CDN hosts; uploads also use its authentication token. Session-derived downloads can refresh hosts once after a reference rejection (401/403/404/410), while uploads refresh credentials on 401/403:
+The client caches media connection information. Downloads use its CDN hosts; uploads also use its authentication token. Session-derived downloads can refresh hosts once after HTTP 401. HTTP 403/404/410 are terminal for downloads, while uploads refresh credentials on 401/403:
 
 ```rust
 // Each operation applies its own refresh policy

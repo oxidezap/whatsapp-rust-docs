@@ -47,7 +47,7 @@ Match with a fallback arm because the enum is extensible. `ErrorChainExt` recove
 
 ## Automatic retry and URL re-derivation
 
-For session-derived routes, the client performs applicable host failover and can refresh the media host list once after a reference rejection. Static URLs bypass session acquisition and their first reference rejection is terminal. Inspect `ClientDownloadError` for the final classification; a refreshed empty host list preserves the original rejection status. The standalone `MediaDownloader` cannot ask a client for refreshed hosts.
+For session-derived routes, the client performs applicable host failover and can refresh the media host list once after HTTP 401. HTTP 403/404/410 are terminal reference rejections. Static URLs bypass session acquisition and their first reference rejection is terminal. Inspect `ClientDownloadError` for the final classification; a refreshed empty host list preserves the original rejection status. The standalone `MediaDownloader` cannot ask a client for refreshed hosts.
 
 Local writer failures do not trigger CDN retry or refresh. A consumed sink may have changed before failure; use the cleanup and cancellation boundaries above rather than publish partial output.
 
@@ -185,7 +185,7 @@ impl MediaDownloader {
   The CDN hosts to try, in order. See [`MediaRoute`](#mediaroute-and-mediahost) below.
 </ParamField>
 
-`download` and `download_to_writer` mirror `Client::download` and `Client::download_to_writer`; same streaming/buffered branching, same retry-on-another-host behavior across the route's hosts, same writer contract for the streaming variant. A `Client` can refresh its media host list once after a reference rejection. `MediaDownloader` has no session to refresh, so a reference rejection is terminal on the first attempt.
+`download` and `download_to_writer` mirror `Client::download` and `Client::download_to_writer`; same streaming/buffered branching, same retry-on-another-host behavior across the route's hosts, same writer contract for the streaming variant. A `Client` can refresh its media host list once after HTTP 401. HTTP 403/404/410 are terminal reference rejections. `MediaDownloader` has no session to refresh, so a reference rejection is terminal on the first attempt.
 
 ### Example: download after the session is gone
 

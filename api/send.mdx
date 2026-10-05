@@ -4,7 +4,7 @@ description: Send content and address edits, reactions, revokes, pins and keeps 
 ---
 
 <Note>
-Examples on this page target [source snapshot `93e5c7f`](https://github.com/oxidezap/whatsapp-rust/tree/93e5c7f75cdad98472efd218d9bff8a464cf47a7), not a crates.io release. Use the [current API guide](/guides/current-api) to select the matching dependency.
+Examples on this page target [source snapshot `d804acae`](https://github.com/oxidezap/whatsapp-rust/tree/d804acaec1439e54c43c129e2f90d45016506abe), not a crates.io release. Use the [current API guide](/guides/current-api) to select the matching dependency.
 </Note>
 
 ## send
@@ -117,7 +117,7 @@ Use the explicitly named `*_raw` methods when integrating stored byte/string key
 The send pipeline derives stanza metadata for polls, events, pins, media and business content. Extra nodes do not bypass validation; a conflicting automatically derived business or DM bot node is rejected. See [business messages](/api/business), [media](/guides/media-handling), [polls](/api/polls), [events](/api/events) and [newsletter actions](/api/newsletter).
 
 ## Source reference
-[Send options, results and routing](https://github.com/oxidezap/whatsapp-rust/blob/93e5c7f75cdad98472efd218d9bff8a464cf47a7/src/send/mod.rs) · [Request constructors](https://github.com/oxidezap/whatsapp-rust/blob/93e5c7f75cdad98472efd218d9bff8a464cf47a7/src/send/requests.rs) · [Editing](https://github.com/oxidezap/whatsapp-rust/blob/93e5c7f75cdad98472efd218d9bff8a464cf47a7/src/client/messaging.rs) · [Revokes, pins and keeps](https://github.com/oxidezap/whatsapp-rust/blob/93e5c7f75cdad98472efd218d9bff8a464cf47a7/src/send/actions.rs) · [Reactions](https://github.com/oxidezap/whatsapp-rust/blob/93e5c7f75cdad98472efd218d9bff8a464cf47a7/src/features/reaction.rs)
+[Send options, results and routing](https://github.com/oxidezap/whatsapp-rust/blob/d804acaec1439e54c43c129e2f90d45016506abe/src/send/mod.rs) · [Request constructors](https://github.com/oxidezap/whatsapp-rust/blob/d804acaec1439e54c43c129e2f90d45016506abe/src/send/requests.rs) · [Editing](https://github.com/oxidezap/whatsapp-rust/blob/d804acaec1439e54c43c129e2f90d45016506abe/src/client/messaging.rs) · [Revokes, pins and keeps](https://github.com/oxidezap/whatsapp-rust/blob/d804acaec1439e54c43c129e2f90d45016506abe/src/send/actions.rs) · [Reactions](https://github.com/oxidezap/whatsapp-rust/blob/d804acaec1439e54c43c129e2f90d45016506abe/src/features/reaction.rs)
 
 ## Decrypt-fail suppression
 

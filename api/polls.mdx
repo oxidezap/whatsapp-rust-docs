@@ -4,7 +4,7 @@ description: Create polls and quizzes, vote and decrypt with a borrowed creation
 ---
 
 <Note>
-Examples on this page target [source snapshot `93e5c7f`](https://github.com/oxidezap/whatsapp-rust/tree/93e5c7f75cdad98472efd218d9bff8a464cf47a7), not a crates.io release. Use the [current API guide](/guides/current-api) to select the matching dependency.
+Examples on this page target [source snapshot `d804acae`](https://github.com/oxidezap/whatsapp-rust/tree/d804acaec1439e54c43c129e2f90d45016506abe), not a crates.io release. Use the [current API guide](/guides/current-api) to select the matching dependency.
 </Note>
 
 ## Create and vote
@@ -59,4 +59,4 @@ Read `send_result()`, `creator()` and `secret()` or move them with `into_parts()
 `aggregate_votes` hashes the named options, decrypts incoming updates and counts the latest selection per voter. Check its source signature when adapting a custom history pipeline. Missing or malformed parent secrets must not be silently padded or truncated; see [MsgSecretStore](/api/store#msgsecretstore).
 
 ## Source reference
-[Poll facade, errors and aggregation](https://github.com/oxidezap/whatsapp-rust/blob/93e5c7f75cdad98472efd218d9bff8a464cf47a7/src/features/polls.rs) · [Creation results and borrowed references](https://github.com/oxidezap/whatsapp-rust/blob/93e5c7f75cdad98472efd218d9bff8a464cf47a7/src/features/creation.rs) · [Core encryption primitives](https://github.com/oxidezap/whatsapp-rust/blob/93e5c7f75cdad98472efd218d9bff8a464cf47a7/wacore/src/poll.rs)
+[Poll facade, errors and aggregation](https://github.com/oxidezap/whatsapp-rust/blob/d804acaec1439e54c43c129e2f90d45016506abe/src/features/polls.rs) · [Creation results and borrowed references](https://github.com/oxidezap/whatsapp-rust/blob/d804acaec1439e54c43c129e2f90d45016506abe/src/features/creation.rs) · [Core encryption primitives](https://github.com/oxidezap/whatsapp-rust/blob/d804acaec1439e54c43c129e2f90d45016506abe/wacore/src/poll.rs)
