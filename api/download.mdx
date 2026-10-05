@@ -210,7 +210,7 @@ pub enum MediaDownloadError {
 
 `MediaDownloadError` is `#[non_exhaustive]`; match it with a wildcard (`_ => `) arm so a future variant doesn't break your build.
 
-`Client::download` and `Client::download_to_writer` return `ClientDownloadError`, which classifies the final outcome after applicable credential refresh and host failover. Low-level `MediaDownloader` uses `MediaDownloadError`.
+`Client::download` and `Client::download_to_writer` return `ClientDownloadError`, which classifies the final outcome after applicable media-session refresh and host failover. Low-level `MediaDownloader` uses `MediaDownloadError`.
 
 ### MediaRoute and MediaHost
 

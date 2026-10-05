@@ -54,11 +54,14 @@ whatsapp-rust suporta diversas features opcionais:
 | `metrics` | Emite contadores, histogramas e gauges `wa_*` pela fachada [`metrics`](https://docs.rs/metrics). Veja [Métricas](/advanced/metrics) | ❌ Não |
 | `client-lifecycle` | Seam de ciclo de vida de extensões com escopo de geração (`ClientLifecycle`, `ConnectionScope`). Habilitada automaticamente por `plugins` | ❌ Não |
 | `plugins` | Host nativo de plugins em tempo de build: registro tipado de `ClientPlugin` via `ClientBuilder`, APIs com escopo de capacidade e ciclo de vida de tarefas por geração. Habilita `client-lifecycle` (veja [Plugins nativos](/advanced/plugins)) | ❌ Não |
-| `voip` | Chamadas de voz e vídeo 1:1, perfil completo: adaptadores MLow + libopus, plano de vídeo H.264 neutro de codec, criptografia E2E-SRTP e transporte por relay. Alias para `voip-mlow` + `voip-libopus` (veja [Chamadas VoIP](/guides/voip-calls)) | ❌ Não |
-| `voip-runtime` | Feature base interna habilitada por toda feature `voip-*` (driver Tokio, transporte por relay, DTLS/SCTP). Não é para ser nomeada diretamente — escolha `voip-encoded` ou uma feature de codec | ❌ Não |
-| `voip-encoded` | Perfil `voip` mais estreito: apenas transporte por relay e a fronteira de áudio codificado, sem codec embutido — forneça pacotes Opus/MLOW do seu próprio encoder/decoder | ❌ Não |
-| `voip-mlow` | `voip-encoded` mais o codec MLOW puro-Rust embutido | ❌ Não |
-| `voip-libopus` | `voip-encoded` mais o adaptador de codec opcional libopus via FFI | ❌ Não |
+| `voip` | Perfil completo para chamadas 1:1: `voip-mlow` + `voip-libopus` + `voip-relay-native` (veja [Chamadas VoIP](/guides/voip-calls)) | ❌ Não |
+| `voip-control` | Contrato e fluxo de controle de chamadas, sem engine de mídia. Forneça um backend para iniciar mídia | ❌ Não |
+| `voip-engine-wacore` | Backend de mídia baseado na engine do `wacore`; habilita `voip-control` | ❌ Não |
+| `voip-runtime` | Composição de `voip-control` + `voip-engine-wacore`, sem transporte por relay ou dependência obrigatória do Tokio | ❌ Não |
+| `voip-relay-native` | Transporte nativo por relay com UDP, DTLS/SCTP e DataChannel. Habilita `tokio-runtime`; não compila em `wasm32` ou `espidf`. Incluído por `voip` | ❌ Não |
+| `voip-encoded` | `voip-runtime` com áudio codificado fornecido pela aplicação, sem codec embutido nem transporte por relay. Adicione `voip-relay-native` ou forneça seu próprio `RelayTransportProvider` | ❌ Não |
+| `voip-mlow` | `voip-runtime` mais o codec MLOW puro-Rust embutido, sem transporte por relay; compila em `wasm32` | ❌ Não |
+| `voip-libopus` | `voip-encoded` mais o adaptador libopus via FFI, sem transporte por relay | ❌ Não |
 | `legacy-session-interop` | Interop tipada com o modelo decodificado do `SessionRecord` v1 legado do libsignal, para migrar estado de autenticação produzido externamente | ❌ Não |
 | `danger-skip-tls-verify` | Pula a verificação TLS (inseguro) | ❌ Não |
 | `danger-skip-cert-chain-verify` | Pula a checagem da cadeia de certificados no handshake Noise (inseguro) | ❌ Não |

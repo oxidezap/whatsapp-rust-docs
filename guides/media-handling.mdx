@@ -686,17 +686,18 @@ For transient errors beyond reference rejections, you can implement your own ret
 
 ```rust
 use tokio::time::{sleep, Duration};
+use whatsapp_rust::{Client, download::{ClientDownloadError, Downloadable}};
 
 async fn download_with_retry(
     client: &Client,
     downloadable: &dyn Downloadable,
     max_retries: u32,
-) -> Result<Vec<u8>> {
+) -> Result<Vec<u8>, ClientDownloadError> {
     let mut attempt = 0;
     loop {
         match client.download(downloadable).await {
             Ok(data) => return Ok(data),
-            Err(e) if attempt < max_retries => {
+            Err(e @ ClientDownloadError::HostsUnreachable(_)) if attempt < max_retries => {
                 attempt += 1;
                 eprintln!("Retry {}/{}: {:?}", attempt, max_retries, e);
                 sleep(Duration::from_secs(2u64.pow(attempt))).await;

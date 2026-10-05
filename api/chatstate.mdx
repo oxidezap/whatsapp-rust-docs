@@ -36,7 +36,7 @@ pub async fn send(
 
 **Example:**
 ```rust
-use whatsapp_rust::features::chatstate::ChatActivity;
+use whatsapp_rust::ChatActivity;
 
 let recipient: Jid = "15551234567@s.whatsapp.net".parse()?;
 
@@ -221,7 +221,6 @@ Note: Recording uses `<composing media="audio">` rather than a separate tag.
 ### Typing indicator lifecycle
 
 ```rust
-use whatsapp_rust::features::chatstate::ChatActivity;
 
 let recipient: Jid = "15551234567@s.whatsapp.net".parse()?;
 
@@ -367,7 +366,6 @@ match client.chatstate().send_composing(&recipient).await {
 ## Complete Example
 
 ```rust
-use whatsapp_rust::features::chatstate::ChatActivity;
 use std::time::Duration;
 
 let recipient: Jid = "15551234567@s.whatsapp.net".parse()?;

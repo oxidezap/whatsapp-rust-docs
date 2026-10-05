@@ -1478,13 +1478,17 @@ pub struct PresenceUpdate {
 **Example:**
 ```rust
 Event::Presence(update) => {
-    if update.status == PresenceStatus::Unavailable {
-        println!("{} is offline", update.from);
-        if let Some(last_seen) = update.last_seen {
-            println!("Last seen: {}", last_seen);
+    use whatsapp_rust::PresenceStatus;
+
+    match update.status {
+        PresenceStatus::Unavailable => {
+            println!("{} is offline", update.from);
+            if let Some(last_seen) = update.last_seen {
+                println!("Last seen: {}", last_seen);
+            }
         }
-    } else {
-        println!("{} is online", update.from);
+        PresenceStatus::Available => println!("{} is online", update.from),
+        _ => {} // Ignore future statuses until the application supports them.
     }
 }
 ```

@@ -1920,7 +1920,7 @@ let node = waiter.await.expect("notification arrived");
 Register the waiter **before** performing the action that triggers the expected node. When no waiters are active, this has zero cost (single atomic load per incoming node).
 </Note>
 
-The `NodeWaiter<T>` future resolves to `Result<Arc<T>, futures::channel::oneshot::Canceled>`. Its `try_recv(&mut self)` returns `Result<Option<Arc<T>>, futures::channel::oneshot::Canceled>`. Dropping it removes its subscription immediately, without waiting for traffic and without retaining the `Client`. An active incoming waiter survives reconnect; outgoing diagnostic waiters are cancelled during connection cleanup; dropping it cancels that subscription. Register before sending, and use a timeout when the response may never arrive.
+The `NodeWaiter<T>` future resolves to `Result<Arc<T>, futures::channel::oneshot::Canceled>`. Its `try_recv(&mut self)` returns `Result<Option<Arc<T>>, futures::channel::oneshot::Canceled>`. Dropping it removes its subscription immediately, without waiting for traffic and without retaining the `Client`. An active incoming waiter survives reconnect. Outgoing diagnostic waiters are cancelled during connection cleanup. Use a timeout when the response may never arrive.
 
 ```rust
 use whatsapp_rust::{Client, NodeFilter, NodeWaiter, wacore_binary::OwnedNodeRef};
