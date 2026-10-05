@@ -4,7 +4,7 @@ description: Learn how to implement custom storage, transport, and HTTP backends
 ---
 
 <Note>
-Examples on this page target [source snapshot `86b1b31`](https://github.com/oxidezap/whatsapp-rust/tree/86b1b315af3be1a48e1961c0a72f3e42152f1a33), not a crates.io release. Use the [current API guide](/guides/current-api) to select the matching dependency.
+Examples on this page target [source snapshot `93e5c7f`](https://github.com/oxidezap/whatsapp-rust/tree/93e5c7f75cdad98472efd218d9bff8a464cf47a7), not a crates.io release. Use the [current API guide](/guides/current-api) to select the matching dependency.
 </Note>
 
 
@@ -407,7 +407,7 @@ Implement the `HttpClient` trait for custom HTTP operations:
 <Warning>
 Make `self.send_request(&request)` below return `Ok` for a completed exchange, even a 4xx/5xx status. Reserve `Err` for two cases: the exchange never starts at all (DNS failure, connection refused, a TLS error, a timeout), or a body read fails after a 2xx status (for example, the body exceeds a size cap you enforce).
 
-Media download and upload read `status_code` off the `Ok` response to refresh a stale media-auth token (401/403) or move to the next CDN host on other errors like 5xx; download additionally re-derives an expired URL (404/410) the same way. If you turn a non-2xx status into `Err` instead, you hide it from all of this, and every retry repeats the same stale token. See [HTTP Client Trait](/api/http-client#httpclient-trait) for the full contract, including how the bundled `UreqHttpClient` works around `ureq`'s opposite default.
+Media download and upload read `status_code` off the `Ok` response. Session-derived downloads can refresh CDN hosts and re-derive the URL once after a reference rejection (401/403/404/410); their routes carry no auth token. Static URLs and standalone `MediaDownloader` cannot refresh a session. Uploads refresh authentication tokens on 401/403. Both paths can move to the next CDN host for other failures such as 5xx. Turning a non-2xx response into `Err` hides its status from this handling. See [HTTP Client Trait](/api/http-client#httpclient-trait), including how `UreqHttpClient` preserves non-2xx responses.
 </Warning>
 
 ```rust

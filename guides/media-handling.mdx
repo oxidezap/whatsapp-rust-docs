@@ -682,7 +682,7 @@ Upload retains its authentication token and credential-refresh behavior. See [up
 
 ### Additional retry logic
 
-For transient errors beyond auth failures, you can implement your own retry wrapper:
+For transient errors beyond reference rejections, you can implement your own retry wrapper:
 
 ```rust
 use tokio::time::{sleep, Duration};
@@ -711,32 +711,32 @@ async fn download_with_retry(
 
 ### Automatic management
 
-The client automatically manages media connection tokens, including refreshing them when they expire or when the CDN rejects them with 401/403/404/410:
+The client caches media connection information. Downloads use its CDN hosts; uploads also use its authentication token. Session-derived downloads can refresh hosts once after a reference rejection (401/403/404/410), while uploads refresh credentials on 401/403:
 
 ```rust
-// Automatically refreshed when expired or rejected
+// Each operation applies its own refresh policy
 let upload = client.upload(data, MediaType::Image, Default::default()).await?;
 let download = client.download(downloadable).await?;
 
-// No manual token management needed!
+// The client manages the cached media connection.
 ```
 
 ### Host types and failover order
 
 Each media connection includes multiple CDN hosts with a `host_type` field indicating whether the host is `"primary"` or `"fallback"`. The client sorts hosts with primary hosts first, so uploads and downloads always try the fastest hosts before falling back to alternatives. Each host may also include a `fallback_hostname` for additional resilience.
 
-### Token expiration
+### Cache expiration
 
 Media connections have two TTL values:
 
 - **`ttl`** — how long the route/host information is valid
 - **`auth_ttl`** — how long the auth token specifically is valid (may be shorter than `ttl`)
 
-The client uses the minimum of these two values to determine when the cached connection has expired. When expired, the next media operation automatically fetches fresh credentials.
+The client uses the minimum of these two values to determine when the cached connection has expired. When expired, the next session-derived media operation fetches fresh connection information. Download routes retain only its hosts.
 
 ### Internal refresh
 
-Media connection refresh and invalidation are managed internally by the client. When the CDN rejects a request (401/403/404/410), the client automatically invalidates the cached connection and fetches fresh credentials before retrying. You don't need to manage this manually.
+Media connection refresh and invalidation are managed internally by the client. Download refresh updates hosts and re-derives the URL without adding an auth token. Static download URLs bypass session refresh, and standalone `MediaDownloader` has no session to refresh. Upload credential refresh remains separate.
 
 ## Best Practices
 
