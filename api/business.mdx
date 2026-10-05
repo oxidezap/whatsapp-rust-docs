@@ -800,7 +800,7 @@ See [Contacts API](/api/contacts) for details.
 
 When sending interactive business messages (native-flow buttons for payments, CTAs, catalogs, etc.), the library automatically injects a `<biz>` stanza child node on the outgoing message. This means you can send `InteractiveMessage` with `NativeFlowMessage` content through `send_message` or `send(SendRequest)` without manually constructing business protocol nodes.
 
-Read the [pinned business classification and node builders](https://github.com/oxidezap/whatsapp-rust/blob/86b1b315af3be1a48e1961c0a72f3e42152f1a33/src/send/mod.rs#L1145) for button-to-flow mappings and envelope-dependent behavior.
+Read the [pinned business classification and node builders](https://github.com/oxidezap/whatsapp-rust/blob/93e5c7f75cdad98472efd218d9bff8a464cf47a7/src/send/mod.rs) for button-to-flow mappings and envelope-dependent behavior.
 
 ## See also
 

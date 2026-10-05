@@ -42,7 +42,7 @@ For crash replay, implement the pending-inbound methods on `ProtocolStore`. Stor
 
 Device-scoped operations must isolate one account from another. The scope of `DeviceStore::resource_report` depends on the adapter. SQLite reports the shared database pool through this legacy trait method; count it once per database. Use `SqliteStore::scoped_resource_report()` for an account and `SqliteDatabase::resource_report()` for the database-wide report. Register an owned adapter with `with_backend` or an `Arc<dyn Backend>` with `with_backend_arc`.
 
-[Storage trait reference](https://github.com/oxidezap/whatsapp-rust/blob/86b1b315af3be1a48e1961c0a72f3e42152f1a33/wacore/src/store/traits.rs) · [SQLite reference implementation](https://github.com/oxidezap/whatsapp-rust/blob/86b1b315af3be1a48e1961c0a72f3e42152f1a33/storages/sqlite-storage/src/lib.rs)
+[Storage trait reference](https://github.com/oxidezap/whatsapp-rust/blob/93e5c7f75cdad98472efd218d9bff8a464cf47a7/wacore/src/store/traits.rs) · [SQLite reference implementation](https://github.com/oxidezap/whatsapp-rust/blob/93e5c7f75cdad98472efd218d9bff8a464cf47a7/storages/sqlite-storage/src/lib.rs)
 
 ## Custom Runtime
 

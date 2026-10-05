@@ -116,8 +116,8 @@ Use typed modes and the source reference for exact arguments:
 Use the [pictures facade](/api/pictures) for a single normal group or community parent. Group picture mutations remain `set_profile_picture` and `remove_profile_picture`.
 
 ## Source reference
-[Facade, projections, history outcomes and DTO constructors](https://github.com/oxidezap/whatsapp-rust/blob/86b1b315af3be1a48e1961c0a72f3e42152f1a33/src/features/groups.rs) · [Core group inputs, typed modes and IQ contracts](https://github.com/oxidezap/whatsapp-rust/blob/86b1b315af3be1a48e1961c0a72f3e42152f1a33/wacore/src/iq/groups.rs)
+[Facade, projections, history outcomes and DTO constructors](https://github.com/oxidezap/whatsapp-rust/blob/93e5c7f75cdad98472efd218d9bff8a464cf47a7/src/features/groups.rs) · [Core group inputs, typed modes and IQ contracts](https://github.com/oxidezap/whatsapp-rust/blob/93e5c7f75cdad98472efd218d9bff8a464cf47a7/wacore/src/iq/groups.rs)
 
 ## GroupError
 
-Group operations return their typed `GroupError`, preserving IQ, storage and validation causes. Description conflicts require reconciling current state before another update. Keep a fallback arm when matching this extensible enum. See [the pinned error definition](https://github.com/oxidezap/whatsapp-rust/blob/86b1b315af3be1a48e1961c0a72f3e42152f1a33/src/features/groups.rs) and [error-chain recovery](/api/errors#error-chain-recovery).
+Group operations return their typed `GroupError`, preserving IQ, storage and validation causes. Description conflicts require reconciling current state before another update. Keep a fallback arm when matching this extensible enum. See [the pinned error definition](https://github.com/oxidezap/whatsapp-rust/blob/93e5c7f75cdad98472efd218d9bff8a464cf47a7/src/features/groups.rs) and [error-chain recovery](/api/errors#error-chain-recovery).
