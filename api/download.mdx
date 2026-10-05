@@ -226,7 +226,7 @@ fn download_route() -> MediaRoute {
 
 Use `MediaRoute::default_hosts()` when you need the built-in `DEFAULT_MEDIA_HOSTS`. A connected client obtains hosts from its media session. A retained route can be used after disconnect while the media reference remains valid.
 
-`DownloadUtils::prepare_download_requests` preserves existing query parameters, percent encoding, and fragments while adding the existing media `token` parameter. Relative media paths remain on the selected HTTPS route origin. Download URLs do not receive session auth.
+`DownloadUtils::prepare_download_requests` preserves existing query parameters, percent encoding, and fragments while adding the existing media `token` parameter. Relative media paths remain on the selected HTTPS route origin. Download URLs do not receive session auth. Supply URI-encoded direct paths: malformed percent escapes, raw whitespace, backslashes, and raw non-ASCII characters are rejected. References cannot add credentials or change the selected HTTPS origin.
 
 ---
 
