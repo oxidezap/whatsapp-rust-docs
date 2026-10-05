@@ -1281,6 +1281,8 @@ pub enum ReceiptType {
 ```
 
 <Note>
+For exact event persistence, use the [ReceiptType JSON representation](/api/receipt#json-persistence), which is separate from wire values.
+
 `ReceiptType` is `#[non_exhaustive]`. Server-driven sets like this grow over time (recent additions include `EncRekeyRetry`, `ReadSelf`, `PlayedSelf`, `PeerMsg`, and `HistorySync`), so your `match` arms must always include a wildcard (`_ => …`). New variants can be added in minor releases without a breaking change.
 </Note>
 
@@ -1440,46 +1442,24 @@ Event::ServerAck(ack) => {
 
 ### ChatPresence
 
-**Emitted:** For typing indicators and recording states
+Emitted for typing and recording activity. `ChatPresenceUpdate` has `source: MessageSource` and `state: ChatActivity`.
 
 ```rust
-#[derive(Debug, Clone, Serialize, bon::Builder)]
-#[non_exhaustive]
-pub struct ChatPresenceUpdate {
-    pub source: MessageSource,
-    pub state: ChatPresence,
-    pub media: ChatPresenceMedia,
-}
+use whatsapp_rust::{ChatActivity, wacore::types::events::Event};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-pub enum ChatPresence {
-    Composing,
-    Paused,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-pub enum ChatPresenceMedia {
-    Text,
-    Audio,
-}
-```
-
-**Example:**
-```rust
-Event::ChatPresence(update) => {
-    match (update.state, update.media) {
-        (ChatPresence::Composing, ChatPresenceMedia::Text) => {
-            println!("{} is typing...", update.source.sender);
-        }
-        (ChatPresence::Composing, ChatPresenceMedia::Audio) => {
-            println!("{} is recording audio...", update.source.sender);
-        }
-        (ChatPresence::Paused, _) => {
-            println!("{} stopped typing", update.source.sender);
+fn show_activity(event: &Event) {
+    if let Event::ChatPresence(update) = event {
+        match update.state {
+            ChatActivity::Typing => println!("{} is typing", update.source.sender),
+            ChatActivity::RecordingAudio => println!("{} is recording audio", update.source.sender),
+            ChatActivity::Idle => println!("{} stopped typing", update.source.sender),
+            _ => {}
         }
     }
 }
 ```
+
+Use this same semantic activity with `client.chatstate().send`. See [chatstate](/api/chatstate#activity-representation) for JSON and protocol projections.
 
 ### Presence
 
@@ -1490,7 +1470,7 @@ Event::ChatPresence(update) => {
 #[non_exhaustive]
 pub struct PresenceUpdate {
     pub from: Jid,
-    pub unavailable: bool,
+    pub status: PresenceStatus,
     pub last_seen: Option<DateTime<Utc>>,
 }
 ```
@@ -1498,16 +1478,56 @@ pub struct PresenceUpdate {
 **Example:**
 ```rust
 Event::Presence(update) => {
-    if update.unavailable {
-        println!("{} is offline", update.from);
-        if let Some(last_seen) = update.last_seen {
-            println!("Last seen: {}", last_seen);
+    use whatsapp_rust::PresenceStatus;
+
+    match update.status {
+        PresenceStatus::Unavailable => {
+            println!("{} is offline", update.from);
+            if let Some(last_seen) = update.last_seen {
+                println!("Last seen: {}", last_seen);
+            }
         }
-    } else {
-        println!("{} is online", update.from);
+        PresenceStatus::Available => println!("{} is online", update.from),
+        _ => {} // Ignore future statuses until the application supports them.
     }
 }
 ```
+
+### JSON event migration
+
+The availability and chat-activity payloads intentionally introduce breaking JSON changes. Update persisted-event readers and external consumers together. The examples below show only changed fields; `from`, `last_seen`, and `source` keep their existing representations.
+
+`PresenceUpdate` replaces the boolean `unavailable` with the string `status`:
+
+```json Before
+{"unavailable": false}
+```
+
+```json After
+{"status": "available"}
+```
+
+Map `unavailable: true` to `status: "unavailable"`. Do not treat a missing legacy boolean as an online status when reading the new payload.
+
+`ChatPresenceUpdate` replaces the `state`/`media` pair with one semantic `ChatActivity` value in `state`:
+
+```json Before
+{"state": "composing", "media": "audio"}
+```
+
+```json After
+{"state": "recording_audio"}
+```
+
+| Previous fields | New field |
+| --- | --- |
+| `"state": "composing", "media": ""` | `"state": "typing"` |
+| `"state": "composing", "media": "audio"` | `"state": "recording_audio"` |
+| `"state": "paused"` with either media value | `"state": "idle"` |
+
+Remove the separate `media` field when migrating stored payloads. These semantic JSON values do not change the chatstate stanzas described in [chatstate](/api/chatstate#activity-representation).
+
+This differs from `ReceiptType`: its existing JSON representation is preserved, including `"ReadSelf"`, `"Delivered"`, and `{"Other":"..."}`. Its deserializer now roundtrips that representation. See [receipt JSON persistence](/api/receipt#json-persistence).
 
 ## User update events
 
@@ -2754,7 +2774,7 @@ pub struct ClientExpirationChanged {
 <Note>
 This is **notice, not an instruction**. The client keeps connecting until the server actually refuses it — the stanza is about the *build*, not the current connection — so whether to ship a newer version or alert an operator is the consumer's call; this library never disconnects on its own because of it.
 
-The recorded deadline is never sooner than **three days** out, even when the server's own answer is more abrupt (`t` at or before now) — a server that says "now" still has to leave a window in which the build can be replaced. The raw `t` is only acted on when it's sooner than the `expires_at` already stored — a `t` at or after that is treated as a stale retransmit or a host that hasn't caught up, and is ignored rather than granted as an extension. That gate gets re-evaluated against "now" each time, though, so it does *not* mean the stored deadline can only move earlier over time: a server that keeps resending the same already-elapsed `t` keeps clearing the gate (it stays "sooner than stored") and each acceptance re-floors three days out from the new "now" — pushing the stored deadline later each time even though `t` itself never changed. A dated deadline in the future, by contrast, settles once stored: restating it no longer clears the gate, so repeats change nothing and dispatch nothing. See [`ServerClientExpiration` and its decision rule](https://github.com/oxidezap/whatsapp-rust/blob/86b1b315af3be1a48e1961c0a72f3e42152f1a33/wacore/src/store/device.rs#L433) for the persisted record and the full decision rule.
+The recorded deadline is never sooner than **three days** out, even when the server's own answer is more abrupt (`t` at or before now) — a server that says "now" still has to leave a window in which the build can be replaced. The raw `t` is only acted on when it's sooner than the `expires_at` already stored — a `t` at or after that is treated as a stale retransmit or a host that hasn't caught up, and is ignored rather than granted as an extension. That gate gets re-evaluated against "now" each time, though, so it does *not* mean the stored deadline can only move earlier over time: a server that keeps resending the same already-elapsed `t` keeps clearing the gate (it stays "sooner than stored") and each acceptance re-floors three days out from the new "now" — pushing the stored deadline later each time even though `t` itself never changed. A dated deadline in the future, by contrast, settles once stored: restating it no longer clears the gate, so repeats change nothing and dispatch nothing. See [`ServerClientExpiration` and its decision rule](https://github.com/oxidezap/whatsapp-rust/blob/93e5c7f75cdad98472efd218d9bff8a464cf47a7/wacore/src/store/device.rs) for the persisted record and the full decision rule.
 </Note>
 
 **Example:**

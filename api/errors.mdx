@@ -469,21 +469,7 @@ pub enum TcTokenError {
 
 ### MediaReuploadError
 
-```rust
-#[non_exhaustive]
-pub enum MediaReuploadError {
-    #[error("{0}")]
-    Client(#[from] ClientError),
-    #[error("client is not logged in")]
-    NotLoggedIn,
-    #[error("invalid media reupload request: {0}")]
-    InvalidRequest(String),
-    #[error("media retry notification timed out")]
-    Timeout,
-    #[error("{0}")]
-    Internal(#[from] anyhow::Error),
-}
-```
+Reupload errors distinguish missing local LID, conflicting requests, receipt ACK timeout or rejection, and notification timeout. Client and internal causes use `Arc` so coalesced callers retain the same cause. See [reupload errors](/api/media-reupload#error-handling).
 
 ### PresenceError
 
@@ -595,7 +581,7 @@ pub enum SignalMaintenanceError {
 
 ### MessageEditError
 
-Returned by `EncryptedEdit::original_sender_jid`, `SecretEncrypted::original_sender_jid`, and `SecretEncrypted::original_sender_for_dispatch` — the target-key sender resolvers used when decrypting `secret_encrypted_message` envelopes (message edits, poll edits/add-option, event edits). Added in PR #1090, replacing bare `anyhow::Error`. Read the [pinned target-key resolvers](https://github.com/oxidezap/whatsapp-rust/blob/86b1b315af3be1a48e1961c0a72f3e42152f1a33/wacore/src/proto_helpers.rs) when handling an encrypted add-on.
+Returned by `EncryptedEdit::original_sender_jid`, `SecretEncrypted::original_sender_jid`, and `SecretEncrypted::original_sender_for_dispatch` — the target-key sender resolvers used when decrypting `secret_encrypted_message` envelopes (message edits, poll edits/add-option, event edits). Added in PR #1090, replacing bare `anyhow::Error`. Read the [pinned target-key resolvers](https://github.com/oxidezap/whatsapp-rust/blob/93e5c7f75cdad98472efd218d9bff8a464cf47a7/wacore/src/proto_helpers.rs) when handling an encrypted add-on.
 
 ```rust
 #[non_exhaustive]

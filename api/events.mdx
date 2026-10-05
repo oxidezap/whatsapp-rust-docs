@@ -4,7 +4,7 @@ description: Create an event and send RSVP responses with its named creation res
 ---
 
 <Note>
-Examples on this page target [source snapshot `86b1b31`](https://github.com/oxidezap/whatsapp-rust/tree/86b1b315af3be1a48e1961c0a72f3e42152f1a33), not a crates.io release. Use the [current API guide](/guides/current-api) to select the matching dependency.
+Examples on this page target [source snapshot `93e5c7f`](https://github.com/oxidezap/whatsapp-rust/tree/93e5c7f75cdad98472efd218d9bff8a464cf47a7), not a crates.io release. Use the [current API guide](/guides/current-api) to select the matching dependency.
 </Note>
 
 ## Create an event
@@ -48,4 +48,4 @@ For manual RSVP decryption, the core helper `wacore::event::decrypt_event_respon
 Use `EditRequest::new(target, replacement).with_secret(created.creator(), created.secret())`. The target addresses the original content; the returned send result describes the edit operation. Read the [send task reference](/api/send#edit_message) before overriding operation IDs.
 
 ## Source reference
-[Event builder and facade](https://github.com/oxidezap/whatsapp-rust/blob/86b1b315af3be1a48e1961c0a72f3e42152f1a33/src/features/events.rs) · [CreatedEvent and EventRef](https://github.com/oxidezap/whatsapp-rust/blob/86b1b315af3be1a48e1961c0a72f3e42152f1a33/src/features/creation.rs) · [Core RSVP helpers](https://github.com/oxidezap/whatsapp-rust/blob/86b1b315af3be1a48e1961c0a72f3e42152f1a33/wacore/src/event.rs)
+[Event builder and facade](https://github.com/oxidezap/whatsapp-rust/blob/93e5c7f75cdad98472efd218d9bff8a464cf47a7/src/features/events.rs) · [CreatedEvent and EventRef](https://github.com/oxidezap/whatsapp-rust/blob/93e5c7f75cdad98472efd218d9bff8a464cf47a7/src/features/creation.rs) · [Core RSVP helpers](https://github.com/oxidezap/whatsapp-rust/blob/93e5c7f75cdad98472efd218d9bff8a464cf47a7/wacore/src/event.rs)

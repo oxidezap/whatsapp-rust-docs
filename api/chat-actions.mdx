@@ -134,7 +134,7 @@ pub async fn mute_chat_until(
 
 **Example:**
 ```rust
-use chrono::{Utc, Duration};
+use whatsapp_rust::{anyhow, chrono::{Utc, Duration}};
 
 let jid: Jid = "15551234567@s.whatsapp.net".parse()?;
 
@@ -210,69 +210,26 @@ A lock change on another linked device arrives as an [`Event::LockChatUpdate`](/
 
 ### star_message
 
-Star a message to mark it as important.
+Star the message identified by `&MessageRef`. Obtain the reference from an inbound message or send result so you retain the original chat, sender, and direction.
 
 ```rust
-pub async fn star_message(
-    &self,
-    chat_jid: &Jid,
-    participant_jid: Option<&Jid>,
-    message_id: &str,
-    from_me: bool
-) -> Result<(), AppStateError>
+use whatsapp_rust::{Client, MessageRef, AppStateError};
+
+async fn star(client: &Client, target: &MessageRef<'_>) -> Result<(), AppStateError> {
+    client.chat_actions().star_message(target).await
+}
 ```
 
-**Parameters:**
-- `chat_jid` - The chat containing the message
-- `participant_jid` - For group messages from others, pass `Some(&sender_jid)`. For 1-on-1 chats or your own messages, pass `None`
-- `message_id` - The message ID to star
-- `from_me` - Whether the message was sent by you
-
-**Example:**
-```rust
-// Star your own message in a 1-on-1 chat
-client.chat_actions()
-    .star_message(&chat_jid, None, "MESSAGE_ID", true)
-    .await?;
-
-// Star someone else's message in a 1-on-1 chat
-client.chat_actions()
-    .star_message(&chat_jid, None, "MESSAGE_ID", false)
-    .await?;
-
-// Star someone else's message in a group
-let sender_jid: Jid = "15559876543@s.whatsapp.net".parse()?;
-client.chat_actions()
-    .star_message(&group_jid, Some(&sender_jid), "MESSAGE_ID", false)
-    .await?;
-```
-
-<Warning>
-For group messages not sent by you, `participant_jid` is required. The method will return an error if it's not provided.
-</Warning>
+For stored metadata, `MessageRef::new(chat, id, original_sender, from_me)` validates the target before mutation. Received group and broadcast messages require the original sender. Newsletter targets use their separate reference domain.
 
 ### unstar_message
 
-Remove the star from a message.
-
 ```rust
-pub async fn unstar_message(
-    &self,
-    chat_jid: &Jid,
-    participant_jid: Option<&Jid>,
-    message_id: &str,
-    from_me: bool
-) -> Result<(), AppStateError>
-```
+use whatsapp_rust::{Client, MessageRef, AppStateError};
 
-**Parameters:**
-Same as `star_message`.
-
-**Example:**
-```rust
-client.chat_actions()
-    .unstar_message(&chat_jid, None, "MESSAGE_ID", true)
-    .await?;
+async fn unstar(client: &Client, target: &MessageRef<'_>) -> Result<(), AppStateError> {
+    client.chat_actions().unstar_message(target).await
+}
 ```
 
 ## Mark chat as read
@@ -465,45 +422,17 @@ A status-mute change on another linked device arrives as an [`Event::UserStatusM
 
 ### delete_message_for_me
 
-Delete a specific message locally (not for the other party). This is different from `revoke_message` which deletes for everyone.
+Delete a message locally using its `MessageRef`. `delete_media` controls associated media deletion; `message_timestamp` carries an optional original timestamp.
 
 ```rust
-pub async fn delete_message_for_me(
-    &self,
-    chat_jid: &Jid,
-    participant_jid: Option<&Jid>,
-    message_id: &str,
-    from_me: bool,
-    delete_media: bool,
-    message_timestamp: Option<i64>,
-) -> Result<(), AppStateError>
+use whatsapp_rust::{Client, MessageRef, AppStateError};
+
+async fn delete_local(client: &Client, target: &MessageRef<'_>) -> Result<(), AppStateError> {
+    client.chat_actions().delete_message_for_me(target, true, None).await
+}
 ```
 
-**Parameters:**
-- `chat_jid` - The chat containing the message
-- `participant_jid` - For group messages from others, pass `Some(&sender_jid)`. For 1-on-1 chats or your own messages, pass `None`
-- `message_id` - The ID of the message to delete
-- `from_me` - Whether the message was sent by you
-- `delete_media` - Whether to also delete the associated media file
-- `message_timestamp` - Optional timestamp of the message
-
-**Example:**
-```rust
-// Delete your own message in a 1-on-1 chat
-client.chat_actions()
-    .delete_message_for_me(&chat_jid, None, "MESSAGE_ID", true, true, None)
-    .await?;
-
-// Delete someone else's message in a group
-let sender_jid: Jid = "15559876543@s.whatsapp.net".parse()?;
-client.chat_actions()
-    .delete_message_for_me(&group_jid, Some(&sender_jid), "MESSAGE_ID", false, true, None)
-    .await?;
-```
-
-<Warning>
-For group messages not sent by you, `participant_jid` is required. The method will return an error if it's not provided.
-</Warning>
+The reference preserves the author, PN/LID namespace, and `from_me` direction. The app-state projection strips a received group author's device ID while keeping the account namespace. Direct-chat and own-message indices omit the participant. The index format is unchanged.
 
 <Note>
 This only removes the message from your own devices. The other party can still see the message. To delete for everyone, use `client.revoke_message()` instead.
@@ -732,13 +661,17 @@ match client.chat_actions().mute_chat_until(&jid, 0).await {
 ```rust
 use whatsapp_rust::Client;
 use whatsapp_rust::wacore_binary::jid::Jid;
-use chrono::{Utc, Duration};
+use whatsapp_rust::{anyhow, chrono::{Utc, Duration}};
 use std::sync::Arc;
 
-async fn organize_chats(client: &Arc<Client>) -> anyhow::Result<()> {
-    let important_chat: Jid = "15551234567@s.whatsapp.net".parse()?;
+async fn organize_chats(
+    client: &Arc<Client>,
+    important_target: whatsapp_rust::MessageRef<'_>,
+    old_target: whatsapp_rust::MessageRef<'_>,
+) -> anyhow::Result<()> {
+    let important_chat = important_target.chat().clone();
     let noisy_group: Jid = "123456789@g.us".parse()?;
-    let old_chat: Jid = "15559876543@s.whatsapp.net".parse()?;
+    let old_chat = old_target.chat().clone();
     
     // Pin important conversations
     client.chat_actions().pin_chat(&important_chat).await?;
@@ -754,7 +687,7 @@ async fn organize_chats(client: &Arc<Client>) -> anyhow::Result<()> {
     
     // Star an important message
     client.chat_actions()
-        .star_message(&important_chat, None, "IMPORTANT_MSG_ID", false)
+        .star_message(&important_target)
         .await?;
     
     // Mark chat as read across all devices
@@ -764,7 +697,7 @@ async fn organize_chats(client: &Arc<Client>) -> anyhow::Result<()> {
     
     // Delete a message locally (not for everyone)
     client.chat_actions()
-        .delete_message_for_me(&old_chat, None, "OLD_MSG_ID", false, true, None)
+        .delete_message_for_me(&old_target, true, None)
         .await?;
     
     // Delete an old chat and its media

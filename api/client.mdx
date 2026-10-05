@@ -723,7 +723,7 @@ pub fn chatstate(&self) -> Chatstate<'_>
 Access chat state (typing indicator) operations.
 
 **Methods:**
-- `send(to: &Jid, state: ChatStateType)` - Send a chat state update
+- `send(to: &Jid, state: ChatActivity)` - Send a chat state update
 - `send_composing(to: &Jid)` - Send typing indicator
 - `send_recording(to: &Jid)` - Send recording indicator
 - `send_paused(to: &Jid)` - Send paused/stopped typing indicator
@@ -782,11 +782,11 @@ Access chat management actions. Operations sync across all linked devices via ap
 - `mute_chat(jid: &Jid)` - Mute a chat indefinitely
 - `mute_chat_until(jid: &Jid, mute_end_timestamp_ms: i64)` - Mute until a specific time
 - `unmute_chat(jid: &Jid)` - Unmute a chat
-- `star_message(chat_jid: &Jid, participant_jid: Option<&Jid>, message_id: &str, from_me: bool)` - Star a message
-- `unstar_message(chat_jid: &Jid, participant_jid: Option<&Jid>, message_id: &str, from_me: bool)` - Unstar a message
+- `star_message(target: &MessageRef)` - Star a message
+- `unstar_message(target: &MessageRef)` - Unstar a message
 - `mark_chat_as_read(jid: &Jid, read: bool, message_range: Option<SyncActionMessageRange>)` - Mark a chat as read or unread across devices
 - `delete_chat(jid: &Jid, delete_media: bool, message_range: Option<SyncActionMessageRange>)` - Delete a chat from all linked devices
-- `delete_message_for_me(chat_jid: &Jid, participant_jid: Option<&Jid>, message_id: &str, from_me: bool, delete_media: bool, message_timestamp: Option<i64>)` - Delete a message locally (not for the other party)
+- `delete_message_for_me(target: &MessageRef, delete_media: bool, message_timestamp: Option<i64>)` - Delete a message locally (not for the other party)
 
 ### quick_replies
 
@@ -856,7 +856,8 @@ pub fn profile(&self) -> Profile<'_>
 Access profile operations.
 
 **Methods:**
-- `set_push_name(name: &str)` - Set display name (syncs across devices)
+- `set_push_name(name: &str)` - Set display name and return `PushNameOutcome`; inspect pending app-state synchronization
+- `sync_push_name(name: &str)` - Retry only app-state synchronization for the still-desired name
 - `set_status_text(text: &str)` - Set profile "About" text
 - `set_profile_picture(image_data: Vec<u8>)` - Set profile picture (JPEG, 640x640 recommended)
 - `remove_profile_picture()` - Remove profile picture
@@ -949,23 +950,14 @@ See [Polls API](/api/polls) for full documentation.
 pub fn media_reupload(&self) -> MediaReupload<'_>
 ```
 
-Access media reupload operations. Use this when a media download fails because the URL has expired.
+Recover expired media with a validated `MessageRef` and `&[u8; 32]` media key:
 
-**Methods:**
-- `request(req: &MediaReuploadRequest)` - Request the server to re-upload expired media
-
-**Example:**
 ```rust
-let result = client.media_reupload().request(&MediaReuploadRequest {
-    msg_id: "ABCD1234",
-    chat_jid: &chat_jid,
-    media_key: &media_key_bytes,
-    is_from_me: false,
-    participant: Some(&sender_jid),
-}).await?;
+let request = MediaReuploadRequest { target, media_key: &media_key_bytes };
+let result = client.media_reupload().request(&request).await?;
 ```
 
-The request sends a `server-error` receipt and waits up to 30 seconds for a `mediaretry` notification with an updated download path.
+`request_many` preserves order and cardinality. Identical requests share one recovery; conflicting targets or keys with the same ID return `Conflict`. The request requires the local LID, waits for a receipt ACK, then waits for the media-retry notification. See [media reupload](/api/media-reupload) for cancellation, timeout, and result handling.
 
 ### signal
 
@@ -1806,13 +1798,15 @@ See [Signal Protocol — flush scheduling](/advanced/signal-protocol#flush-sched
 ### generate_message_id
 
 ```rust
-pub fn generate_message_id(&self) -> String
+pub fn generate_message_id(&self) -> MessageId
 ```
+
+Pass the generated ID directly to `SendOptions::default().with_message_id(id)`. Use `as_str()` or `into_string()` only at a raw boundary. `MessageRetransmission` takes the original content `MessageId`; operation ACK correlation uses `StanzaId`.
 
 Generates a unique WhatsApp-protocol-conformant message ID. Combines timestamp, user JID, and random components for uniqueness.
 
 <Note>
-This is intended for advanced users who need to build custom protocol interactions or manage message IDs manually. Most users should use `send_message` which handles ID generation automatically.
+This is intended for advanced users who need to build custom protocol interactions or manage message IDs manually. Use `Client::send(SendRequest)` for the canonical request interface; it generates an ID unless you provide one through `SendOptions`.
 </Note>
 
 ### send_iq
@@ -1899,10 +1893,10 @@ let response = client.execute_streaming(PropsSpec::new().retaining(watched_codes
 ### wait_for_node
 
 ```rust
-pub fn wait_for_node(&self, filter: NodeFilter) -> oneshot::Receiver<Arc<OwnedNodeRef>>
+pub fn wait_for_node(&self, filter: NodeFilter) -> NodeWaiter<OwnedNodeRef>
 ```
 
-Waits for a specific incoming protocol node matching the given filter. Returns a receiver that resolves when a matching node arrives.
+Waits for a specific incoming protocol node matching the given filter. Returns an owned future that resolves when a matching node arrives.
 
 <ParamField path="filter" type="NodeFilter" required>
   Filter specifying which node to wait for (by tag and attributes)
@@ -1926,6 +1920,16 @@ let node = waiter.await.expect("notification arrived");
 Register the waiter **before** performing the action that triggers the expected node. When no waiters are active, this has zero cost (single atomic load per incoming node).
 </Note>
 
+The `NodeWaiter<T>` future resolves to `Result<Arc<T>, futures::channel::oneshot::Canceled>`. Its `try_recv(&mut self)` returns `Result<Option<Arc<T>>, futures::channel::oneshot::Canceled>`. Dropping it removes its subscription immediately, without waiting for traffic and without retaining the `Client`. An active incoming waiter survives reconnect. Outgoing diagnostic waiters are cancelled during connection cleanup. Use a timeout when the response may never arrive.
+
+```rust
+use whatsapp_rust::{Client, NodeFilter, NodeWaiter, wacore_binary::OwnedNodeRef};
+
+fn watch_group_notifications(client: &Client) -> NodeWaiter<OwnedNodeRef> {
+    client.wait_for_node(NodeFilter::tag("notification").attr("type", "w:gp2"))
+}
+```
+
 #### NodeFilter
 
 Builder for matching incoming protocol nodes:
@@ -1946,10 +1950,10 @@ let filter = NodeFilter::tag("notification")
 ### wait_for_sent_node
 
 ```rust
-pub fn wait_for_sent_node(&self, filter: NodeFilter) -> oneshot::Receiver<Arc<Node>>
+pub fn wait_for_sent_node(&self, filter: NodeFilter) -> NodeWaiter<Node>
 ```
 
-Waits for a specific **outgoing** protocol node matching the given filter. Returns a receiver that resolves when a matching node is sent by the client. This is the outbound counterpart to `wait_for_node`.
+Waits for a specific **outgoing** protocol node matching the given filter. Returns an owned future that resolves when a matching node is sent by the client. This is the outbound counterpart to `wait_for_node`.
 
 <ParamField path="filter" type="NodeFilter" required>
   Filter specifying which outgoing node to intercept (by tag and attributes)
@@ -2448,6 +2452,7 @@ Entry counts plus estimated retained heap bytes for the client's internal collec
 | `delivery_receipt_queue` | `usize` | Delivery receipts queued for their worker, same shape as `transport_ack_queue` ([#1116](https://github.com/oxidezap/whatsapp-rust/pull/1116)) |
 | `response_waiters` | `usize` | Active IQ response waiters |
 | `node_waiters` | `usize` | Active node waiters |
+| `media_reuploads` | `usize` | Distinct in-flight media-reupload operations. Coalesced subscribers share one entry; this is not a subscriber count. |
 | `sent_node_waiters` | `usize` | Waiters parked on outgoing nodes, the pre-encryption counterpart of `node_waiters`. Each retains a filter and a oneshot sender ([#1235](https://github.com/oxidezap/whatsapp-rust/pull/1235)) |
 | `pending_retries` | `usize` | Pending message retries |
 | `pending_lid_refreshes` | `usize` | Numbers with a `refresh_lid` re-resolve in flight, keyed by `(connection_generation, PN-side JID)`. Counts active reservations, not distinct peers — the same phone number can hold more than one across a reconnect, since an old generation's entry is only released by the task that took it. A value that stays high across repeated samples points at refreshes not completing rather than at request volume alone — though sustained turnover across many peers can also hold it up, since a completed reservation can be replaced by a fresh one between samples ([#1313](https://github.com/oxidezap/whatsapp-rust/pull/1313)) |

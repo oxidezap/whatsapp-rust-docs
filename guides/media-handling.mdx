@@ -124,7 +124,7 @@ See [Download API reference](/api/download#download_to_writer) for streaming fro
 
 ### Downloading without an active session
 
-`client.download()` and its variants need a connected `Client` for most media — they ask the server for CDN hosts and an auth token (cached and refreshed automatically, not fetched on every call). The exception is `static_url` media (newsletter/channel content), which skips that entirely — see the [Download API reference](/api/download#download) for details. If you've persisted a message's CDN fields (for example as a [`DownloadParams`](/api/download#downloadparams)) and want to fetch that media later, after the session that received it has disconnected, use [`MediaDownloader`](/api/download#mediadownloader) instead. It needs only an `HttpClient` and a `Runtime` — no `Client`, no pairing:
+`client.download()` and its variants need a connected `Client` for most media; they ask the server for CDN hosts (cached and refreshed automatically, not fetched on every call). The exception is `static_url` media (newsletter/channel content), which skips that entirely; see the [Download API reference](/api/download#download) for details. If you've persisted a message's CDN fields (for example as a [`DownloadParams`](/api/download#downloadparams)) and want to fetch that media later, after the session that received it has disconnected, use [`MediaDownloader`](/api/download#mediadownloader) instead. It needs only an `HttpClient` and a `Runtime`; no `Client`, no pairing:
 
 ```rust
 use std::sync::Arc;
@@ -147,7 +147,7 @@ let data = downloader.download(&params).await?;
 ```
 
 <Note>
-`MediaDownloader` mirrors `client.download()`'s streaming/buffered behavior and host failover, but it can't refresh credentials — there's no session to get fresh ones from. A rejection fails immediately instead of retrying, and the error is a typed [`MediaDownloadError`](/api/download#mediadownloaderror) rather than `anyhow::Error`. On a route built with `MediaRoute::authenticated`, a 401/403 can mean only the *auth token* went stale, not the reference itself — retry once with `route.without_auth()` before treating it as expired or revoked. See [`MediaDownloadError`](/api/download#mediadownloaderror) for the full breakdown.
+`MediaDownloader` uses the same streaming/buffered behavior and host failover as client downloads. It cannot refresh the host list through a session. A reference rejection returns a typed [`MediaDownloadError`](/api/download#mediadownloaderror). Supply hosts with `MediaRoute::new(hosts)` or use the default-host convenience; download routes carry no auth token.
 </Note>
 
 ## Thumbnails
@@ -674,37 +674,30 @@ let _file = client.download_to_writer(video, progress_writer).await?;
 
 ### Automatic retry and failover
 
-Both `download` and `upload` methods automatically retry when WhatsApp's CDN returns certain HTTP errors. The client handles three categories of errors:
+For session-derived download routes, a reference rejection (401/403/404/410) can trigger one media-session refresh and URL re-derivation with refreshed hosts. Download routes carry no auth token. Static URLs bypass session refresh, and `MediaDownloader` returns a reference rejection immediately because it has no session.
 
-**Auth errors (401/403):** The client invalidates the cached `MediaConn`, fetches fresh credentials from WhatsApp's servers, and retries the operation once with new auth tokens.
+Transport, HTTP, or integrity failures can fall over to another host. Local writer failures are terminal. Inspect the typed [download errors](/api/download#clientdownloaderror) and publish the destination only after success; cleanup after cancellation is not guaranteed.
 
-**Media not found (404/410):** When a download URL has expired or the media has been moved, the CDN returns 404 or 410. The client treats this the same as an auth error — it invalidates the cached media connection, re-derives download URLs with fresh credentials and hosts, and retries once. This matches WhatsApp Web's `MediaNotFoundError` handling.
-
-**Other errors (e.g., 500):** The client tries the next available CDN host without refreshing credentials. Media connections include multiple hosts sorted by priority (primary hosts first, then fallback hosts), and the client iterates through them sequentially.
-
-<Note>
-This retry behavior is fully transparent — no changes are needed in your code. Both `download` and `upload` handle auth refresh, URL re-derivation, and host failover automatically, with a maximum of one credential refresh per operation. [`MediaDownloader`](/api/download#mediadownloader) follows the same host-failover behavior but skips the credential refresh, since it has no session to refresh from — see [Downloading without an active session](#downloading-without-an-active-session).
-</Note>
-
-For streaming downloads (`download_to_writer`), the client empties and rewinds your writer before each attempt, including the first, so a host that streamed out plaintext before failing its MAC can't leave a tail behind a shorter successful retry. If every host fails, the client empties the writer one last time on a best-effort basis rather than leaving it holding unverified bytes. See [`DownloadWriter`](/api/download#downloadwriter-trait) for the trait this relies on.
+Upload retains its authentication token and credential-refresh behavior. See [upload](/api/upload) for that separate path.
 
 ### Additional retry logic
 
-For transient errors beyond auth failures, you can implement your own retry wrapper:
+For transient errors beyond reference rejections, you can implement your own retry wrapper:
 
 ```rust
 use tokio::time::{sleep, Duration};
+use whatsapp_rust::{Client, download::{ClientDownloadError, Downloadable}};
 
 async fn download_with_retry(
     client: &Client,
     downloadable: &dyn Downloadable,
     max_retries: u32,
-) -> Result<Vec<u8>> {
+) -> Result<Vec<u8>, ClientDownloadError> {
     let mut attempt = 0;
     loop {
         match client.download(downloadable).await {
             Ok(data) => return Ok(data),
-            Err(e) if attempt < max_retries => {
+            Err(e @ ClientDownloadError::HostsUnreachable(_)) if attempt < max_retries => {
                 attempt += 1;
                 eprintln!("Retry {}/{}: {:?}", attempt, max_retries, e);
                 sleep(Duration::from_secs(2u64.pow(attempt))).await;
@@ -719,32 +712,32 @@ async fn download_with_retry(
 
 ### Automatic management
 
-The client automatically manages media connection tokens, including refreshing them when they expire or when the CDN rejects them with 401/403/404/410:
+The client caches media connection information. Downloads use its CDN hosts; uploads also use its authentication token. Session-derived downloads can refresh hosts once after a reference rejection (401/403/404/410), while uploads refresh credentials on 401/403:
 
 ```rust
-// Automatically refreshed when expired or rejected
+// Each operation applies its own refresh policy
 let upload = client.upload(data, MediaType::Image, Default::default()).await?;
 let download = client.download(downloadable).await?;
 
-// No manual token management needed!
+// The client manages the cached media connection.
 ```
 
 ### Host types and failover order
 
 Each media connection includes multiple CDN hosts with a `host_type` field indicating whether the host is `"primary"` or `"fallback"`. The client sorts hosts with primary hosts first, so uploads and downloads always try the fastest hosts before falling back to alternatives. Each host may also include a `fallback_hostname` for additional resilience.
 
-### Token expiration
+### Cache expiration
 
 Media connections have two TTL values:
 
 - **`ttl`** — how long the route/host information is valid
 - **`auth_ttl`** — how long the auth token specifically is valid (may be shorter than `ttl`)
 
-The client uses the minimum of these two values to determine when the cached connection has expired. When expired, the next media operation automatically fetches fresh credentials.
+The client uses the minimum of these two values to determine when the cached connection has expired. When expired, the next session-derived media operation fetches fresh connection information. Download routes retain only its hosts.
 
 ### Internal refresh
 
-Media connection refresh and invalidation are managed internally by the client. When the CDN rejects a request (401/403/404/410), the client automatically invalidates the cached connection and fetches fresh credentials before retrying. You don't need to manage this manually.
+Media connection refresh and invalidation are managed internally by the client. Download refresh updates hosts and re-derives the URL without adding an auth token. Static download URLs bypass session refresh, and standalone `MediaDownloader` has no session to refresh. Upload credential refresh remains separate.
 
 ## Best Practices
 

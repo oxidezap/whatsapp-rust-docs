@@ -24,7 +24,7 @@ Antes de instalar whatsapp-rust, certifique-se de ter:
 
 ```toml Cargo.toml
 [dependencies]
-whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "86b1b315af3be1a48e1961c0a72f3e42152f1a33" }
+whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "93e5c7f75cdad98472efd218d9bff8a464cf47a7" }
 # Só é preciso declarar um crate irmão para features específicas dele:
 # whatsapp-rust-sqlite-storage is re-exported by whatsapp-rust; add a direct Git dependency only if needed.
 # whatsapp-rust-tokio-transport is re-exported by whatsapp-rust; add a direct Git dependency only if needed.
@@ -54,11 +54,14 @@ whatsapp-rust suporta diversas features opcionais:
 | `metrics` | Emite contadores, histogramas e gauges `wa_*` pela fachada [`metrics`](https://docs.rs/metrics). Veja [Métricas](/advanced/metrics) | ❌ Não |
 | `client-lifecycle` | Seam de ciclo de vida de extensões com escopo de geração (`ClientLifecycle`, `ConnectionScope`). Habilitada automaticamente por `plugins` | ❌ Não |
 | `plugins` | Host nativo de plugins em tempo de build: registro tipado de `ClientPlugin` via `ClientBuilder`, APIs com escopo de capacidade e ciclo de vida de tarefas por geração. Habilita `client-lifecycle` (veja [Plugins nativos](/advanced/plugins)) | ❌ Não |
-| `voip` | Chamadas de voz e vídeo 1:1, perfil completo: adaptadores MLow + libopus, plano de vídeo H.264 neutro de codec, criptografia E2E-SRTP e transporte por relay. Alias para `voip-mlow` + `voip-libopus` (veja [Chamadas VoIP](/guides/voip-calls)) | ❌ Não |
-| `voip-runtime` | Feature base interna habilitada por toda feature `voip-*` (driver Tokio, transporte por relay, DTLS/SCTP). Não é para ser nomeada diretamente — escolha `voip-encoded` ou uma feature de codec | ❌ Não |
-| `voip-encoded` | Perfil `voip` mais estreito: apenas transporte por relay e a fronteira de áudio codificado, sem codec embutido — forneça pacotes Opus/MLOW do seu próprio encoder/decoder | ❌ Não |
-| `voip-mlow` | `voip-encoded` mais o codec MLOW puro-Rust embutido | ❌ Não |
-| `voip-libopus` | `voip-encoded` mais o adaptador de codec opcional libopus via FFI | ❌ Não |
+| `voip` | Perfil completo para chamadas 1:1: `voip-mlow` + `voip-libopus` + `voip-relay-native` (veja [Chamadas VoIP](/guides/voip-calls)) | ❌ Não |
+| `voip-control` | Contrato e fluxo de controle de chamadas, sem engine de mídia. Forneça um backend para iniciar mídia | ❌ Não |
+| `voip-engine-wacore` | Backend de mídia baseado na engine do `wacore`; habilita `voip-control` | ❌ Não |
+| `voip-runtime` | Composição de `voip-control` + `voip-engine-wacore`, sem transporte por relay ou dependência obrigatória do Tokio | ❌ Não |
+| `voip-relay-native` | Transporte nativo por relay com UDP, DTLS/SCTP e DataChannel. Habilita `tokio-runtime`; não compila em `wasm32` ou `espidf`. Incluído por `voip` | ❌ Não |
+| `voip-encoded` | `voip-runtime` com áudio codificado fornecido pela aplicação, sem codec embutido nem transporte por relay. Adicione `voip-relay-native` ou forneça seu próprio `RelayTransportProvider` | ❌ Não |
+| `voip-mlow` | `voip-runtime` mais o codec MLOW puro-Rust embutido, sem transporte por relay; compila em `wasm32` | ❌ Não |
+| `voip-libopus` | `voip-encoded` mais o adaptador libopus via FFI, sem transporte por relay | ❌ Não |
 | `legacy-session-interop` | Interop tipada com o modelo decodificado do `SessionRecord` v1 legado do libsignal, para migrar estado de autenticação produzido externamente | ❌ Não |
 | `danger-skip-tls-verify` | Pula a verificação TLS (inseguro) | ❌ Não |
 | `danger-skip-cert-chain-verify` | Pula a checagem da cadeia de certificados no handshake Noise (inseguro) | ❌ Não |
@@ -78,7 +81,7 @@ Para usar whatsapp-rust em um ambiente de navegador WASM, habilite a feature `js
 
 ```toml Cargo.toml
 [dependencies]
-wacore = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "86b1b315af3be1a48e1961c0a72f3e42152f1a33", default-features = false, features = ["js"] }
+wacore = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "93e5c7f75cdad98472efd218d9bff8a464cf47a7", default-features = false, features = ["js"] }
 ```
 
 O crate `waproto` tem suas próprias feature flags:
@@ -93,7 +96,7 @@ O `build.rs` sempre executa e gera `whatsapp.rs` no `OUT_DIR` — nenhuma featur
 
 ```toml Cargo.toml
 [dependencies]
-waproto = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "86b1b315af3be1a48e1961c0a72f3e42152f1a33", features = ["serde-snake-case"] }
+waproto = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "93e5c7f75cdad98472efd218d9bff8a464cf47a7", features = ["serde-snake-case"] }
 ```
 
 O crate `whatsapp-rust-sqlite-storage` tem suas próprias feature flags:
@@ -110,7 +113,7 @@ Para manter o `SqliteStore` e vincular ao seu próprio SQLite, desabilite as fea
 
 ```toml Cargo.toml
 [dependencies]
-whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "86b1b315af3be1a48e1961c0a72f3e42152f1a33", default-features = false, features = [
+whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "93e5c7f75cdad98472efd218d9bff8a464cf47a7", default-features = false, features = [
     "sqlite-storage",
     "tokio-transport",
     "tokio-runtime",
@@ -126,7 +129,7 @@ Se você depende de `whatsapp-rust-sqlite-storage` diretamente, a mesma regra se
 
 ```toml Cargo.toml
 [dependencies]
-whatsapp-rust-sqlite-storage = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "86b1b315af3be1a48e1961c0a72f3e42152f1a33", default-features = false }
+whatsapp-rust-sqlite-storage = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "93e5c7f75cdad98472efd218d9bff8a464cf47a7", default-features = false }
 ```
 
 <Note>
@@ -161,7 +164,7 @@ Se você quiser usar apenas features específicas:
 
 ```toml Cargo.toml
 [dependencies]
-whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "86b1b315af3be1a48e1961c0a72f3e42152f1a33", default-features = false, features = ["sqlite-storage", "tokio-transport"] }
+whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "93e5c7f75cdad98472efd218d9bff8a464cf47a7", default-features = false, features = ["sqlite-storage", "tokio-transport"] }
 ```
 
 ## Verifique a instalação

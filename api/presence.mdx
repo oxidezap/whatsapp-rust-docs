@@ -116,7 +116,11 @@ client.presence().unsubscribe(&contact_jid).await?;
 println!("Unsubscribed from {}'s presence", contact_jid);
 ```
 
-## PresenceStatus Enum
+## PresenceStatus enum
+
+Persisted event JSON changes intentionally. See the [before/after migration examples](/concepts/events#json-event-migration) before updating external consumers.
+
+`PresenceStatus` is shared with `wacore::types::presence` and re-exported by the SDK. `PresenceUpdate.status` can be passed directly to `client.presence().set(status)`. This is global availability; use `ChatActivity` for typing and recording in one chat.
 
 ```rust
 #[non_exhaustive]
@@ -135,6 +139,16 @@ pub enum PresenceStatus {
 ```rust
 let status = PresenceStatus::Available;
 assert_eq!(status.as_str(), "available");
+```
+
+## Reuse an incoming availability value
+
+```rust
+use whatsapp_rust::{Client, PresenceError, wacore::types::events::PresenceUpdate};
+
+async fn set_availability(client: &Client, update: &PresenceUpdate) -> Result<(), PresenceError> {
+    client.presence().set(update.status).await
+}
 ```
 
 ## Push name requirement

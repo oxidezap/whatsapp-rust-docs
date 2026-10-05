@@ -104,9 +104,9 @@ pub async fn is_blocked(&self, jid: &Jid) -> Result<bool, BlockingError>
 - `bool` - `true` if blocked, `false` otherwise
 
 **Behavior:**
-- Compares only the user part of the JID (ignores device ID)
+- Compares normalized JIDs, ignoring device IDs while preserving the PN/LID namespace
 - Blocking applies to the entire user account, not individual devices
-- Because `block()` stores entries keyed by LID, `is_blocked()` resolves the queried JID's LID/PN pair before matching. If the mapping lookup fails (network or backend error), the call returns `Err` rather than silently falling back to the raw user, which would risk a false negative. When no mapping exists for the JID, the raw user part is used as-is.
+- Because `block()` stores entries keyed by LID, `is_blocked()` resolves the queried JID's LID/PN pair before matching. If the mapping lookup fails (network or backend error), the call returns `Err` rather than silently falling back to the raw user, which would risk a false negative. When no mapping exists, comparison uses the original normalized JID, including its PN/LID namespace. A PN and LID with identical user text do not match without an explicit mapping.
 
 **Example:**
 ```rust
@@ -319,7 +319,7 @@ match client.blocking().block(&contact).await {
 
 ## Device ID Handling
 
-The `is_blocked()` method compares only the user part of JIDs, ignoring device IDs:
+The `is_blocked()` method ignores device IDs while preserving the JID namespace. It rejects non-PN/LID targets before an IQ:
 
 ```rust
 let jid1: Jid = "15551234567.0@s.whatsapp.net".parse()?;  // Device 0

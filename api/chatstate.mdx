@@ -23,31 +23,31 @@ Send a chat state update to a recipient.
 pub async fn send(
     &self,
     to: &Jid,
-    state: ChatStateType,
+    state: ChatActivity,
 ) -> Result<(), ChatStateError>
 ```
 
 **Parameters:**
 - `to` - Recipient JID (user or group)
-- `state: ChatStateType` - Type of chat state to send
+- `state: ChatActivity` - Type of chat state to send
 
 **Returns:**
-- `Result<(), ChatStateError>` — `Ok(())` on success; a `ChatStateError` if the client is disconnected or the JID is invalid
+- `Result<(), ChatStateError>`; `Ok(())` on success; a `ChatStateError` if the client is disconnected or the JID is invalid
 
 **Example:**
 ```rust
-use whatsapp_rust::features::chatstate::ChatStateType;
+use whatsapp_rust::ChatActivity;
 
 let recipient: Jid = "15551234567@s.whatsapp.net".parse()?;
 
 // Send typing indicator
-client.chatstate().send(&recipient, ChatStateType::Composing).await?;
+client.chatstate().send(&recipient, ChatActivity::Typing).await?;
 
 // Send recording indicator
-client.chatstate().send(&recipient, ChatStateType::Recording).await?;
+client.chatstate().send(&recipient, ChatActivity::RecordingAudio).await?;
 
 // Send paused (stopped typing)
-client.chatstate().send(&recipient, ChatStateType::Paused).await?;
+client.chatstate().send(&recipient, ChatActivity::Idle).await?;
 ```
 
 ### send_composing
@@ -108,7 +108,7 @@ pub struct ChatStateEvent {
     /// For group chats, the participant who triggered the event
     pub participant: Option<Jid>,
     /// The chat state (typing, recording_audio, or idle)
-    pub state: ReceivedChatState,
+    pub state: ChatActivity,
 }
 ```
 
@@ -120,25 +120,25 @@ pub struct ChatStateEvent {
   For group chats, the participant who triggered the event. `None` for 1:1 chats.
 </ParamField>
 
-<ParamField path="state" type="ReceivedChatState">
-  The parsed chat state — see `ReceivedChatState` below.
+<ParamField path="state" type="ChatActivity">
+  The parsed chat state; see `ChatActivity` below.
 </ParamField>
 
 **Example:**
 
 ```rust
-use whatsapp_rust::ChatStateEvent;
+use whatsapp_rust::{ChatActivity, ChatStateEvent};
 use std::sync::Arc;
 
 let subscription = client.subscribe_chatstate_handler(Arc::new(|event: ChatStateEvent| {
     match event.state {
-        ReceivedChatState::Typing => {
+        ChatActivity::Typing => {
             println!("{} is typing in {}", event.participant.as_ref().unwrap_or(&event.chat), event.chat);
         }
-        ReceivedChatState::RecordingAudio => {
+        ChatActivity::RecordingAudio => {
             println!("{} is recording audio", event.chat);
         }
-        ReceivedChatState::Idle => {
+        ChatActivity::Idle => {
             println!("{} stopped typing", event.chat);
         }
         _ => {}
@@ -146,60 +146,47 @@ let subscription = client.subscribe_chatstate_handler(Arc::new(|event: ChatState
 }));
 ```
 
-### ReceivedChatState
+### ChatActivity
 
-The state values for incoming chatstate events, aligned with WhatsApp Web's `WAChatState` constants.
+Use the same activity value for incoming events and outgoing updates.
 
 ```rust
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ReceivedChatState {
+pub enum ChatActivity {
     Typing,        // User is typing text
     RecordingAudio, // User is recording a voice message
     Idle,          // User stopped typing/recording (default)
 }
 ```
 
-`ReceivedChatState` is `#[non_exhaustive]`, so match statements should include a wildcard arm.
+`ChatActivity` is `#[non_exhaustive]`, so match statements should include a wildcard arm.
 
 **Wire format mapping:**
 
-| XML stanza | ReceivedChatState |
+| XML stanza | ChatActivity |
 |---|---|
 | `<composing/>` | `Typing` |
 | `<composing media="audio"/>` | `RecordingAudio` |
 | `<paused/>` | `Idle` |
 
-## Sending chat state updates
-
-## ChatStateType Enum
-
 ```rust
-#[non_exhaustive]
-pub enum ChatStateType {
-    Composing,  // Typing text
-    Recording,  // Recording audio
-    Paused,     // Stopped typing/recording
+use whatsapp_rust::{Client, ChatActivity, ChatStateError, wacore_binary::Jid};
+
+async fn send_activity(client: &Client, chat: &Jid, activity: ChatActivity) -> Result<(), ChatStateError> {
+    client.chatstate().send(chat, activity).await
 }
 ```
 
-`ChatStateType` is `#[non_exhaustive]`, so match statements should include a wildcard arm to handle future variants.
+## Activity representation
 
-**Methods:**
-- `as_str()` - Returns `"composing"`, `"recording"`, or `"paused"`
+Persisted event JSON changes intentionally. See the [before/after migration examples](/concepts/events#json-event-migration) before updating external consumers.
 
-**String conversion:**
-```rust
-use whatsapp_rust::features::chatstate::ChatStateType;
+`ChatActivity` is shared by sending, `ChatStateEvent.state`, and `ChatPresenceUpdate.state`. It describes activity in one chat. Global online/offline availability uses `PresenceStatus` separately.
 
-let state = ChatStateType::Composing;
-assert_eq!(state.as_str(), "composing");
-assert_eq!(state.to_string(), "composing");
+Serde serializes the activities as `"typing"`, `"recording_audio"`, and `"idle"`. These names are semantic values. Use `into_child_node()` and `from_child_node(&NodeRef)` for the protocol projection. Recording audio produces `<composing media="audio"/>`.
 
-// Parse from string
-let parsed = ChatStateType::try_from("recording")?;
-assert_eq!(parsed, ChatStateType::Recording);
-```
+The parser treats unknown media on `composing` as typing and unknown child tags as idle. Keep the raw node separately if you need to preserve unknown attributes.
 
 ## Wire Format
 
@@ -234,7 +221,6 @@ Note: Recording uses `<composing media="audio">` rather than a separate tag.
 ### Typing indicator lifecycle
 
 ```rust
-use whatsapp_rust::features::chatstate::ChatStateType;
 
 let recipient: Jid = "15551234567@s.whatsapp.net".parse()?;
 
@@ -351,9 +337,9 @@ client.send_message(group_jid.clone(), message).await?;
 
 All methods return `Result<(), ChatStateError>`. You'll encounter these most often:
 
-- **Not connected** — you are not connected to WhatsApp
-- **Invalid JID** — the recipient JID is malformed
-- **Network errors** — connection dropped mid-send
+- **Not connected**; you are not connected to WhatsApp
+- **Invalid JID**; the recipient JID is malformed
+- **Network errors**; connection dropped mid-send
 
 ```rust
 use whatsapp_rust::ChatStateError;
@@ -372,7 +358,7 @@ match client.chatstate().send_composing(&recipient).await {
 ## Best Practices
 
 1. **Throttle updates**: Don't send chat state updates more than once every 2-3 seconds
-2. **Clear on send**: Send `Paused` before sending the actual message
+2. **Clear on send**: Send `ChatActivity::Idle` before sending the actual message
 3. **Auto-timeout**: Consider auto-clearing typing indicators after 10-15 seconds of inactivity
 4. **Don't spam**: Only send when state actually changes
 5. **Groups**: Be mindful that all group members will see the indicator
@@ -380,7 +366,6 @@ match client.chatstate().send_composing(&recipient).await {
 ## Complete Example
 
 ```rust
-use whatsapp_rust::features::chatstate::ChatStateType;
 use std::time::Duration;
 
 let recipient: Jid = "15551234567@s.whatsapp.net".parse()?;

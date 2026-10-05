@@ -24,6 +24,8 @@ The call consumes and returns the writer. Success replaces previous contents wit
 
 On an ordinary returned error, the downloader clears and rewinds the consumed destination when possible. `WriterCleanup` exposes refusal or cleanup failure. Cancellation or executor loss can prevent return and cleanup; publish a separately retained destination only after success.
 
+`Downloadable` uses `MaybeSendSync`; writer methods require `DownloadWriter + MaybeSend + 'static`. Import the markers from `whatsapp_rust::wacore::sync_marker`. Native targets retain `Send`/`Sync` requirements. On `wasm32`, local implementations can hold `Rc`/`RefCell` state. The writer remains a synchronous `Write`/`Seek`/truncate sink; these bounds do not make it a browser stream API.
+
 ## DownloadWriter trait
 
 A writer must implement `Write`, `Seek`, and `truncate`. `Cursor<Vec<u8>>` and `std::fs::File` implement this contract. A custom host writer must truncate existing output as well as accept writes and rewinds.
@@ -45,7 +47,7 @@ Match with a fallback arm because the enum is extensible. `ErrorChainExt` recove
 
 ## Automatic retry and URL re-derivation
 
-For session-derived routes, the client performs applicable host failover and can refresh media credentials once after a reference rejection. Static URLs bypass session acquisition and their first reference rejection is terminal. Inspect `ClientDownloadError` for the final classification; a refreshed empty host list preserves the original rejection status. The standalone `MediaDownloader` cannot ask a client for refreshed credentials.
+For session-derived routes, the client performs applicable host failover and can refresh the media host list once after a reference rejection. Static URLs bypass session acquisition and their first reference rejection is terminal. Inspect `ClientDownloadError` for the final classification; a refreshed empty host list preserves the original rejection status. The standalone `MediaDownloader` cannot ask a client for refreshed hosts.
 
 Local writer failures do not trigger CDN retry or refresh. A consumed sink may have changed before failure; use the cleanup and cancellation boundaries above rather than publish partial output.
 
@@ -110,7 +112,7 @@ pub fn encrypted(
 
 ## MediaDownloader
 
-Downloads and decrypts media from the CDN with **no connected `Client`**. Everything a download needs beyond the CDN hosts already lives in the [`Downloadable`](#downloadable-trait) itself — `MediaDownloader` takes the hosts (and, optionally, an auth token) up front instead of asking a live session for them, so a persisted reference (for example a stored [`DownloadParams`](#downloadparams)) stays downloadable after the client has disconnected.
+Downloads and decrypts media from the CDN with **no connected `Client`**. Everything a download needs beyond the CDN hosts already lives in the [`Downloadable`](#downloadable-trait) itself; `MediaDownloader` takes the hosts up front instead of asking a live session for them, so a persisted reference (for example a stored [`DownloadParams`](#downloadparams)) stays downloadable after the client has disconnected.
 
 A live `Client` still needs a session to fetch its hosts (cached and refreshed automatically, not re-fetched on every call — see [Automatic retry and URL re-derivation](#automatic-retry-and-url-re-derivation)); `MediaDownloader` is the path for callers that have no session to ask with at all — a background worker, a queue consumer, or a CLI tool operating on data a paired client saved earlier.
 
@@ -136,7 +138,7 @@ impl MediaDownloader {
         downloadable: &dyn Downloadable,
     ) -> Result<Vec<u8>, MediaDownloadError>;
 
-    pub async fn download_to_writer<W: DownloadWriter + Send + 'static>(
+    pub async fn download_to_writer<W: DownloadWriter + MaybeSend + 'static>(
         &self,
         downloadable: &dyn Downloadable,
         writer: W,
@@ -153,10 +155,10 @@ impl MediaDownloader {
 </ParamField>
 
 <ParamField path="new::route" type="MediaRoute" required>
-  The CDN hosts to try, in order, and an optional auth token. See [`MediaRoute`](#mediaroute-and-mediahost) below.
+  The CDN hosts to try, in order. See [`MediaRoute`](#mediaroute-and-mediahost) below.
 </ParamField>
 
-`download` and `download_to_writer` mirror `Client::download` and `Client::download_to_writer` — same streaming/buffered branching, same retry-on-another-host behavior across the route's hosts, same writer contract for the streaming variant. The one difference is the auth-refresh budget: a `Client` gets one retry with freshly fetched credentials after an auth or not-found error; `MediaDownloader` has no session to refresh credentials from, so that class of error is terminal on the first attempt.
+`download` and `download_to_writer` mirror `Client::download` and `Client::download_to_writer`; same streaming/buffered branching, same retry-on-another-host behavior across the route's hosts, same writer contract for the streaming variant. A `Client` can refresh its media host list once after a reference rejection. `MediaDownloader` has no session to refresh, so a reference rejection is terminal on the first attempt.
 
 ### Example: download after the session is gone
 
@@ -184,7 +186,7 @@ let bytes = downloader.download(&params).await?;
 ```
 
 <Tip>
-`with_default_hosts` routes through [`DEFAULT_MEDIA_HOSTS`](#mediaroute-and-mediahost) with no auth token, which matches how WhatsApp Web's own download URL builder works — auth is an upload concern, not a download one. Pass an explicit `MediaRoute` to `new` if you need specific hosts or want to carry a token you obtained another way.
+`with_default_hosts` uses [`DEFAULT_MEDIA_HOSTS`](#mediaroute-and-mediahost). Pass `MediaRoute::new(hosts)` to `new` to choose hosts explicitly.
 </Tip>
 
 ### MediaDownloadError
@@ -201,57 +203,30 @@ pub enum MediaDownloadError {
 
 | Variant | Meaning |
 |---------|---------|
-| `ReferenceRejected` | The CDN rejected the request with 401/403/404/410. On a route built with [`MediaRoute::authenticated`](#mediaroute-and-mediahost), a 401/403 can mean only the *auth token* is stale — downloads don't strictly need one, so retrying with [`route.without_auth()`](#mediaroute-and-mediahost) before giving up can still succeed. A 404/410, or a 401/403 on an already-unauthenticated route, means the `direct_path` itself is expired or revoked and no host can serve it — that case is terminal. |
+| `ReferenceRejected` | The CDN rejected the reference with 401/403/404/410. The standalone downloader returns this error without refreshing a session or trying another host. |
 | `HostsUnreachable` | Every host in the route failed for a reason other than the reference (transport failure, unexpected status, a body that failed to decrypt/verify). |
 | `NoHosts` | The `MediaRoute` named no hosts, so nothing was ever contacted. |
 | `Other` | The `Downloadable` didn't have the fields needed to build a request at all (e.g. no `direct_path` and no `static_url`), so — unlike `NoHosts` — no host was ever *going* to be contacted. Fix the metadata, not the network. |
 
 `MediaDownloadError` is `#[non_exhaustive]`; match it with a wildcard (`_ => `) arm so a future variant doesn't break your build.
 
-`Client::download` and `Client::download_to_writer` return `ClientDownloadError`, which classifies the final outcome after applicable credential refresh and host failover. Low-level `MediaDownloader` uses `MediaDownloadError`.
+`Client::download` and `Client::download_to_writer` return `ClientDownloadError`, which classifies the final outcome after applicable media-session refresh and host failover. Low-level `MediaDownloader` uses `MediaDownloadError`.
 
 ### MediaRoute and MediaHost
 
-`MediaRoute` replaces the old `MediaConnection` type — it is the low-level input to [`DownloadUtils::prepare_download_requests`](#key-methods) and to `MediaDownloader`. Where `MediaConnection` required an `auth: String`, `MediaRoute` makes it `auth: Option<String>`, because the CDN gates a download on the signed `direct_path` and its hash token, not on a session credential.
+`MediaRoute` contains CDN hosts in failover order. It carries no authentication token. `MediaRoute::from(&media_conn)` copies only hosts from the session; upload keeps its separate authentication requirements.
 
 ```rust
-pub struct MediaHost {
-    pub hostname: String,
-}
+use whatsapp_rust::download::{MediaHost, MediaRoute};
 
-impl MediaHost {
-    pub fn new(hostname: impl Into<String>) -> Self;
+fn download_route() -> MediaRoute {
+    MediaRoute::new(vec![MediaHost::new("mmg.whatsapp.net")])
 }
-
-pub struct MediaRoute {
-    pub hosts: Vec<MediaHost>,
-    pub auth: Option<String>,
-}
-
-impl MediaRoute {
-    pub fn authenticated(hosts: Vec<MediaHost>, auth: String) -> Self;
-    pub fn unauthenticated(hosts: Vec<MediaHost>) -> Self;
-    pub fn without_auth(self) -> Self;
-    pub fn default_hosts() -> Self;
-}
-
-pub const DEFAULT_MEDIA_HOSTS: [&str; 2] = ["mmg.whatsapp.net", "mmg-fallback.whatsapp.net"];
 ```
 
-| Constructor | Use when |
-|-------------|----------|
-| `MediaRoute::authenticated(hosts, auth)` | You have both server-provided hosts and a media auth token (what a connected `Client` builds from its `MediaConn`). |
-| `MediaRoute::unauthenticated(hosts)` | You have hosts but no token — the common case for `MediaDownloader`. |
-| `route.without_auth()` | You have an authenticated route but want to keep using it past the token's lifetime; drops the token rather than sending a stale one. |
-| `MediaRoute::default_hosts()` | You have neither — routes through [`DEFAULT_MEDIA_HOSTS`](#mediaroute-and-mediahost), the CDN hosts WhatsApp Web itself carries in its binary-protocol token dictionary. This is only a convenience: a live session should still take its hosts from the server, which is what lets a test harness point downloads at itself. |
+Use `MediaRoute::default_hosts()` when you need the built-in `DEFAULT_MEDIA_HOSTS`. A connected client obtains hosts from its media session. A retained route can be used after disconnect while the media reference remains valid.
 
-<Note>
-`MediaRoute`'s `Debug` implementation is hand-written to print `auth: Some("<redacted>")` / `auth: None` instead of the token itself, so a stray `{:?}` or tracing field can't leak a live credential into a log.
-</Note>
-
-<Warning>
-**Breaking change (as of PR #1194):** `wacore::download::MediaConnection` (`{ hosts: Vec<MediaHost>, auth: String }`) no longer exists. If you built one directly and passed it to `DownloadUtils::prepare_download_requests`, migrate by constructing the equivalent `MediaRoute` in its place: `MediaRoute::authenticated(hosts, auth)`. (The `From<&MediaConn> for MediaRoute` impl is unrelated to this migration — it converts `whatsapp_rust`'s own `mediaconn::MediaConn`, the server response a connected `Client` refreshes internally, and is what `Client::prepare_requests` uses under the hood.) `Client::download` and friends are unaffected either way; this only touches callers using the lower-level `DownloadUtils` type directly.
-</Warning>
+`DownloadUtils::prepare_download_requests` preserves existing query parameters, percent encoding, and fragments while adding the existing media `token` parameter. Relative media paths remain on the selected HTTPS route origin. Download URLs do not receive session auth. Supply URI-encoded direct paths: malformed percent escapes, raw whitespace, backslashes, and raw non-ASCII characters are rejected. References cannot add credentials or change the selected HTTPS origin.
 
 ---
 
@@ -342,7 +317,7 @@ The CDN response is a JSON envelope, not a protobuf message — `StickerPack` / 
 The `Downloadable` trait provides a generic interface for downloading media from any message type.
 
 ```rust
-pub trait Downloadable: Sync + Send {
+pub trait Downloadable: MaybeSendSync {
     fn direct_path(&self) -> Option<&str>;
     fn media_key(&self) -> Option<&[u8]>;
     fn file_enc_sha256(&self) -> Option<&[u8]>;
@@ -525,5 +500,5 @@ use whatsapp_rust::download::DownloadUtils;
 | `decrypt_stream_to_writer(reader, media_key, media_type, writer)` | Streaming decryption directly into a writer with constant memory usage |
 | `validate_plaintext_sha256(data, expected_sha256)` | Validates SHA-256 hash of plaintext media (in-memory) |
 | `copy_and_validate_plaintext_to_writer(reader, expected_sha256, writer)` | Streams plaintext media to a writer while validating SHA-256 hash |
-| `prepare_download_requests(downloadable, route)` | Builds CDN request URLs with host failover. Takes a [`MediaRoute`](#mediaroute-and-mediahost) (previously `MediaConnection`) — hosts plus an optional auth token |
+| `prepare_download_requests(downloadable, route)` | Builds CDN request URLs with host failover. Takes a hosts-only [`MediaRoute`](#mediaroute-and-mediahost) |
 | `get_media_keys(media_key, app_info)` | Derives IV, cipher key, and MAC key via HKDF |

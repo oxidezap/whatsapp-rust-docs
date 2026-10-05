@@ -525,7 +525,7 @@ pub async fn retransmit_message(
 ) -> Result<(), SendError>
 ```
 
-The client derives the wire stanza from the native `wa::Message` and keeps ownership of routing, encryption, session/sender-key state, persistence, and transport — `MessageRetransmission` never accepts a pre-built stanza. `MessageRetransmission` is a small builder:
+The client derives the wire stanza from the native `wa::Message` and keeps ownership of routing, encryption, session/sender-key state, persistence, and transport; `MessageRetransmission` never accepts a pre-built stanza. `MessageRetransmission` is a small builder. Its constructor takes the original typed `MessageId`, and `message_id()` returns `&MessageId`. Use `MessageId::new` to validate a stored raw ID; preserve `StanzaId` for separate operations:
 
 ```rust
 MessageRetransmission::new(chat, requester, message, message_id, retry_count)
@@ -547,18 +547,21 @@ For a status retransmission, the client rebuilds the sender key immediately, but
 
 **Example:**
 ```rust
-use whatsapp_rust::{Freshness, MessageRetransmission};
+use whatsapp_rust::{Client, MessageId, MessageRetransmission, SendError, wacore_binary::Jid, waproto::whatsapp as wa};
 
-// requester is the device JID from an intercepted <receipt type="retry"> stanza
-let request = MessageRetransmission::new(
-    chat_jid.clone(),
-    requester_jid,
-    original_message.clone(),
-    original_message_id.clone(),
-    retry_count,
-);
-
-client.retransmit_message(request).await?;
+async fn retransmit(
+    client: &Client,
+    chat: Jid,
+    requester: Jid,
+    original_message: wa::Message,
+    original_message_id: MessageId,
+    retry_count: u8,
+) -> Result<(), SendError> {
+    let request = MessageRetransmission::new(
+        chat, requester, original_message, original_message_id, retry_count,
+    );
+    client.retransmit_message(request).await
+}
 ```
 
 <Note>
@@ -956,4 +959,4 @@ Use `InboundMessage::message_ref()` for chat actions and `newsletter_ref()` for 
 
 PDO placeholder recovery remains event-only. A later encrypted retry still must complete its durability hook even when the equivalent user event was already dispatched. The retry can promote that recovery to committed state without publishing the same event again. Distinct user payloads in an SKDM-bearing retry retain separate dispatch claims; adding an SKDM envelope does not make their user content identical. Hooks and event consumers still need idempotent `(chat, sender, id)` handling.
 
-[PDO retry and durability regression scenarios](https://github.com/oxidezap/whatsapp-rust/blob/86b1b315af3be1a48e1961c0a72f3e42152f1a33/src/message/tests.rs)
+[PDO retry and durability regression scenarios](https://github.com/oxidezap/whatsapp-rust/blob/93e5c7f75cdad98472efd218d9bff8a464cf47a7/src/message/tests.rs)

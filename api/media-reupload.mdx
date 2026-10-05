@@ -1,131 +1,57 @@
 ---
 title: Media reupload
-description: Request re-upload of media with expired CDN URLs
+description: Recover expired media with a typed message reference and media key
 ---
 
-The `MediaReupload` struct provides a method to request the server to re-upload media when the original CDN URL has expired. This is essential for long-running bots that need to download media from older messages.
-
-## Access
-
-Access media reupload operations through the client:
-
-```rust
-let media_reupload = client.media_reupload();
-```
+Use `client.media_reupload()` when a media reference has expired. Keep the original `MessageRef` and the 32-byte media key together. A media key is separate from the secrets used by message add-ons.
 
 ## Methods
 
 ### request
 
-Request the server to re-upload media for a message with an expired URL.
-
 ```rust
-pub async fn request(
-    &self,
-    req: &MediaReuploadRequest<'_>,
-) -> Result<MediaRetryResult, MediaReuploadError>
-```
+use whatsapp_rust::{Client, MediaReuploadError, MediaReuploadRequest, MediaRetryResult, MessageRef};
 
-<ParamField path="req" type="&MediaReuploadRequest" required>
-  Parameters identifying the media message to re-upload.
-</ParamField>
-
-<ResponseField name="MediaRetryResult" type="MediaRetryResult">
-  The result of the reupload request. On success, contains a new `direct_path` for downloading.
-</ResponseField>
-
-**Example:**
-
-```rust
-use whatsapp_rust::features::media_reupload::{MediaReuploadRequest, MediaRetryResult};
-
-let result = client.media_reupload().request(&MediaReuploadRequest {
-    msg_id: "3EB0ABC123",
-    chat_jid: &chat_jid,
-    media_key: &media_key_bytes,
-    is_from_me: false,
-    participant: Some(&sender_jid), // Required for group messages
-}).await?;
-
-match result {
-    MediaRetryResult::Success { direct_path } => {
-        println!("New download path: {}", direct_path);
-        // Use direct_path to download the media
-    }
-    MediaRetryResult::NotFound => {
-        eprintln!("Media no longer available on server");
-    }
-    MediaRetryResult::GeneralError => {
-        eprintln!("Server returned an error");
-    }
-    MediaRetryResult::DecryptionError => {
-        eprintln!("Failed to decrypt server response");
-    }
+async fn recover_media(
+    client: &Client,
+    target: MessageRef<'_>,
+    media_key: &[u8; 32],
+) -> Result<MediaRetryResult, MediaReuploadError> {
+    let request = MediaReuploadRequest { target, media_key };
+    client.media_reupload().request(&request).await
 }
 ```
+
+Obtain the target from an inbound message or a send result. For stored metadata, validate it with `MessageRef::new`. Received group and broadcast messages require the original sender. Newsletter references belong to a separate domain and cannot be used here.
 
 ### request_many
 
-Request re-upload for several messages at once, concurrently. Use this for bulk recovery — e.g. resuming a client after a long offline period leaves many expired media URLs — since it completes in roughly one [request](#request) timeout instead of the serial sum of per-item waits.
+`request_many(&[MediaReuploadRequest<'_>])` returns `Vec<Result<MediaRetryResult, MediaReuploadError>>` in input order, with one result per request. One failure does not discard the other results.
 
 ```rust
-pub async fn request_many(
-    &self,
-    reqs: &[MediaReuploadRequest<'_>],
-) -> Vec<Result<MediaRetryResult, MediaReuploadError>>
-```
+use whatsapp_rust::{Client, MediaReuploadError, MediaReuploadRequest, MediaRetryResult};
 
-<ParamField path="reqs" type="&[MediaReuploadRequest]" required>
-  The batch of reupload requests.
-</ParamField>
-
-<ResponseField name="results" type="Vec<Result<MediaRetryResult, MediaReuploadError>>">
-  One result per input request, in the same order as `reqs`. One item failing does not abort the others.
-</ResponseField>
-
-**Example:**
-
-```rust
-use whatsapp_rust::features::media_reupload::{MediaReuploadRequest, MediaRetryResult};
-
-let reqs = vec![
-    MediaReuploadRequest {
-        msg_id: "3EB0ABC123",
-        chat_jid: &chat_jid,
-        media_key: &media_key_bytes,
-        is_from_me: false,
-        participant: Some(&sender_jid),
-    },
-    MediaReuploadRequest {
-        msg_id: "3EB0DEF456",
-        chat_jid: &other_chat_jid,
-        media_key: &other_media_key_bytes,
-        is_from_me: false,
-        participant: None,
-    },
-];
-
-for result in client.media_reupload().request_many(&reqs).await {
-    match result {
-        Ok(MediaRetryResult::Success { direct_path }) => {
-            println!("New download path: {}", direct_path);
-        }
-        Ok(other) => eprintln!("Reupload failed: {:?}", other),
-        Err(e) => eprintln!("Request error: {}", e),
-    }
+async fn recover_batch(
+    client: &Client,
+    requests: &[MediaReuploadRequest<'_>],
+) -> Vec<Result<MediaRetryResult, MediaReuploadError>> {
+    client.media_reupload().request_many(requests).await
 }
 ```
 
-<Warning>
-Duplicate `msg_id`s within one batch are rejected (past the first occurrence) with `MediaReuploadError::InvalidRequest` — the underlying `mediaretry` waiter is keyed on message id alone, so two in-flight waiters for the same id could otherwise resolve each other with the wrong payload. A message id is unique per message, so a duplicate in a batch is a caller mistake.
-</Warning>
+Identical requests share one recovery, both within a batch and across concurrent callers. Identity includes the message ID, normalized target and participant, direction, and media key. Reusing an in-flight ID for a different target or key returns `Conflict(MessageId)`. In a batch, the first occurrence reserves that ID; identical later entries share its result, including duplicates beyond the concurrency window.
+
+Dropping one caller leaves other subscribers running. Dropping the last subscriber removes the operation and its waiters immediately. Completion, failure, and timeout release the registration too. `client.memory_report().await.media_reuploads` counts distinct in-flight operations, not their coalesced subscribers.
 
 ## Protocol flow
 
-1. The client encrypts a `ServerErrorReceipt` protobuf using an HKDF-derived key from the media key
-2. A `<receipt type="server-error">` stanza is sent with the encrypted payload and `<rmr>` metadata
-3. The client waits up to 30 seconds for a `<notification type="mediaretry">` response
-4. The response is decrypted and the new `directPath` is extracted
+1. Require the local account's LID. There is no fallback to the local PN.
+2. For a PN chat on a LID-migrated account, use its mapped LID when available. Otherwise retain the supplied chat identity.
+3. Register both the receipt ACK waiter and the media-retry notification waiter before sending the encrypted `server-error` receipt.
+4. Wait for the matching receipt ACK. Sending through the transport alone does not confirm this step. A server rejection returns `Rejected`.
+5. Await and decrypt the notification. A notification received during send or ACK processing remains buffered. The encrypted notification must contain the matching stanza ID.
+
+The send/ACK phase has a 30-second timeout. After a successful ACK, the notification phase has its own 30-second timeout. An early notification cannot hide a rejected receipt.
 
 ## Types
 
@@ -133,98 +59,34 @@ Duplicate `msg_id`s within one batch are rejected (past the first occurrence) wi
 
 ```rust
 pub struct MediaReuploadRequest<'a> {
-    pub msg_id: &'a str,
-    pub chat_jid: &'a Jid,
-    pub media_key: &'a [u8],
-    pub is_from_me: bool,
-    pub participant: Option<&'a Jid>,
+    pub target: MessageRef<'a>,
+    pub media_key: &'a [u8; 32],
 }
 ```
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `msg_id` | `&str` | The message ID containing the media |
-| `chat_jid` | `&Jid` | The chat JID where the message was received |
-| `media_key` | `&[u8]` | Raw media key bytes (32 bytes, from the message's `mediaKey` field) |
-| `is_from_me` | `bool` | Whether the message was sent by you |
-| `participant` | `Option<&Jid>` | For group/broadcast messages, the participant JID who sent the message |
 
 ### MediaRetryResult
 
-```rust
-pub enum MediaRetryResult {
-    Success { direct_path: String },
-    GeneralError,
-    NotFound,
-    DecryptionError,
-}
-```
+| Variant | Meaning |
+| --- | --- |
+| `Success { direct_path }` | New download path returned by the retry notification |
+| `NotFound` | Media could not be found |
+| `GeneralError` | Server reported a general retry failure |
+| `DecryptionError` | Server reported a decryption failure |
 
-| Variant | Description |
-|---------|-------------|
-| `Success` | Server re-uploaded the media. Contains the new `direct_path` for downloading. |
-| `GeneralError` | Server returned a general error. |
-| `NotFound` | Media is no longer available on the server. |
-| `DecryptionError` | Failed to decrypt the server response. |
+A successful request returns this result; inspect the variant before retrying the download.
 
 ## Error handling
 
-The method returns `Result<MediaRetryResult, MediaReuploadError>`. The `MediaRetryResult` enum itself distinguishes between server-side success and failure; `MediaReuploadError` covers transport and validation failures:
+`MediaReuploadError` is non-exhaustive. Match with a fallback arm.
 
-```rust
-#[non_exhaustive]
-pub enum MediaReuploadError {
-    #[error("{0}")]
-    Client(#[from] ClientError),
-    #[error("client is not logged in")]
-    NotLoggedIn,
-    #[error("invalid media reupload request: {0}")]
-    InvalidRequest(String),
-    #[error("media retry notification timed out")]
-    Timeout,
-    #[error("{0}")]
-    Internal(#[from] anyhow::Error),
-}
-```
+| Variant | Meaning |
+| --- | --- |
+| `NotLoggedIn` | Local LID is unavailable; nothing is sent |
+| `Conflict(MessageId)` | Another target or media key owns the in-flight wire ID |
+| `AckTimeout` | Send/receipt-ACK phase timed out |
+| `Rejected(String)` | Matching receipt ACK carried a rejection |
+| `Timeout` | Media-retry notification timed out after the ACK |
+| `Client(Arc<ClientError>)` | Shared client or transport failure |
+| `Internal(Arc<anyhow::Error>)` | Shared encryption, parsing, or other internal cause |
 
-- `Client` — wraps `ClientError` (transport/client-layer failures)
-- `NotLoggedIn` — Cannot determine own JID
-- `InvalidRequest` — Newsletter messages are not supported for media reupload; or, when using `request_many`, a `msg_id` appears more than once in the batch
-- `Timeout` — The server did not respond within 30 seconds
-- `Internal` — Encryption failure or other internal error
-
-```rust
-use whatsapp_rust::MediaReuploadError;
-
-match client.media_reupload().request(&req).await {
-    Ok(MediaRetryResult::Success { direct_path }) => {
-        // Re-download using new path
-    }
-    Ok(other) => {
-        eprintln!("Reupload failed: {:?}", other);
-    }
-    Err(MediaReuploadError::Timeout) => {
-        eprintln!("Request timed out");
-    }
-    Err(MediaReuploadError::NotLoggedIn) => {
-        eprintln!("Not authenticated");
-    }
-    Err(e) => {
-        eprintln!("Request error: {}", e);
-    }
-}
-```
-
-<Note>
-Media reupload requests have a 30-second timeout. If the server does not respond in time, the request fails with a timeout error.
-</Note>
-
-<Warning>
-Media reupload is not supported for newsletter messages. Newsletter messages do not have media keys, so the encrypted retry protocol cannot be used.
-</Warning>
-
-## See also
-
-- [Media handling guide](/guides/media-handling) - Upload and download media
-- [Upload API](/api/upload) - Upload media files
-- [Download API](/api/download) - Download media files
+Client and internal errors retain their original causes for all subscribers. `std::error::Error::source()` exposes the underlying typed cause rather than the sharing `Arc`, so error-chain inspection and downcasting remain available. An invalid encrypted notification is an error, including a missing or mismatched stanza ID.

@@ -17,25 +17,39 @@ let profile = client.profile();
 
 ### set_push_name
 
-Set your display name (push name).
+`set_push_name(&str)` returns `Result<PushNameOutcome, ProfileError>`. An empty name is rejected. A presence transport failure returns an error before changing the local name. Otherwise, the client attempts app-state synchronization and updates the local name.
+
+`Synced` means the app-state step completed. `SyncPending { source }` retains the original `AppStateError` after presence was sent and the local name updated. Neither outcome proves that every linked device displays the name or that all local state is durable. Transport acceptance is not a server ACK.
 
 ```rust
-pub async fn set_push_name(&self, name: &str) -> Result<(), ProfileError>
+use whatsapp_rust::{Client, ProfileError, PushNameOutcome};
+
+async fn set_name(client: &Client, name: &str) -> Result<PushNameOutcome, ProfileError> {
+    let outcome = client.profile().set_push_name(name).await?;
+    match &outcome {
+        PushNameOutcome::Synced => println!("Push-name synchronization completed"),
+        PushNameOutcome::SyncPending { source } => {
+            eprintln!("Push-name synchronization pending: {source}");
+        }
+        _ => {}
+    }
+    Ok(outcome)
+}
 ```
 
-**Parameters:**
-- `name` - The new display name (cannot be empty)
+Retain the desired name with a pending outcome so your retry policy can act on its cause. Pending synchronization is possible during pairing before app-state keys arrive.
 
-Updates the local device store, sends a presence stanza with the new name, and propagates the change via app state sync for cross-device synchronization.
+### sync_push_name
 
-**Example:**
+`sync_push_name(&str)` returns `Result<(), AppStateError>`. Retry this step after the connection or keys become available. It sends only the app-state mutation, without resending presence or changing the local name. Retry only if the pending name is still desired; do not overwrite a newer choice.
+
 ```rust
-client.profile().set_push_name("My Bot").await?;
-```
+use whatsapp_rust::{Client, AppStateError};
 
-<Note>
-The push name change takes effect immediately via presence, but app state sync may fail if keys aren't available yet (e.g., right after pairing before initial sync completes).
-</Note>
+async fn retry_name_sync(client: &Client, pending_name: &str) -> Result<(), AppStateError> {
+    client.profile().sync_push_name(pending_name).await
+}
+```
 
 ### set_status_text
 
@@ -120,33 +134,13 @@ pub struct SetProfilePictureResponse {
 }
 ```
 
-## Complete example
+## Retain pending synchronization
 
-```rust
-use whatsapp_rust::Client;
-use std::sync::Arc;
-use std::fs;
-
-async fn setup_profile(client: &Arc<Client>) -> anyhow::Result<()> {
-    // Set display name
-    client.profile().set_push_name("My WhatsApp Bot").await?;
-    
-    // Set status text
-    client.profile().set_status_text("Automated responses").await?;
-    
-    // Set profile picture
-    let image_bytes = fs::read("bot_avatar.jpg")?;
-    let response = client.profile().set_profile_picture(image_bytes).await?;
-    
-    println!("Profile picture updated: {}", response.id);
-    
-    Ok(())
-}
-```
+The `set_name` helper above returns the outcome to its caller. Store the pending name and cause before starting unrelated profile operations, so a later picture or status-text failure cannot discard the synchronization result.
 
 ## Error handling
 
-All methods return `Result<T, ProfileError>`:
+Profile updates return `Result<T, ProfileError>`; the app-state-only retry returns `Result<(), AppStateError>`:
 
 ```rust
 #[derive(Debug, thiserror::Error)]
@@ -173,7 +167,7 @@ Common errors:
 use whatsapp_rust::ProfileError;
 
 match client.profile().set_push_name("").await {
-    Ok(_) => println!("Name updated"),
+    Ok(outcome) => println!("Inspect name outcome: {outcome:?}"),
     Err(ProfileError::InvalidArgument(msg)) => eprintln!("Invalid: {}", msg),
     Err(e) => eprintln!("Failed: {}", e),
 }
