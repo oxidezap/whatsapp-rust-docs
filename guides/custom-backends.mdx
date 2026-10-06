@@ -5,6 +5,8 @@ description: Learn how to implement custom storage, transport, and HTTP backends
 
 <Note>
 Examples on this page target [source snapshot `d804acae`](https://github.com/oxidezap/whatsapp-rust/tree/d804acaec1439e54c43c129e2f90d45016506abe), not a crates.io release. Use the [current API guide](/guides/current-api) to select the matching dependency.
+
+The required atomic storage operations below target [source `b49134d5`](https://github.com/oxidezap/whatsapp-rust/blob/b49134d5adc1746a0dbc6c39cf56c3127b8d674d/wacore/src/store/traits.rs), introduced by [core PR #1681](https://github.com/oxidezap/whatsapp-rust/pull/1681). Adapters inheriting the old defaults must migrate when updating to this revision.
 </Note>
 
 
@@ -34,6 +36,26 @@ fn read_projection(bytes: &[u8], parent_time: Option<i64>) -> Result<StoredMessa
 
 Return `None` when there is no row. Unknown parent time is explicit `None`; a malformed secret returns `InvalidMessageSecret`. Implement `put_msg_secrets` and `delete_expired_msg_secrets` too. Preserve the expiry and timestamp conflict merge rules documented in [MsgSecretStore](/api/store#msgsecretstore).
 
+## Implement atomic storage operations
+
+Implement these methods explicitly when updating a custom Rust backend:
+
+- `ProtocolStore::touch_tc_token_sender_timestamp`
+- `ProtocolStore::store_received_tc_token`
+- `AppSyncStore::commit_patch`
+
+Their signatures are unchanged, but the sequential default implementations were removed. This is a source compatibility break for adapters that inherited them. Update forwarding wrappers too; delegate the whole operation to the backing store's atomic implementation.
+
+For trusted-contact tokens, make the comparison and update atomic in the account's storage scope. Advancing the sender timestamp preserves the received bytes and timestamp and keeps the maximum sender timestamp. Storing a received token preserves the sender timestamp. Replace a real token only when the incoming timestamp is greater than or equal to the stored timestamp; an empty placeholder must accept the first real token even if that token's timestamp is older.
+
+Use a transaction, a conditional update with CAS retry, or a lock shared by every writer of the same data. A lock on one adapter instance does not coordinate another process or connection. `put_tc_token` remains a full-row replacement; use the field-specific methods for concurrent issuance and reception.
+
+For an app-state patch, atomically store the collection version/hash, remove the listed MACs, then add the supplied MACs. If an index appears in both lists, its added value wins. Scope the entire operation to the account. Errors and cancellation must never leave a new cursor paired with only part of its MAC changes.
+
+A sequence of KV callbacks, a batch without transaction semantics, and a later flush do not satisfy this contract. Do not replace a missing atomic implementation with a no-op or the old read/modify/write default. In-memory storage uses one state lock; SQLite uses a transaction. Neither requires a schema or key-format migration.
+
+Atomicity and durability are separate. SQLite can return a typed `CommitBarrierError` after the entire SQL transaction has committed. Preserve the error and its cause; do not treat it as success or assume it rolled back. The app-state processor publishes a patch's mutations only after `commit_patch` returns `Ok`. Atomicity alone does not recover mutation delivery after a post-commit barrier failure, and retrying the processor does not guarantee replay of that cursor.
+
 ## Preserve durability
 
 Signal sessions and sender keys must become durable before publishing messages that advance their ratchets. Backend batching must preserve required ordering; an in-memory cache alone does not provide crash safety.
@@ -42,7 +64,7 @@ For crash replay, implement the pending-inbound methods on `ProtocolStore`. Stor
 
 Device-scoped operations must isolate one account from another. The scope of `DeviceStore::resource_report` depends on the adapter. SQLite reports the shared database pool through this legacy trait method; count it once per database. Use `SqliteStore::scoped_resource_report()` for an account and `SqliteDatabase::resource_report()` for the database-wide report. Register an owned adapter with `with_backend` or an `Arc<dyn Backend>` with `with_backend_arc`.
 
-[Storage trait reference](https://github.com/oxidezap/whatsapp-rust/blob/d804acaec1439e54c43c129e2f90d45016506abe/wacore/src/store/traits.rs) · [SQLite reference implementation](https://github.com/oxidezap/whatsapp-rust/blob/d804acaec1439e54c43c129e2f90d45016506abe/storages/sqlite-storage/src/lib.rs)
+[Storage trait reference](https://github.com/oxidezap/whatsapp-rust/blob/b49134d5adc1746a0dbc6c39cf56c3127b8d674d/wacore/src/store/traits.rs) · [SQLite reference implementation](https://github.com/oxidezap/whatsapp-rust/blob/d804acaec1439e54c43c129e2f90d45016506abe/storages/sqlite-storage/src/lib.rs)
 
 ## Custom Runtime
 
