@@ -865,6 +865,8 @@ client.revoke_message(&target).await?;
 
 See [message identity and actions](/guides/current-api#message-actions-and-identity).
 
+Nested `protocolMessage.key` values retain the sender’s wire perspective. Do not treat their `fromMe` field as a ready-to-use local message key: interpret it with the enclosing message, author and your account’s PN/LID identities. A blanket inversion is incorrect, and group sender keys can include a participant. This observation concerns live protocol messages; it does not establish the same semantics for nested history-sync keys.
+
 ## Next Steps
 
 <CardGroup cols={2}>
