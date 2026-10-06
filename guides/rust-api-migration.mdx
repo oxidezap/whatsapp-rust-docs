@@ -130,6 +130,16 @@ A patch commit stores its version/hash and all removed/added MACs together, with
 
 An error can follow a complete commit. SQLite's `CommitBarrierError` must remain observable, and the processor publishes mutations only after `Ok`. Atomicity does not recover delivery after this post-commit failure or guarantee that restart can replay the committed cursor. See [storage migration details](/guides/custom-backends#implement-atomic-storage-operations).
 
+## Preserve optional label action times
+
+<Note>
+This follow-up contract belongs to [core #1691 at `3dd695b6`](https://github.com/oxidezap/whatsapp-rust/commit/3dd695b61ab441f8bd7dd609ee3d25a9816a3ac6), beyond the `b7b0b9ec` snapshot described above. Final composition remains pending; the five passing A13 checks on `b7b0b9ec` do not qualify this addition.
+</Note>
+
+When adopting that contract, read `action_timestamp: Option<DateTime<Utc>>` on `LabelEditUpdate`, `LabelAssociationUpdate` and `MessageLabelAssociationUpdate` when you need to preserve whether an action time was carried. An absent or unrepresentable value becomes `None`; explicit zero becomes `Some` of the Unix epoch. Existing `timestamp` fallbacks remain: epoch for absence and local dispatch time for an out-of-range value.
+
+This is the carried action time, not a server receipt time or replay/live classification. Keep `from_full_sync` independent. Existing builders can omit the new optional field. Serialized payloads add `action_timestamp` as a timestamp or null; these event types implement serialization, not deserialization. See [label events](/concepts/events#labeleditupdate).
+
 ## Validate data and operational profiles separately
 
 Keep source compatibility separate from persistent-data migration. Stop writers and retain a consistent backup before changing the dependency. Exercise opening, migration, decryption, sending and restart on a copy with your target revision. The available historical-writer evidence covers v0.7.0; it does not prove every older baseline, downgrade or restoration of an old Signal-state backup.
