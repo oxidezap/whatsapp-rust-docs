@@ -6,7 +6,7 @@ description: Learn how to implement custom storage, transport, and HTTP backends
 <Note>
 Examples on this page target [source snapshot `d804acae`](https://github.com/oxidezap/whatsapp-rust/tree/d804acaec1439e54c43c129e2f90d45016506abe), not a crates.io release. Use the [current API guide](/guides/current-api) to select the matching dependency.
 
-The required atomic storage operations below target [source `b49134d5`](https://github.com/oxidezap/whatsapp-rust/blob/b49134d5adc1746a0dbc6c39cf56c3127b8d674d/wacore/src/store/traits.rs), introduced by [core PR #1681](https://github.com/oxidezap/whatsapp-rust/pull/1681). Adapters inheriting the old defaults must migrate when updating to this revision.
+Pending contract, not released: the atomic storage sections below describe candidate [b49134d5](https://github.com/oxidezap/whatsapp-rust/blob/b49134d5adc1746a0dbc6c39cf56c3127b8d674d/wacore/src/store/traits.rs) from unmerged [core PR #1681](https://github.com/oxidezap/whatsapp-rust/pull/1681). The three methods still have defaults in the `d804acae` snapshot used by this page. Adapters inheriting those defaults must implement the operations explicitly when adopting the candidate contract.
 </Note>
 
 
@@ -38,7 +38,7 @@ Return `None` when there is no row. Unknown parent time is explicit `None`; a ma
 
 ## Implement atomic storage operations
 
-Implement these methods explicitly when updating a custom Rust backend:
+Implement these methods explicitly when adopting the pending #1681 contract in a custom Rust backend:
 
 - `ProtocolStore::touch_tc_token_sender_timestamp`
 - `ProtocolStore::store_received_tc_token`
@@ -64,7 +64,7 @@ For crash replay, implement the pending-inbound methods on `ProtocolStore`. Stor
 
 Device-scoped operations must isolate one account from another. The scope of `DeviceStore::resource_report` depends on the adapter. SQLite reports the shared database pool through this legacy trait method; count it once per database. Use `SqliteStore::scoped_resource_report()` for an account and `SqliteDatabase::resource_report()` for the database-wide report. Register an owned adapter with `with_backend` or an `Arc<dyn Backend>` with `with_backend_arc`.
 
-[Storage trait reference](https://github.com/oxidezap/whatsapp-rust/blob/b49134d5adc1746a0dbc6c39cf56c3127b8d674d/wacore/src/store/traits.rs) · [SQLite reference implementation](https://github.com/oxidezap/whatsapp-rust/blob/d804acaec1439e54c43c129e2f90d45016506abe/storages/sqlite-storage/src/lib.rs)
+[Storage trait reference](https://github.com/oxidezap/whatsapp-rust/blob/d804acaec1439e54c43c129e2f90d45016506abe/wacore/src/store/traits.rs) · [SQLite reference implementation](https://github.com/oxidezap/whatsapp-rust/blob/d804acaec1439e54c43c129e2f90d45016506abe/storages/sqlite-storage/src/lib.rs)
 
 ## Custom Runtime
 
