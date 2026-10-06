@@ -408,12 +408,10 @@ The mute state is sent as `ON`/`OFF`; the mute expiration is local database stat
 Newsletter message sending is handled by the unified `client.send_message()` method. See the [Send API reference](/api/send#send) for full details.
 
 ```rust
-use waproto::whatsapp as wa;
+use whatsapp_rust::waproto::whatsapp as wa;
 
-let message = wa::Message {
-    conversation: Some("Hello subscribers!".to_string()),
-    ..Default::default()
-};
+let mut message = wa::Message::default();
+message.conversation = Some("Hello subscribers!".to_string());
 
 // Pass a newsletter JID directly to send_message
 let msg_id = client.send_message(newsletter_jid, message).await?;
