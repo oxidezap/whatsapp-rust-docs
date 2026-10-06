@@ -1,6 +1,6 @@
 ---
 title: Inbound Durability Hook
-description: Opt in to at-least-once message delivery by deferring the transport ack until your consumer durably commits each batch of messages.
+description: Commit encrypted inbound messages before acknowledgment, within backend and retention limits
 ---
 
 <Note>
@@ -9,19 +9,11 @@ Examples on this page target [source snapshot `d804acae`](https://github.com/oxi
 
 ## Overview
 
-By default the client acknowledges a message to the WhatsApp server **as soon as it is decrypted** (at-most-once delivery). The ack tells the server to drop the message from its offline queue and never resend it. If your process crashes, or your storage write fails, *after* the ack but *before* you persist the message, the message is lost — the server will not redeliver it.
+Without a hook, acknowledgment does not wait for your application's durable commit. A process failure between acknowledgment and your write can lose the application copy.
 
-Registering an `InboundDurabilityHook` converts the consumer to **at-least-once delivery**:
+Register `InboundDurabilityHook` to commit encrypted direct and group messages before their transport acknowledgments. The SDK first writes a pending copy, flushes Signal state and awaits your hook. Return `Ok(())` only after your commit is durable. A hook error suppresses acknowledgment; a later redelivery can use a retained pending copy.
 
-1. The decrypted message(s) are buffered durably in the `pending_inbound_messages` table **before** the Signal ratchet is flushed.
-2. Your hook is awaited with the whole batch. On `Ok` every message in the batch is acked and its buffer row cleared.
-3. On `Err` (or a crash), all their acks are suppressed. The server redelivers the batch on the next connect, where the hook runs again from the buffered copies.
-
-Default behavior is unchanged — with no hook registered nothing is buffered and the ack path is identical to before.
-
-<Note>
-This is the same gap whatsmeow closes with `SynchronousAck` + `EnableDecryptedEventBuffer`. The design follows whatsmeow's decrypt-buffer approach rather than a global gate.
-</Note>
+This guarantee depends on successful pending-buffer storage and retention. It does not cover every `Event::Messages` origin, guarantee server redelivery, or provide exactly-once processing. Read the failure and origin limits below before choosing this hook for your application's inbox.
 
 ## Batching
 
@@ -38,7 +30,7 @@ During the **offline drain** (the backlog replayed on reconnect), the client acc
 
 These triggers are internal constants, not currently exposed as configuration. The message-count trigger matches WhatsApp Web's `web_message_processing_cache_size` (the snapshot flush granularity — distinct from the 200-stanza `<offline_batch>` server pull size). The drain→live transition is raceless: the tail batch of the drain always commits before any live-mode message is processed, so a consumer never observes drain and live messages out of order across the boundary.
 
-Within a batch, the commit order is: durable buffer write (one transaction) → Signal-cache flush → your hook → buffer clear → acks → buffered offline delivery receipts flushed → `Event::Messages` dispatch. A failure at any step **up to and including acks** leaves the **entire batch** unacked, and the server redelivers all of it — so your hook must commit a batch all-or-nothing. The two trailing steps (the delivery-receipt flush and the `Event::Messages` dispatch) run after the acks have been sent and do not affect redelivery.
+The normal batch path writes the durable buffer, flushes Signal state, calls your hook, clears the pending rows, sends acknowledgments, flushes offline delivery receipts and dispatches `Event::Messages`. Do not treat that sequence as one transaction across your backend and the server. An error during acknowledgment can leave some acknowledgments already sent. Make the consumer commit idempotent and keep application recovery independent of event callback delivery.
 
 <Note>
 Offline delivery receipts are flushed once **per durable drain batch**, not only at the end of the full offline drain, matching WA Web's `createSnapshot` → `sendAggregateOfflineReceipts` per snapshot. This bounds the receipt buffer over a large backlog and caps redelivery on a mid-drain disconnect to a single snapshot instead of the whole backlog.
@@ -163,9 +155,9 @@ Durable cross-crash replay requires a backend that implements the pending-inboun
 - `delete_pending_inbound` — clear the buffer after the hook commits
 - `delete_expired_pending_inbound` — retention sweep (called unconditionally from keepalive)
 
-Two additional batch-oriented methods, `store_pending_inbound_batch` and `delete_pending_inbound_batch`, default to looping the single-row methods above, so existing custom backends keep working unchanged. The bundled `SqliteStore` overrides both to commit a whole batch in one transaction — see [Custom Backends](/guides/custom-backends#preserve-durability) if you want the same atomicity in your own backend.
+Two additional batch-oriented methods, `store_pending_inbound_batch` and `delete_pending_inbound_batch`, default to looping the single-row methods above, which does not make an arbitrary custom backend transactional. The bundled `SqliteStore` overrides both to commit a whole batch in one transaction — see [Custom Backends](/guides/custom-backends#preserve-durability) if you want the same atomicity in your own backend.
 
-Backends that implement none of these return an error from the defaults, which causes `Bot::build()` to fail with `BotBuilderError::UnsupportedDurabilityBackend` — a clear error rather than a silent runtime degradation.
+With an inbound hook configured, construction probes pending-inbound store, read and delete operations. A failed probe returns `UnsupportedDurabilityBackend` from the builder. Passing that probe does not certify batch atomicity, crash durability or retention behavior. Implement and test those properties in your backend.
 
 ## Caveats
 
@@ -183,7 +175,7 @@ Backends that implement none of these return an error from the defaults, which c
 
 **Redelivery `info` fields.** On a redelivery replay, `info` is re-parsed from the stanza. A few fields derived during the first dispatch (the ephemeral timer, encrypted comment threading) may be absent. The `message` body is always the original.
 
-**`Event::Messages` is at-least-once too, when a hook is registered.** A redelivery whose buffered copy survived (e.g. the post-commit cleanup failed and the ack was lost) replays through the same commit and dispatches the event again — event handlers need the same idempotency discipline as the hook if they perform side effects.
+**Event callbacks can receive duplicates.** A redelivery whose buffered copy survived (e.g. the post-commit cleanup failed and the ack was lost) replays through the same commit and dispatches the event again — event handlers need the same idempotency discipline as the hook if they perform side effects.
 
 **Resent messages get their own, separate gate.** The redelivery handling above covers a byte-identical stanza the server replays. A sender-side outbox retry instead re-encrypts the same message under a new sender-key iteration, so it isn't byte-identical and reaches the pipeline as an apparently-fresh decrypt. Since [#1352](https://github.com/oxidezap/whatsapp-rust/pull/1352), an in-memory dispatch-once gate (`dispatched_messages` in `CacheConfig`, default 5-minute TTL) collapses that case to one `Event::Messages` too — see [Resend collapse](/concepts/events#messages). Unlike the pending-inbound buffer, this gate has no durable backing and does not survive a restart of your process, so it narrows the window for a duplicate dispatch rather than closing it: your hook and event handlers still need their own idempotency for the reasons above.
 
@@ -207,7 +199,7 @@ impl InboundDurabilityHook for InboxArchiver {
     ) -> anyhow::Result<()> {
         // Live traffic arrives one message at a time; an offline drain hands
         // over a whole batch. Either way the commit below is a single append +
-        // fsync, so the durability cost amortizes over the batch.
+        // fsync. A production archive must also handle partial writes on restart.
         let mut lines = String::new();
         let mut keys: Vec<CommitKey> = Vec::with_capacity(batch.len());
         {
@@ -230,8 +222,8 @@ impl InboundDurabilityHook for InboxArchiver {
         }
 
         if !keys.is_empty() {
-            // Durable commit on a blocking thread: append then fsync — all-or-
-            // nothing for the batch. Returning Ok only after sync_all means
+            // Append and fsync on a blocking thread. This is not an atomic
+            // transaction: restart recovery must handle a partial tail. Returning Ok after sync_all means
             // "safe to ack every message"; any error returns Err, so the acks
             // are suppressed and the server redelivers the batch later.
             let file = Arc::clone(&self.file);

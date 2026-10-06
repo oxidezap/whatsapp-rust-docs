@@ -7,6 +7,27 @@ description: Choose supported requests, message references and storage boundarie
 
 These examples use the merged source snapshot [d804acae](https://github.com/oxidezap/whatsapp-rust/tree/d804acaec1439e54c43c129e2f90d45016506abe). The package's declared version does not prove that a main-branch API exists in the published crate. Use the pinned dependency from [installation](/installation) to compile these examples. For a released dependency, select its exact version in [Rustdoc](https://docs.rs/whatsapp-rust).
 
+## Prepare an application upgrade
+
+Pin the same source revision for the SDK and any explicitly declared sibling crates. Build your application with its actual features and target, including your custom backend, HTTP client and transport implementations. A default native build does not validate a browser or VoIP profile.
+
+Construct protobuf messages with `Default` and field assignment. Clone existing messages before modifying selected fields. Use constructors for validated requests, `..` in extensible struct patterns, and a fallback arm when matching a non-exhaustive enum. Rust matching rules do not determine how unknown protocol values decode.
+
+Keep the source compatibility check separate from persistent-data migration. Before changing the application dependency, stop writers and retain a consistent backup. Exercise opening, migration, message decryption, sending and restart on a copy with the selected target version. Do not assume that a successful upgrade also supports downgrade or restoring an old Signal-state backup.
+
+Cancellation can stop your wait after an operation has produced local or remote effects. Preserve partial results and retry only the documented remaining step, as with `PushNameOutcome::SyncPending`. Reconnection admission does not authorize replaying an operation whose outcome is unknown.
+
+### Scope of the documented contracts
+
+| Area | What you can rely on in these pages |
+|---|---|
+| Rust examples | The pinned source revision and the features named by each example; the pin is not a release candidate or a published 1.0 baseline. |
+| Host extensions | The documented builders, runtime, transport, HTTP, storage and lifecycle contracts. Manual sync-worker ownership and dependency reexports remain available. |
+| Incoming messages | Encrypted direct/group delivery through the inbound hook within its storage and retention limits. PDO and newsletter events require their own persistence path. |
+| HTTP | Completed non-success exchanges retain status. Retry and recovery rules belong to the operation. |
+| Persistent data | Validate the starting database version and target revision separately from Rust compilation. These pages do not promise every 0.x upgrade or downgrade. |
+| Calls | Feature and host requirements describe available APIs. They do not certify every live call configuration. |
+
 ## Sends and edits
 
 Use `send_text`, `send_message` or `forward_message` for default sends. Use `send(SendRequest::new(chat, message).with_options(options))` for custom options. Build `SendOptions` and `EditOptions` from `Default` with their typed setters.

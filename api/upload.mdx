@@ -121,21 +121,18 @@ let image_bytes = fs::read("photo.jpg")?;
 let upload = client.upload(image_bytes, MediaType::Image, Default::default()).await?;
 
 // Create image message with upload metadata
-let message = wa::Message {
-    image_message: buffa::MessageField::some(wa::message::ImageMessage {
-        url: Some(upload.url),
-        direct_path: Some(upload.direct_path),
-        media_key: Some(upload.media_key_vec()),
-        file_enc_sha256: Some(upload.file_enc_sha256_vec()),
-        file_sha256: Some(upload.file_sha256_vec()),
-        file_length: Some(upload.file_length),
-        media_key_timestamp: Some(upload.media_key_timestamp),
-        caption: Some("Check out this photo!".to_string()),
-        mimetype: Some("image/jpeg".to_string()),
-        ..Default::default()
-    }),
-    ..Default::default()
-};
+let mut image = wa::message::ImageMessage::default();
+image.url = Some(upload.url.clone());
+image.direct_path = Some(upload.direct_path.clone());
+image.media_key = Some(upload.media_key_vec());
+image.file_enc_sha256 = Some(upload.file_enc_sha256_vec());
+image.file_sha256 = Some(upload.file_sha256_vec());
+image.file_length = Some(upload.file_length);
+image.media_key_timestamp = Some(upload.media_key_timestamp);
+image.caption = Some("Check out this photo!".to_string());
+image.mimetype = Some("image/jpeg".to_string());
+let mut message = wa::Message::default();
+message.image_message = buffa::MessageField::some(image);
 
 // Send the message
 let result = client.send_message(chat_jid, message).await?;
@@ -175,20 +172,22 @@ let filename = doc_path.file_name()
 
 let upload = client.upload(doc_bytes, MediaType::Document, Default::default()).await?;
 
-let message = wa::Message {
-    document_message: buffa::MessageField::some(wa::message::DocumentMessage {
-        url: Some(upload.url),
-        direct_path: Some(upload.direct_path),
-        media_key: Some(upload.media_key_vec()),
-        file_enc_sha256: Some(upload.file_enc_sha256_vec()),
-        file_sha256: Some(upload.file_sha256_vec()),
-        file_length: Some(upload.file_length),
-        media_key_timestamp: Some(upload.media_key_timestamp),
-        file_name: Some(filename.to_string()),
-        mimetype: Some("application/pdf".to_string()),
-        ..Default::default()
-    }),
-    ..Default::default()
+let message = {
+    let mut value = wa::Message::default();
+    value.document_message = buffa::MessageField::some({
+        let mut value = wa::message::DocumentMessage::default();
+        value.url = Some(upload.url.clone());
+        value.direct_path = Some(upload.direct_path.clone());
+        value.media_key = Some(upload.media_key_vec());
+        value.file_enc_sha256 = Some(upload.file_enc_sha256_vec());
+        value.file_sha256 = Some(upload.file_sha256_vec());
+        value.file_length = Some(upload.file_length);
+        value.media_key_timestamp = Some(upload.media_key_timestamp);
+        value.file_name = Some(filename.to_string());
+        value.mimetype = Some("application/pdf".to_string());
+        value
+    });
+    value
 };
 
 let result = client.send_message(chat_jid, message).await?;
@@ -203,20 +202,22 @@ use whatsapp_rust::waproto::whatsapp as wa;
 let audio_bytes = fs::read("voice.ogg")?;
 let upload = client.upload(audio_bytes, MediaType::Audio, Default::default()).await?;
 
-let message = wa::Message {
-    audio_message: buffa::MessageField::some(wa::message::AudioMessage {
-        url: Some(upload.url),
-        direct_path: Some(upload.direct_path),
-        media_key: Some(upload.media_key_vec()),
-        file_enc_sha256: Some(upload.file_enc_sha256_vec()),
-        file_sha256: Some(upload.file_sha256_vec()),
-        file_length: Some(upload.file_length),
-        media_key_timestamp: Some(upload.media_key_timestamp),
-        mimetype: Some("audio/ogg; codecs=opus".to_string()),
-        ptt: Some(true), // Mark as Push-To-Talk (voice note)
-        ..Default::default()
-    }),
-    ..Default::default()
+let message = {
+    let mut value = wa::Message::default();
+    value.audio_message = buffa::MessageField::some({
+        let mut value = wa::message::AudioMessage::default();
+        value.url = Some(upload.url.clone());
+        value.direct_path = Some(upload.direct_path.clone());
+        value.media_key = Some(upload.media_key_vec());
+        value.file_enc_sha256 = Some(upload.file_enc_sha256_vec());
+        value.file_sha256 = Some(upload.file_sha256_vec());
+        value.file_length = Some(upload.file_length);
+        value.media_key_timestamp = Some(upload.media_key_timestamp);
+        value.mimetype = Some("audio/ogg; codecs=opus".to_string());
+        value.ptt = Some(true);
+        value
+    });
+    value
 };
 
 let result = client.send_message(chat_jid, message).await?;

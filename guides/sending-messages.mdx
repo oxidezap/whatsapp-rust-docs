@@ -79,13 +79,15 @@ use whatsapp_rust::{Client, Jid, buffa, waproto::whatsapp as wa};
 use whatsapp_rust::proto_helpers::wrap_as_album_child;
 
 async fn album(client: &Client, chat: &Jid, images: Vec<wa::Message>) -> whatsapp_rust::anyhow::Result<()> {
-    let parent = wa::Message {
-        album_message: buffa::MessageField::some(wa::message::AlbumMessage {
-            expected_image_count: Some(images.len().try_into()?),
-            expected_video_count: Some(0),
-            ..Default::default()
-        }),
-        ..Default::default()
+    let parent = {
+        let mut value = wa::Message::default();
+        value.album_message = buffa::MessageField::some({
+            let mut value = wa::message::AlbumMessage::default();
+            value.expected_image_count = Some(images.len().try_into()?);
+            value.expected_video_count = Some(0);
+            value
+        });
+        value
     };
     let sent = client.send_message(chat, parent).await?;
     for image in images {

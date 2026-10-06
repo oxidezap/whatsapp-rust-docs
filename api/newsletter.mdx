@@ -410,10 +410,8 @@ Newsletter message sending is handled by the unified `client.send_message()` met
 ```rust
 use waproto::whatsapp as wa;
 
-let message = wa::Message {
-    conversation: Some("Hello subscribers!".to_string()),
-    ..Default::default()
-};
+let mut message = wa::Message::default();
+message.conversation = Some("Hello subscribers!".to_string());
 
 // Pass a newsletter JID directly to send_message
 let msg_id = client.send_message(newsletter_jid, message).await?;

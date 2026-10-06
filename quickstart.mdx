@@ -144,10 +144,8 @@ use whatsapp_rust::prelude::*;
 
 .on_message(|ctx| async move {
     if ctx.message.text_content() == Some("ping") {
-        let reply = wa::Message {
-            conversation: Some("pong".to_string()),
-            ..Default::default()
-        };
+        let mut reply = wa::Message::default();
+        reply.conversation = Some("pong".to_string());
         if let Err(e) = ctx.send_message(reply).await {
             eprintln!("Failed to send reply: {e}");
         }
@@ -311,12 +309,14 @@ You can also forward media instantly by reusing the original CDN fields — no d
 fn build_media_reply(message: &wa::Message) -> Option<wa::Message> {
     let base = message.get_base_message();
     if let Some(img) = base.image_message.as_option() {
-        return Some(wa::Message {
-            image_message: MessageField::some(wa::message::ImageMessage {
-                caption: Some("Received your image!".to_string()),
-                ..img.clone()
-            }),
-            ..Default::default()
+        return Some({
+            let mut value = wa::Message::default();
+            value.image_message = MessageField::some({
+                let mut value = img.clone();
+                value.caption = Some("Received your image!".to_string());
+                value
+            });
+            value
         });
     }
     None
@@ -350,7 +350,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-`BotHandle` also exposes `abort()` as an escape hatch (skips the flush). Awaiting the handle resolves to `()` once the run loop exits.
+`BotHandle` also exposes `abort()` as an escape hatch that skips the flush. Inspect the handle's completion result and the shutdown persistence report; socket closure alone does not confirm a durable write. See [the Bot API](/api/bot).
 
 <Note>
   Prefer [`shutdown_signal()`](/installation#graceful-shutdown) over a bare `tokio::signal::ctrl_c()`: it resolves on **SIGTERM as well as SIGINT**. Supervisors like `docker stop`, Kubernetes, and systemd stop a process with SIGTERM first — a Ctrl+C-only wait never sees it, so cleanup is skipped and the process is hard-killed once the stop grace period elapses. Requires the `signal` feature, on by default.
@@ -444,23 +444,27 @@ fn build_media_pong(message: &wa::Message) -> Option<wa::Message> {
     if let Some(img) = base.image_message.as_option()
         && img.caption.as_deref() == Some(PING_TRIGGER)
     {
-        return Some(wa::Message {
-            image_message: MessageField::some(wa::message::ImageMessage {
-                caption: Some(PONG_TEXT.to_string()),
-                ..img.clone()
-            }),
-            ..Default::default()
+        return Some({
+            let mut value = wa::Message::default();
+            value.image_message = MessageField::some({
+                let mut value = img.clone();
+                value.caption = Some(PONG_TEXT.to_string());
+                value
+            });
+            value
         });
     }
     if let Some(vid) = base.video_message.as_option()
         && vid.caption.as_deref() == Some(PING_TRIGGER)
     {
-        return Some(wa::Message {
-            video_message: MessageField::some(wa::message::VideoMessage {
-                caption: Some(PONG_TEXT.to_string()),
-                ..vid.clone()
-            }),
-            ..Default::default()
+        return Some({
+            let mut value = wa::Message::default();
+            value.video_message = MessageField::some({
+                let mut value = vid.clone();
+                value.caption = Some(PONG_TEXT.to_string());
+                value
+            });
+            value
         });
     }
     None

@@ -313,10 +313,8 @@ Bot::builder()
             Event::Messages(batch) => {
                 // Reply to messages
                 for InboundMessage { info, .. } in batch.iter() {
-                    let reply = wa::Message {
-                        conversation: Some("Hello back!".to_string()),
-                        ..Default::default()
-                    };
+                    let mut reply = wa::Message::default();
+                    reply.conversation = Some("Hello back!".to_string());
                     let _ = client.send_message(info.source.chat.clone(), reply).await;
                 }
             }
@@ -1102,13 +1100,15 @@ use whatsapp_rust::bot::MessageContext;
 .on_event(|event, client| async move {
     for inbound in event.messages() {
         let ctx = MessageContext::from_inbound(inbound, client.clone());
-        let reply = wa::Message {
-            extended_text_message: buffa::MessageField::some(wa::message::ExtendedTextMessage {
-                text: Some("Quoted reply!".to_string()),
-                context_info: buffa::MessageField::some(ctx.build_quote_context()),
-                ..Default::default()
-            }),
-            ..Default::default()
+        let reply = {
+            let mut value = wa::Message::default();
+            value.extended_text_message = buffa::MessageField::some({
+                let mut value = wa::message::ExtendedTextMessage::default();
+                value.text = Some("Quoted reply!".to_string());
+                value.context_info = buffa::MessageField::some(ctx.build_quote_context());
+                value
+            });
+            value
         };
         let _ = ctx.send_message(reply).await;
     }
@@ -1195,10 +1195,8 @@ async fn main() -> anyhow::Result<()> {
                     // Echo messages back
                     for InboundMessage { message: msg, info, .. } in batch.iter() {
                         if let Some(text) = &msg.conversation {
-                            let reply = wa::Message {
-                                conversation: Some(format!("You said: {}", text)),
-                                ..Default::default()
-                            };
+                            let mut reply = wa::Message::default();
+                            reply.conversation = Some(format!("You said: {}", text));
                             let _ = client.send_message(info.source.chat.clone(), reply).await;
                         }
                     }

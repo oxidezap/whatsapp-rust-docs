@@ -71,7 +71,7 @@ pub trait HttpClient: MaybeSendSync {
 
 Read `status_code` off the `Ok` response to decide what to do next. Session-derived downloads can refresh CDN hosts and re-derive the URL once after HTTP 401. HTTP 403/404/410 are terminal reference rejections. Download routes carry no auth token; static URLs and standalone `MediaDownloader` cannot refresh a session. Uploads refresh their authentication token on 401/403. Both paths can try another CDN host for other failures such as 5xx. Mapping these statuses to `Err` hides the response from this handling. See [download retries](/api/download#automatic-retry-and-url-re-derivation) and [upload retries](/api/upload#automatic-retry-on-auth-errors).
 
-Some HTTP crates default the wrong way. `ureq`'s `http_status_as_error` turns non-2xx into an `Err` unless you disable it, which is why `UreqHttpClient` disables it on every request. If you build a custom client on `ureq` or a similar library, disable that default yourself. `MockHttpClient` below shows the shape a compliant implementation should have: `Err` only when there's no response to give at all.
+Some HTTP crates default the wrong way. `ureq`'s `http_status_as_error` turns non-2xx into an `Err` unless you disable it, which is why `UreqHttpClient` disables it on every request. If you build a custom client on `ureq` or a similar library, disable that default yourself. `MockHttpClient` below shows the shape a compliant implementation should have: `Err` for transport failures or an incomplete successful buffered payload; retain status for completed non-success exchanges.
 </Warning>
 
 ### Methods
@@ -357,7 +357,7 @@ for backend in session_backends {
 #### Basic GET Request
 
 ```rust
-use whatsapp_rust::http::UreqHttpClient;
+use whatsapp_rust::http::{HttpClient, UreqHttpClient};
 use whatsapp_rust::wacore::net::HttpRequest;
 
 #[tokio::main]
@@ -712,7 +712,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 2. **Streaming for large files** - Use `execute_streaming` for media downloads to avoid buffering
 3. **Error handling** - Return descriptive errors with context
 4. **Timeouts** - ureq 3.4 applies per-IP connection timeouts automatically; implement request-level timeouts for reliability
-5. **Retries** - Consider retry logic for transient failures
+5. **Retries** - Follow the calling operation's policy. A response status alone does not establish that replaying a request is safe.
 6. **Connection pooling** - Use a shared `ureq::Agent` (as `UreqHttpClient` does) for connection reuse within a session, and [share one `UreqHttpClient` across sessions](#sharing-one-client-across-many-sessions) when running many of them in one process
 
 ## Media Operations

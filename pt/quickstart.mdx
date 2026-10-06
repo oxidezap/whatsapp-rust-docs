@@ -39,4 +39,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 Use `client.send(SendRequest)` quando precisar de opções. Para editar ou reagir, obtenha `MessageRef` da mensagem recebida ou de `SendResult::message_ref()` e use os métodos tipados. Para ações em canais, use `NewsletterMessageRef`; reações precisam do `ServerMessageId` observado no servidor, que não pode ser inferido do ID local do envio. `MessageId` identifica conteúdo, `StanzaId` identifica operações e `ServerMessageId` identifica conteúdo observado de canais; preserve essas funções.
 
+Para construir protobufs diretamente, use `Default` e atribua os campos. Ao modificar uma mensagem existente, use `clone()` antes de alterar os campos necessários.
+
+```rust
+let mut message = wa::Message::default();
+message.conversation = Some("Olá!".to_string());
+```
+
+Consulte os [contratos atuais](/guides/current-api) antes de atualizar a dependência.
+
 Continue com [Envio de mensagens](/guides/sending-messages), [Recebimento de mensagens](/guides/receiving-messages) e [API do Bot](/api/bot).

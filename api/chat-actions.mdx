@@ -499,11 +499,9 @@ Prefer the typed wrappers (`pin_chat`, `mute_chat`, `archive_chat`, label method
 use whatsapp_rust::schemas;
 use whatsapp_rust::waproto::whatsapp as wa;
 
-let value = wa::SyncActionValue {
-    clear_chat_action: Some(Default::default()),
-    timestamp: Some(1_700_000_000_000),
-    ..Default::default()
-};
+let mut value = wa::SyncActionValue::default();
+value.clear_chat_action = Some(Default::default());
+value.timestamp = Some(1_700_000_000_000);
 
 // CLEAR_CHAT's non-literal index parts are [chatJid, deleteStarred, deleteMedia].
 client
@@ -543,11 +541,9 @@ Most delete-like actions — labels, quick replies — use a `deleted` flag insi
 use whatsapp_rust::schemas;
 use whatsapp_rust::waproto::whatsapp as wa;
 
-let value = wa::SyncActionValue {
-    contact_action: Some(Default::default()),
-    timestamp: Some(1_700_000_000_000),
-    ..Default::default()
-};
+let mut value = wa::SyncActionValue::default();
+value.contact_action = Some(Default::default());
+value.timestamp = Some(1_700_000_000_000);
 
 client
     .remove_app_state_action(&schemas::CONTACT, &["15551234567@s.whatsapp.net"], &value)
