@@ -345,12 +345,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let handle = bot.spawn(); // bot runs in the background; client is available via handle.client()
 
     whatsapp_rust::shutdown_signal().await;
-    handle.shutdown().await; // graceful: flushes pending state, then stops
+    let report = handle.shutdown().await;
+    let stopped = matches!(
+        report.run,
+        BotRunOutcome::Completed(RunCompletionReason::ShutdownRequested)
+    );
+    let shutdown = &report.shutdown;
+    let drained = matches!(shutdown.inbound, DrainOutcome::Completed)
+        && matches!(shutdown.outbound, DrainOutcome::Completed)
+        && matches!(shutdown.signal_settle, DrainOutcome::Completed);
+    if !stopped
+        || !drained
+        || shutdown.device.is_err()
+        || shutdown.message_secrets.failed_batches != 0
+        || shutdown.message_secrets.first_error.is_some()
+    {
+        return Err(std::io::Error::other(format!("incomplete shutdown: {report:?}")).into());
+    }
     Ok(())
 }
 ```
 
-`BotHandle` also exposes `abort()` as an escape hatch that skips the flush. Inspect the handle's completion result and the shutdown persistence report; socket closure alone does not confirm a durable write. See [the Bot API](/api/bot).
+`BotHandle` also exposes `abort()` as an escape hatch that skips the flush. The example returns an error if the run did not stop as requested, a tracked drain did not complete, or persistence reported a failure. A completed drain does not prove successful delivery, and this report does not join every detached callback or stop concurrent producers. See [the Bot API](/api/bot).
 
 <Note>
   Prefer [`shutdown_signal()`](/installation#graceful-shutdown) over a bare `tokio::signal::ctrl_c()`: it resolves on **SIGTERM as well as SIGINT**. Supervisors like `docker stop`, Kubernetes, and systemd stop a process with SIGTERM first — a Ctrl+C-only wait never sees it, so cleanup is skipped and the process is hard-killed once the stop grace period elapses. Requires the `signal` feature, on by default.

@@ -116,7 +116,7 @@ Return `Ok(())` once the whole batch is durably committed. Return `Err` to suppr
 
 ## Idempotency Requirement
 
-At-least-once means the hook **will be called more than once for the same message** when a crash occurs after the consumer commits but before the ack lands. Your hook **must be idempotent**, and since a failed batch is redelivered whole, a partially-applied batch commit must also be safe to re-run.
+If a pending copy remains and the server redelivers after a crash, the hook can run again for a message your consumer already committed. Make the hook idempotent. A partially acknowledged batch may replay only in part, so repeated items and partially applied consumer commits must be safe to retry independently.
 
 Deduplicate by the full triplet `(info.source.chat, info.source.sender, info.id)` — **not** `info.id` alone. Stanza IDs are only unique within a `(chat, sender)` pair, so two different chats can reuse the same ID string.
 
@@ -162,7 +162,7 @@ With an inbound hook configured, construction probes pending-inbound store, read
 ## Caveats
 
 <Warning>
-**At-least-once, not exactly-once.** A crash after your consumer commits but before the ack lands replays the message (or its whole batch). Your hook must be idempotent (deduplicate by `(chat, sender, id)`).
+**Duplicates are possible.** A crash after your consumer commits but before the ack lands can lead to another hook invocation if a pending copy remains and the server redelivers. Neither replay nor whole-batch redelivery is guaranteed. Make your hook idempotent (deduplicate by `(chat, sender, id)`).
 </Warning>
 
 **Backpressure.** The hook is awaited inside the receive pipeline. A slow hook backpressures inbound processing for the duration of the commit — the same trade-off as whatsmeow's synchronous ack. Persist and return; spawn any reply logic after the hook returns `Ok`.

@@ -4,7 +4,7 @@ description: Adapt a Rust integration to merged contracts and distinguish experi
 ---
 
 <Warning>
-Merged contracts below were audited at [main snapshot `edaa64b6`](https://github.com/oxidezap/whatsapp-rust/tree/edaa64b68d0de24bdb6848b98a824a32e276c55c). That snapshot is not a published release or an approved release candidate. Installation and reference examples still use [d804acae](/installation); do not use their dependency pin with newer APIs. Experimental sections name separate, unmerged proposals. The five earlier example checks at `b7b0b9ec` do not qualify this main snapshot or a future integrated revision.
+Merged contracts below were audited at [main snapshot `edaa64b6`](https://github.com/oxidezap/whatsapp-rust/tree/edaa64b68d0de24bdb6848b98a824a32e276c55c). That snapshot is not a published release or an approved release candidate. Installation and reference examples still use [d804acae](/installation); do not use their dependency pin with newer APIs. Unmerged proposals are excluded from the contracts below. Compile your integration against the exact revision you select; this source audit does not qualify a release candidate.
 </Warning>
 
 ## Select the source and profile
@@ -23,7 +23,7 @@ The merged compatibility registry remains in `preparing` phase with no baseline 
 
 ## Construct extensible types
 
-Start protobuf messages with `Default` and assign the fields you need. When modifying an existing value, clone it and change the intended fields so the remaining modeled data survives. This construction works at the installation pin and prepares your code for the experimental extensibility proposal below; that proposal is not merged in the audited main snapshot.
+Start protobuf messages with `Default` and assign the fields you need. When modifying an existing value, clone it and change the intended fields so the remaining modeled data survives. This construction works at the installation pin. Generated protobuf types do not yet have the proposed extensibility guarantees in the audited main snapshot.
 
 ```rust
 use whatsapp_rust::waproto::whatsapp as wa;
@@ -111,44 +111,20 @@ An error can follow a complete commit. SQLite's `CommitBarrierError` must remain
 ## Preserve optional label action times
 
 <Note>
-[Core #1691](https://github.com/oxidezap/whatsapp-rust/pull/1691) is merged in the audited main snapshot. This field is absent from the older `d804acae` reference examples; the earlier `b7b0b9ec` checks did not cover it.
+[Core #1691](https://github.com/oxidezap/whatsapp-rust/pull/1691) is merged in the audited main snapshot. This field is absent from the older `d804acae` reference examples.
 </Note>
 
 Read `action_timestamp: Option<DateTime<Utc>>` on `LabelEditUpdate`, `LabelAssociationUpdate` and `MessageLabelAssociationUpdate` when you need to preserve whether an action time was carried. An absent or unrepresentable value becomes `None`; explicit zero becomes `Some` of the Unix epoch. Existing `timestamp` fallbacks remain: epoch for absence and local dispatch time for an out-of-range value.
 
 This is the carried action time, not a server receipt time or replay/live classification. Keep `from_full_sync` independent. Existing builders can omit the new optional field. Serialized payloads add `action_timestamp` as a timestamp or null; these event types implement serialization, not deserialization. See [label events](/concepts/events#labeleditupdate).
 
-## Experimental protobuf evolution
+## Check the limits of the merged implementation
 
-[Core #1676](https://github.com/oxidezap/whatsapp-rust/pull/1676) remains unmerged. The earlier `b7b0b9ec` composition included a version of this proposal; it is not the audited main snapshot. In that experimental composition, generated messages and views are non-exhaustive, external literals are rejected even with `..Default::default()`, and extensible oneofs require fallback arms. Use `Default` plus assignment or the proposed `with_*` methods. The proposal adds Rust-signature and wire-identity checks and unknown wire-field retention; do not attribute these guarantees to the current main generator.
+Generated protobuf API extensibility and unknown-field retention ([#1676](https://github.com/oxidezap/whatsapp-rust/pull/1676)), pending-message recovery ([#1679](https://github.com/oxidezap/whatsapp-rust/pull/1679)), and a protobuf optimization experiment ([#1686](https://github.com/oxidezap/whatsapp-rust/pull/1686)) remain unmerged at the audited snapshot. Do not depend on their proposed APIs, storage formats or guarantees.
 
-The separate [A02 optimization experiment, #1686](https://github.com/oxidezap/whatsapp-rust/pull/1686), is also unmerged. A size measurement or isolated benchmark does not establish adoption, runtime equivalence or production qualification.
+In the merged implementation, a failed pending-buffer write can lose replayable plaintext after the Signal ratchet advances. A stored row only helps while retained and reached by the replay path; withholding a receipt does not guarantee server redelivery. History capture does not repair this gap. See [inbound durability](/advanced/inbound-durability) for the installed revision's behavior.
 
-## Experimental pending-message recovery
-
-<Warning>
-[Core #1679 at `0934e1eb`](https://github.com/oxidezap/whatsapp-rust/commit/0934e1eb00fc588423a2bf15f3652d6e5e2f6491) remains unmerged and is not part of `edaa64b6`. The following retention, multipart replay and admission behavior describes that proposal only. In the audited main snapshot, a failed pending-buffer write can lose replayable plaintext after the Signal ratchet advances. Do not assume the proposed recovery applies to main.
-</Warning>
-
-The experimental hook collects all dispatched payloads of an encrypted direct or group stanza. Preserve their order and multiplicity: equal parts can share the same message ID. A live callback can therefore contain more than one payload; offline callbacks can contain several stanzas.
-
-Make commits idempotent by chat, sender and message ID without collapsing repeated parts inside that message. For group/broadcast authors, device-qualified and device-less participant spellings identify the same message. PN and LID remain separate namespaces. Preserve original metadata and storage keys.
-
-Custom pending-inbound backends must implement `ProtocolStore::get_pending_inbound_for_message` as well as the existing buffer methods. Construction probes store, exact read, participant-candidate read and delete, rejecting unsupported backends. Batch overrides must preserve those semantics. A passing probe alone does not establish crash durability.
-
-The recovery boundaries differ from the older [inbound-durability reference](/advanced/inbound-durability):
-
-- Buffer-write and hook failures retain admitted plaintext in the same `Client` across connection resets. Resident failures are retried while it runs. Dropping the client or stopping the process before persistence loses that memory-only protection.
-- Persisted rows from an earlier process are replayed when a corresponding inbound delivery reaches the replay path. The SDK does not scan them at startup, and receipt suppression does not guarantee server redelivery.
-- Corrupt or conflicting matching records fail closed and remain stored. Uncommitted rows do not expire automatically. Plan storage capacity and repair procedures; there is no cross-restart quota or startup sweep that substitutes for them.
-- Group replay reads the original stored sender keys for the chat/message and filters device-less participant identity. Successful cleanup removes only the rows read or written for that commit.
-- Multipart rows use a versioned envelope. The proposal reads legacy single-message rows, but older SDKs cannot read the new multipart format. Treat downgrade separately from upgrade.
-
-Admission counts queued, processing and retained stanzas together, with a limit of 400 stanzas and a 4 MiB budget measured from original decoded-frame lengths. One larger supported frame can occupy an otherwise empty budget. These are not exact heap limits. Exhaustion closes the connection before decrypting or acknowledging the rejected stanza; intake does not wait for the hook to free capacity.
-
-The hook gates delivery-receipt attempts, and the message event follows the attempt. Live Signal writes remain coalesced independently; this is not a transaction spanning Signal state and the consumer store. An entered hook can outlive its connection. Shutdown stops scheduling recovery retries but does not abort or join a hook already entered. Do not wait inside the hook for inbound work from the same chat.
-
-Newsletter/channel messages and PDO placeholder recoveries remain outside this hook. Persist their events through the appropriate application path. No exactly-once or universal `Event::Messages` delivery guarantee follows from registering the hook.
+Newsletter/channel messages and PDO placeholder recoveries remain outside the message durability hook. Persist their events through the appropriate application path. No exactly-once or universal `Event::Messages` delivery guarantee follows from registering the hook.
 
 ## Validate data and operational profiles separately
 
