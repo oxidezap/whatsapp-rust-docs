@@ -171,7 +171,7 @@ With an inbound hook configured, construction probes pending-inbound store, read
 
 **Scope.** The hook covers end-to-end encrypted messages (1:1 and group). Newsletter and broadcast channel messages use a separate ack path and are never gated by the hook — they dispatch `Event::Messages` directly. PDO placeholder recoveries (`info.unavailable_request_id` set) bypass the hook the same way.
 
-**Buffer-write failure.** If the durable buffer write itself fails (e.g. disk full), the acks for that batch are suppressed, but if the process does not crash the Signal ratchet still advances. Those messages degrade to at-most-once on their next redelivery (they can no longer be decrypted and there is no buffered copy to replay). The guarantee holds whenever the buffer write succeeds.
+**Buffer-write failure.** If the durable buffer write itself fails (e.g. disk full), the acks for that batch are suppressed, but if the process does not crash the Signal ratchet still advances. Those messages degrade to at-most-once on their next redelivery (they can no longer be decrypted and there is no buffered copy to replay). A successfully stored copy can support replay while retained; it does not guarantee server redelivery.
 
 **Redelivery `info` fields.** On a redelivery replay, `info` is re-parsed from the stanza. A few fields derived during the first dispatch (the ephemeral timer, encrypted comment threading) may be absent. The `message` body is always the original.
 
@@ -225,7 +225,7 @@ impl InboundDurabilityHook for InboxArchiver {
             // Append and fsync on a blocking thread. This is not an atomic
             // transaction: restart recovery must handle a partial tail. Returning Ok after sync_all means
             // "safe to ack every message"; any error returns Err, so the acks
-            // are suppressed and the server redelivers the batch later.
+            // are suppressed. Redelivery is possible, not guaranteed.
             let file = Arc::clone(&self.file);
             tokio::task::spawn_blocking(move || -> std::io::Result<()> {
                 let mut f = file.lock().expect("file lock poisoned");
