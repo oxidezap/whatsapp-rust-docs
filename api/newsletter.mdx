@@ -527,9 +527,6 @@ A removed vote is still returned. Its `poll_vote` is `Some` with an empty `optio
 
 **Errors:** At this page's pinned source snapshot `d804acae`, `get_my_addons` returns `NewsletterError::InvalidRequest` without sending anything if `jid` is not a newsletter JID. A malformed server response also returns `NewsletterError::InvalidRequest`.
 
-<Note>
-Newer merged contract: [core PR #1678](https://github.com/oxidezap/whatsapp-rust/pull/1678), included in [main snapshot `edaa64b6`](https://github.com/oxidezap/whatsapp-rust/blob/edaa64b68d0de24bdb6848b98a824a32e276c55c/src/features/newsletter.rs#L1043), returns malformed server responses as `NewsletterError::Iq(IqError::ParseError(_))`, preserving the parser cause. Invalid newsletter JIDs still return `NewsletterError::InvalidRequest` before sending. This mapping is not the behavior of the older `d804acae` snapshot used by this page. A merge into main does not identify a published release; use a matching dependency revision before relying on it.
-</Note>
 
 **Example:**
 ```rust
