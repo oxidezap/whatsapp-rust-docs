@@ -5,6 +5,8 @@ description: Implement validated backend reads and separate SQLite database oper
 
 <Note>
 Examples on this page target [source snapshot `d804acae`](https://github.com/oxidezap/whatsapp-rust/tree/d804acaec1439e54c43c129e2f90d45016506abe), not a crates.io release. Use the [current API guide](/guides/current-api) to select the matching dependency.
+
+Newer merged contract: the atomic storage sections below describe [main snapshot `edaa64b6`](https://github.com/oxidezap/whatsapp-rust/blob/edaa64b68d0de24bdb6848b98a824a32e276c55c/wacore/src/store/traits.rs), which includes [core PR #1681](https://github.com/oxidezap/whatsapp-rust/pull/1681). The three methods still have defaults in the `d804acae` snapshot used by this page. Adapters inheriting those defaults must implement the operations explicitly when adopting that newer contract. A merge into main does not identify a published release.
 </Note>
 
 ## Backend
@@ -20,6 +22,16 @@ Implement `SignalStore`, `AppSyncStore`, `ProtocolStore`, `MsgSecretStore` and `
 | Device | One account's persistence and lifecycle scope |
 
 Use [storage concepts](/concepts/storage) for the ownership model and [custom backends](/guides/custom-backends) before implementing an adapter. A collection of copied SQL snippets is not a complete backend contract.
+
+## Atomic app-state and token operations
+
+In the merged #1681 contract, `AppSyncStore::commit_patch` and `ProtocolStore::{touch_tc_token_sender_timestamp, store_received_tc_token}` are required methods. Custom backends that inherited their former defaults must implement them before compiling against this contract. Their argument and result types remain unchanged.
+
+`commit_patch` stores a collection's version/hash and removed/added MACs as one atomic operation. Apply removals before additions. On failure or cancellation, the visible state must be the complete old or complete new patch, never a partial combination. An error may follow a complete commit if a durability barrier fails; it does not establish rollback.
+
+The token methods atomically merge their respective fields in the device scope. Sender timestamps advance by maximum. Received bytes and their timestamp use newer-wins, accepting equal timestamps and replacing empty placeholders regardless of the placeholder timestamp. Preserve the other writer's fields.
+
+Follow the [custom-backend implementation guidance](/guides/custom-backends#implement-atomic-storage-operations) for transactions, shared locks, callback adapters, and post-commit durability errors.
 
 ## MsgSecretStore
 
@@ -133,4 +145,4 @@ Inspect typed `StoreError` causes. Malformed message secrets use `InvalidMessage
 
 ## TCToken storage
 
-`ProtocolStore::store_received_tc_token` and `get_tc_tokens` support privacy-token persistence and batched reads. Received-token writes must preserve newer-wins semantics atomically; a byte-less placeholder can accept the first real token. The built-in SQLite adapter performs its check and write in an immediate transaction, while the in-memory backend holds its state lock. A custom adapter using a default read/modify/write must account for concurrent notification and identity-migration writes. See [privacy token behavior](/api/tctoken) and the [trait contract](https://github.com/oxidezap/whatsapp-rust/blob/d804acaec1439e54c43c129e2f90d45016506abe/wacore/src/store/traits.rs).
+`ProtocolStore::store_received_tc_token` and `get_tc_tokens` support privacy-token persistence and batched reads. Received-token writes must preserve newer-wins semantics atomically; a byte-less placeholder can accept the first real token. The built-in SQLite adapter performs its check and write in an immediate transaction, while the in-memory backend holds its state lock. In the merged #1681 contract, custom adapters must explicitly implement the atomic merge so concurrent notification and identity-migration writes preserve the other fields. The linked [privacy token reference](/api/tctoken) describes the older `d804acae` snapshot; its default-method discussion does not apply to this merged contract. Use the [trait contract](https://github.com/oxidezap/whatsapp-rust/blob/edaa64b68d0de24bdb6848b98a824a32e276c55c/wacore/src/store/traits.rs).

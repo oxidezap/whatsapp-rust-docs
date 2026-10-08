@@ -61,6 +61,8 @@ A backend implements all five traits: Signal, app state, protocol, message secre
 
 An inbound durability hook commits idempotently by `(chat, sender, message_id)` before returning success. PDO placeholder recovery is event-only; a later encrypted retry still crosses the durability gate even if its equivalent event was already published. See [inbound durability](/advanced/inbound-durability).
 
+Newer merged contract: [core PR #1681](https://github.com/oxidezap/whatsapp-rust/pull/1681), included in [main snapshot `edaa64b6`](https://github.com/oxidezap/whatsapp-rust/blob/edaa64b68d0de24bdb6848b98a824a32e276c55c/wacore/src/store/traits.rs), requires custom backends to explicitly implement `AppSyncStore::commit_patch` and the two `ProtocolStore` token merges, `touch_tc_token_sender_timestamp` and `store_received_tc_token`. That snapshot removes the sequential defaults; they remain present in this guide's pinned `d804acae` snapshot. Preserve atomic version/MAC updates and concurrent token fields; batching or flushing alone is insufficient. See [atomic storage operations](/guides/custom-backends#implement-atomic-storage-operations).
+
 ## SQLite database and account scope
 
 Use `SqliteStore::open` for the default account. Configure resources with `SqliteDatabaseConfig` when opening `SqliteDatabase`. Select with `store(id)`, provision a chosen unused ID with `provision_device`, or allocate with `create_device`. Enumeration, reset and removal belong to the database facade.
