@@ -408,12 +408,10 @@ The mute state is sent as `ON`/`OFF`; the mute expiration is local database stat
 Newsletter message sending is handled by the unified `client.send_message()` method. See the [Send API reference](/api/send#send) for full details.
 
 ```rust
-use waproto::whatsapp as wa;
+use whatsapp_rust::waproto::whatsapp as wa;
 
-let message = wa::Message {
-    conversation: Some("Hello subscribers!".to_string()),
-    ..Default::default()
-};
+let mut message = wa::Message::default();
+message.conversation = Some("Hello subscribers!".to_string());
 
 // Pass a newsletter JID directly to send_message
 let msg_id = client.send_message(newsletter_jid, message).await?;
@@ -527,7 +525,8 @@ Poll tallies on [`NewsletterMessage::votes`](#newslettermessage) and in live upd
 
 A removed vote is still returned. Its `poll_vote` is `Some` with an empty `option_hashes` list. `poll_vote` is `None` only if you never voted on that message.
 
-**Errors:** Returns `NewsletterError::InvalidRequest` without sending anything if `jid` is not a newsletter JID. A malformed server response also returns `NewsletterError::InvalidRequest`.
+**Errors:** At this page's pinned source snapshot `d804acae`, `get_my_addons` returns `NewsletterError::InvalidRequest` without sending anything if `jid` is not a newsletter JID. A malformed server response also returns `NewsletterError::InvalidRequest`.
+
 
 **Example:**
 ```rust
