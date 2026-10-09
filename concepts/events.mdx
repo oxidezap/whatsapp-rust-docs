@@ -3032,8 +3032,8 @@ pub struct IncomingCall {
     pub notify: Option<String>,
     pub platform: Option<String>,
     pub version: Option<String>,
-    #[serde(with = "chrono::serde::ts_seconds")]
-    pub timestamp: DateTime<Utc>,
+    #[serde(with = "chrono::serde::ts_seconds_option", skip_serializing_if = "Option::is_none")]
+    pub timestamp: Option<DateTime<Utc>>,
     pub offline: bool,
     pub action: CallAction,
     /// The rotation the sending device announced on this stanza's `<video>` child, in
@@ -3045,6 +3045,22 @@ pub struct IncomingCall {
     pub group: Option<Box<GroupCallUpdate>>,
 }
 ```
+
+`timestamp` is `None` when an `enc_rekey` stanza omits its server timestamp.
+Key rotation uses the transaction ID and does not need a date. Other recognized
+actions still require a valid timestamp. Present timestamps serialize as Unix
+seconds; an absent timestamp is omitted.
+
+If you read this field directly, handle its absence:
+
+```rust
+if let Some(timestamp) = call.timestamp {
+    println!("Call signaling time: {timestamp}");
+}
+```
+
+Existing `.timestamp(date)` builder calls still work. Use
+`.maybe_timestamp(optional_date)` when your input can omit the timestamp.
 
 <Note>
 `group_jid: Some(...)` on `CallAction::Offer` (below) is what distinguishes a group call offer from a 1:1 one; `group` on `IncomingCall` carries its roster snapshot. See [Group calls](/guides/voip-calls#group-calls) and [Call links](/guides/voip-calls#call-links) in the VoIP guide for accepting one and attaching media.
