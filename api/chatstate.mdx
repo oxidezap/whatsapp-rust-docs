@@ -234,10 +234,8 @@ std::thread::sleep(std::time::Duration::from_secs(2));
 client.chatstate().send_paused(&recipient).await?;
 
 // Send the actual message
-let message = wa::Message {
-    conversation: Some("Hello!".to_string()),
-    ..Default::default()
-};
+let mut message = wa::Message::default();
+message.conversation = Some("Hello!".to_string());
 client.send_message(recipient.clone(), message).await?;
 ```
 
@@ -257,19 +255,21 @@ client.chatstate().send_paused(&recipient).await?;
 
 // Upload and send audio message
 let upload = client.upload(audio_data, MediaType::Audio, Default::default()).await?;
-let message = wa::Message {
-    audio_message: buffa::MessageField::some(wa::message::AudioMessage {
-        url: Some(upload.url),
-        direct_path: Some(upload.direct_path),
-        media_key: Some(upload.media_key_vec()),
-        file_enc_sha256: Some(upload.file_enc_sha256_vec()),
-        file_sha256: Some(upload.file_sha256_vec()),
-        file_length: Some(upload.file_length),
-        mimetype: Some("audio/ogg; codecs=opus".to_string()),
-        ptt: Some(true),
-        ..Default::default()
-    }),
-    ..Default::default()
+let message = {
+    let mut value = wa::Message::default();
+    value.audio_message = buffa::MessageField::some({
+        let mut value = wa::message::AudioMessage::default();
+        value.url = Some(upload.url.clone());
+        value.direct_path = Some(upload.direct_path.clone());
+        value.media_key = Some(upload.media_key_vec());
+        value.file_enc_sha256 = Some(upload.file_enc_sha256_vec());
+        value.file_sha256 = Some(upload.file_sha256_vec());
+        value.file_length = Some(upload.file_length);
+        value.mimetype = Some("audio/ogg; codecs=opus".to_string());
+        value.ptt = Some(true);
+        value
+    });
+    value
 };
 client.send_message(recipient.clone(), message).await?;
 ```
@@ -326,10 +326,8 @@ let group_jid: Jid = "123456789@g.us".parse()?;
 client.chatstate().send_composing(&group_jid).await?;
 
 // Send message
-let message = wa::Message {
-    conversation: Some("Hello everyone!".to_string()),
-    ..Default::default()
-};
+let mut message = wa::Message::default();
+message.conversation = Some("Hello everyone!".to_string());
 client.send_message(group_jid.clone(), message).await?;
 ```
 
@@ -382,10 +380,8 @@ println!("Still typing...");
 
 // User finishes and sends message
 client.chatstate().send_paused(&recipient).await?;
-let message = wa::Message {
-    conversation: Some("Hello there!".to_string()),
-    ..Default::default()
-};
+let mut message = wa::Message::default();
+message.conversation = Some("Hello there!".to_string());
 client.send_message(recipient.clone(), message).await?;
 println!("Message sent");
 

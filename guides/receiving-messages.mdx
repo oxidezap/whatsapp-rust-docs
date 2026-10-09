@@ -705,9 +705,9 @@ match event {
 
 ## Advanced Usage
 
-### At-Least-Once Delivery
+### Commit before acknowledgment
 
-By default, the client acknowledges a message to the server as soon as it is decrypted. If your process crashes before you persist the message, it is lost — the server will not redeliver it.
+Without a hook, acknowledgment does not wait for your application's durable write. A process failure between acknowledgment and that write can lose the application copy.
 
 Register an `InboundDurabilityHook` to defer the ack until your consumer durably commits the message(s). Live traffic calls the hook with a batch of one; an offline drain hands over an accumulated batch (WhatsApp Web's `MessageProcessorCache` granularity), so the durability cost amortizes over the batch instead of paying a round-trip per message:
 
@@ -727,8 +727,9 @@ impl InboundDurabilityHook for MyStore {
         batch: &[InboundMessage],
     ) -> anyhow::Result<()> {
         // This loop commits each item independently, so a later item's `?`
-        // can leave earlier items already committed while the SDK still
-        // redelivers the whole batch on Err. `my_db_insert` MUST be an
+        // can leave earlier items already committed. An Err suppresses
+        // the batch's acks; later redelivery is possible, not guaranteed.
+        // `my_db_insert` MUST be an
         // idempotent upsert (e.g. `INSERT ... ON CONFLICT DO NOTHING`), or
         // wrap the loop in one transaction — see the note below.
         for item in batch {
@@ -745,7 +746,9 @@ let bot = Bot::builder()
     .await?;
 ```
 
-The hook **must be idempotent** — deduplicate by `(info.source.chat, info.source.sender, info.id)` since a crash after the consumer commits but before the ack lands will replay the message, and a failed batch is redelivered whole.
+The hook **must be idempotent** — deduplicate by `(info.source.chat, info.source.sender, info.id)`. If `on_messages` returns `Err` after the pending copies are stored, the SDK leaves those copies in place and suppresses every acknowledgment for that batch. All its messages can therefore be candidates for later replay, but neither server redelivery nor preservation of the original batch grouping is guaranteed.
+
+After a successful hook commit, pending-row cleanup and acknowledgment are separate steps. A custom backend's partial cleanup, a lost acknowledgment or a crash can affect only some messages. Replay looks up each redelivered message's retained pending copy independently; a message whose copy was already deleted does not invoke the hook again through that path. Handle repeated items and partial consumer commits without relying on whole-batch replay.
 
 See [Inbound Durability Hook](/advanced/inbound-durability) for the full contract, batching triggers, caveats, and a worked example.
 

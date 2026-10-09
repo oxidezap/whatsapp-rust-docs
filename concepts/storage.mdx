@@ -61,7 +61,7 @@ Persist Signal changes before sending an envelope that advances their ratchets. 
 
 For durable incoming delivery, store pending payloads and implement the protocol-store replay methods. Register an idempotent `InboundDurabilityHook` to commit application data before acknowledgement. Use `(chat, sender, id)` as the identity, since IDs alone can collide across chats or senders. A crash between the application's commit and ACK can replay an already committed message.
 
-Read [inbound durability](/advanced/inbound-durability) for commit order, offline batches, PDO recovery and failure boundaries. The hook's live ACK gate still applies without crash replay support, but a backend that omits the durable buffer cannot offer the same restart recovery.
+Read [inbound durability](/advanced/inbound-durability) for commit order, offline batches, PDO recovery and failure boundaries. With the hook configured, the builder probes pending-inbound store, read and delete operations and rejects an unsupported backend with `UnsupportedDurabilityBackend`. A successful probe does not establish batch atomicity or crash durability.
 
 ## Source reference
 

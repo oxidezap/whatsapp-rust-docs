@@ -2167,6 +2167,10 @@ Event::DeleteMessageForMeUpdate(update) => {
 
 ### LabelEditUpdate
 
+<Note>
+Newer merged contract: [core #1691](https://github.com/oxidezap/whatsapp-rust/pull/1691), included in [main snapshot `edaa64b6`](https://github.com/oxidezap/whatsapp-rust/tree/edaa64b68d0de24bdb6848b98a824a32e276c55c), adds `action_timestamp: Option<DateTime<Utc>>` to `LabelEditUpdate`, `LabelAssociationUpdate` and `MessageLabelAssociationUpdate`. It is `None` when the carried value is absent or outside the date-time range, and `Some(epoch)` for explicit zero. The legacy `timestamp` still falls back to the Unix epoch for absence and local dispatch time for an out-of-range value. Neither the optional field nor its presence identifies replay versus live traffic; `from_full_sync` remains independent. This addition is outside this page's `d804acae` pin; the signatures below retain that older snapshot. The earlier `b7b0b9ec` example checks did not qualify this field. See [label timestamp migration](/guides/rust-api-migration#preserve-optional-label-action-times).
+</Note>
+
 **Emitted:** When a chat label is created, renamed, recolored, or deleted on a linked device
 
 ```rust

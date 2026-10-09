@@ -35,8 +35,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 `on_message` recebe `MessageContext`, com a mensagem, seus metadados e métodos como `reply`, `reply_quoting`, `react` e `send_message`. Os callbacks usam filas e concorrência limitadas por padrão. `EventDelivery::Ordered` executa em sequência os callbacks dos eventos aceitos na fila, na ordem de enfileiramento. Isso não garante ordem global, ordem por timestamp nem entrega de eventos descartados por overflow ou cancelamento; retenha dados em armazenamento próprio se precisar de processamento durável.
 
-`bot.run().await` executa a sessão no chamador e retorna `RunCompletionReason`. `bot.spawn()` executa em background e retorna um handle cujo resultado distingue conclusão, pedido de cancelamento e término sem resultado observado. Encerre pelo `Client::shutdown()` e confira o relatório de persistência; o fechamento do socket, sozinho, não confirma que os dados foram gravados.
+`bot.run().await` executa a sessão no chamador e retorna `RunCompletionReason`. `bot.spawn()` executa em background e retorna um handle cujo resultado distingue conclusão, pedido de cancelamento e término sem resultado observado. Encerre com `handle.shutdown().await` quando usar `spawn()`. Confira o resultado da execução e os resultados de drenagem e persistência no relatório; o fechamento do socket, sozinho, não confirma que os dados foram gravados. Veja o [exemplo completo de shutdown](/quickstart#background-operation-and-graceful-shutdown), que retorna erro quando o relatório indica uma falha ou resultado incompleto. Uma drenagem concluída não comprova entrega bem-sucedida nem aguarda todo callback independente.
 
 Use `client.send(SendRequest)` quando precisar de opções. Para editar ou reagir, obtenha `MessageRef` da mensagem recebida ou de `SendResult::message_ref()` e use os métodos tipados. Para ações em canais, use `NewsletterMessageRef`; reações precisam do `ServerMessageId` observado no servidor, que não pode ser inferido do ID local do envio. `MessageId` identifica conteúdo, `StanzaId` identifica operações e `ServerMessageId` identifica conteúdo observado de canais; preserve essas funções.
+
+Para construir protobufs diretamente, use `Default` e atribua os campos. Ao modificar uma mensagem existente, use `clone()` antes de alterar os campos necessários.
+
+```rust
+let mut message = wa::Message::default();
+message.conversation = Some("Olá!".to_string());
+```
+
+Consulte os [contratos atuais](/guides/current-api) e o [guia de migração Rust](/guides/rust-api-migration) antes de atualizar a dependência. O guia distingue os contratos mais recentes já integrados e as propostas experimentais do pin destes exemplos.
 
 Continue com [Envio de mensagens](/guides/sending-messages), [Recebimento de mensagens](/guides/receiving-messages) e [API do Bot](/api/bot).

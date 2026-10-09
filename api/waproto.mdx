@@ -30,15 +30,13 @@ The build writes `whatsapp.rs` and `tags.rs` to `OUT_DIR`. Do not commit these f
 
 ## Usage
 
-All protobuf types are under the `waproto::whatsapp` module:
+All protobuf types are under the `waproto::whatsapp` module. Start with `Default` and assign the fields you need. This construction also works when a struct is non-exhaustive; a literal with `..Default::default()` does not work outside that struct's crate. When modifying an existing message, clone it and change the intended fields so the remaining data survives:
 
 ```rust
 use whatsapp_rust::waproto::whatsapp as wa;
 
-let message = wa::Message {
-    conversation: Some("Hello, World!".to_string()),
-    ..Default::default()
-};
+let mut message = wa::Message::default();
+message.conversation = Some("Hello, World!".to_string());
 ```
 
 Sub-message fields (nested protobuf messages) are `buffa::MessageField<T>`, not `Option<Box<T>>` or `Option<T>`. Construct one with `buffa::MessageField::some(..)`, and read it back with `.as_option()`, `.is_set()`, or `.is_unset()`.
@@ -51,12 +49,14 @@ Sub-message fields (nested protobuf messages) are `buffa::MessageField<T>`, not 
 use whatsapp_rust::waproto::buffa::MessageField;
 use whatsapp_rust::waproto::whatsapp as wa;
 
-let img = wa::Message {
-    image_message: MessageField::some(wa::message::ImageMessage {
-        caption: Some("Check this out!".to_string()),
-        ..Default::default()
-    }),
-    ..Default::default()
+let img = {
+    let mut value = wa::Message::default();
+    value.image_message = MessageField::some({
+        let mut value = wa::message::ImageMessage::default();
+        value.caption = Some("Check this out!".to_string());
+        value
+    });
+    value
 };
 
 if let Some(image) = img.image_message.as_option() {
@@ -121,22 +121,22 @@ use whatsapp_rust::waproto::buffa::MessageField;
 use whatsapp_rust::waproto::whatsapp as wa;
 
 // Construct a text message
-let msg = wa::Message {
-    conversation: Some("Hello!".to_string()),
-    ..Default::default()
-};
+let mut msg = wa::Message::default();
+msg.conversation = Some("Hello!".to_string());
 
 // Construct an image message
-let img = wa::Message {
-    image_message: MessageField::some(wa::message::ImageMessage {
-        url: Some(media_url),
-        media_key: Some(media_key.to_vec()),
-        file_sha256: Some(file_sha256.to_vec()),
-        file_enc_sha256: Some(file_enc_sha256.to_vec()),
-        caption: Some("Check this out!".to_string()),
-        ..Default::default()
-    }),
-    ..Default::default()
+let img = {
+    let mut value = wa::Message::default();
+    value.image_message = MessageField::some({
+        let mut value = wa::message::ImageMessage::default();
+        value.url = Some(media_url);
+        value.media_key = Some(media_key.to_vec());
+        value.file_sha256 = Some(file_sha256.to_vec());
+        value.file_enc_sha256 = Some(file_enc_sha256.to_vec());
+        value.caption = Some("Check this out!".to_string());
+        value
+    });
+    value
 };
 ```
 
@@ -637,7 +637,7 @@ pub mod video_message {
 ```
 
 <Note>
-buffa generates a **closed** enum by default: an unrecognized wire value decodes to `None` rather than being preserved, unlike the old prost-generated `Option<i32>` fields which round-tripped any integer. In practice WhatsApp only ever sends in-schema values, so this only matters for forward compatibility with brand-new server-side enum variants.
+buffa generates a **closed** enum by default: an unrecognized wire value decodes to `None` rather than being preserved, unlike the old prost-generated `Option<i32>` fields which round-tripped any integer. Do not assume that a server only sends values known to your schema. Rust exhaustiveness and preservation of unknown wire data are separate contracts.
 
 `SyncdMutation.operation` (`SyncdOperation`) is the one deliberate exception: `build.rs` opts it into buffa's **open** enum mode, so the field type is `Option<buffa::EnumValue<SyncdOperation>>` instead of `Option<SyncdOperation>`. An unrecognized wire value decodes to `EnumValue::Unknown(n)` rather than `None`. `wacore_appstate`'s `process_patch` rejects an unknown operation with a typed `AppStateError::UnsupportedSyncdOperation` before mutating any state, instead of silently treating it as `SET` and corrupting the app-state LTHash — which is what the previous closed-enum decode did.
 </Note>
@@ -764,38 +764,41 @@ use whatsapp_rust::waproto::buffa::MessageField;
 use whatsapp_rust::waproto::whatsapp as wa;
 
 // Text message
-let text = wa::Message {
-    conversation: Some("Hello!".to_string()),
-    ..Default::default()
-};
+let mut text = wa::Message::default();
+text.conversation = Some("Hello!".to_string());
 
 // Image with caption
-let image = wa::Message {
-    image_message: MessageField::some(wa::message::ImageMessage {
-        url: Some(media_url),
-        media_key: Some(media_key.to_vec()),
-        file_sha256: Some(file_sha256.to_vec()),
-        file_enc_sha256: Some(file_enc_sha256.to_vec()),
-        caption: Some("Nice photo!".to_string()),
-        jpeg_thumbnail: Some(thumbnail),
-        ..Default::default()
-    }),
-    ..Default::default()
+let image = {
+    let mut value = wa::Message::default();
+    value.image_message = MessageField::some({
+        let mut value = wa::message::ImageMessage::default();
+        value.url = Some(media_url);
+        value.media_key = Some(media_key.to_vec());
+        value.file_sha256 = Some(file_sha256.to_vec());
+        value.file_enc_sha256 = Some(file_enc_sha256.to_vec());
+        value.caption = Some("Nice photo!".to_string());
+        value.jpeg_thumbnail = Some(thumbnail);
+        value
+    });
+    value
 };
 
 // Quoted reply
-let reply = wa::Message {
-    extended_text_message: MessageField::some(wa::message::ExtendedTextMessage {
-        text: Some("Great question!".to_string()),
-        context_info: MessageField::some(wa::message::ContextInfo {
-            stanza_id: Some(original_message_id),
-            participant: Some(original_sender),
-            quoted_message: MessageField::some(original_message),
-            ..Default::default()
-        }),
-        ..Default::default()
-    }),
-    ..Default::default()
+let reply = {
+    let mut value = wa::Message::default();
+    value.extended_text_message = MessageField::some({
+        let mut value = wa::message::ExtendedTextMessage::default();
+        value.text = Some("Great question!".to_string());
+        value.context_info = MessageField::some({
+            let mut value = wa::ContextInfo::default();
+            value.stanza_id = Some(original_message_id);
+            value.participant = Some(original_sender);
+            value.quoted_message = MessageField::some(original_message);
+            value
+        });
+        value
+    });
+    value
 };
 ```
 
@@ -853,26 +856,16 @@ wacore provides utilities for working with waproto messages:
 - **`messages`** - Message encryption/decryption
 - **`send`** - Message building and sending
 
-Example:
+For message actions, obtain a `MessageRef` from the received message or a send result and use the typed client methods. The reference preserves the original chat and author; constructing a protobuf key by hand can lose that addressing.
 
 ```rust
-use whatsapp_rust::waproto::buffa::MessageField;
-use whatsapp_rust::wacore::proto_helpers;
-use whatsapp_rust::waproto::whatsapp as wa;
-
-// Convert internal JID to protobuf MessageKey
-let key = proto_helpers::message_key(&jid, &message_id, from_me);
-
-// Build revoke message
-let revoke = wa::Message {
-    protocol_message: MessageField::some(wa::message::ProtocolMessage {
-        key: MessageField::some(key),
-        r#type: Some(wa::message::protocol_message::Type::REVOKE),
-        ..Default::default()
-    }),
-    ..Default::default()
-};
+// `target` is a MessageRef retained from an inbound message or SendResult.
+client.revoke_message(&target).await?;
 ```
+
+See [message identity and actions](/guides/current-api#message-actions-and-identity).
+
+Nested `protocolMessage.key` values retain the sender’s wire perspective. Do not treat their `fromMe` field as a ready-to-use local message key: interpret it with the enclosing message, author and your account’s PN/LID identities. A blanket inversion is incorrect, and group sender keys can include a participant. This observation concerns live protocol messages; it does not establish the same semantics for nested history-sync keys.
 
 ## Next Steps
 

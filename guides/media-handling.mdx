@@ -163,22 +163,24 @@ use whatsapp_rust::waproto::whatsapp as wa;
 
 let upload = client.upload(image_data, MediaType::Image, Default::default()).await?;
 
-let message = wa::Message {
-    image_message: buffa::MessageField::some(wa::message::ImageMessage {
-        url: Some(upload.url),
-        direct_path: Some(upload.direct_path),
-        media_key: Some(upload.media_key_vec()),
-        file_sha256: Some(upload.file_sha256_vec()),
-        file_enc_sha256: Some(upload.file_enc_sha256_vec()),
-        file_length: Some(upload.file_length),
-        media_key_timestamp: Some(upload.media_key_timestamp),
-        mimetype: Some("image/jpeg".to_string()),
-        jpeg_thumbnail: Some(thumbnail_bytes), // raw JPEG bytes
-        width: Some(1920),
-        height: Some(1080),
-        ..Default::default()
-    }),
-    ..Default::default()
+let message = {
+    let mut value = wa::Message::default();
+    value.image_message = buffa::MessageField::some({
+        let mut value = wa::message::ImageMessage::default();
+        value.url = Some(upload.url.clone());
+        value.direct_path = Some(upload.direct_path.clone());
+        value.media_key = Some(upload.media_key_vec());
+        value.file_sha256 = Some(upload.file_sha256_vec());
+        value.file_enc_sha256 = Some(upload.file_enc_sha256_vec());
+        value.file_length = Some(upload.file_length);
+        value.media_key_timestamp = Some(upload.media_key_timestamp);
+        value.mimetype = Some("image/jpeg".to_string());
+        value.jpeg_thumbnail = Some(thumbnail_bytes); // Raw JPEG bytes
+        value.width = Some(1920);
+        value.height = Some(1080);
+        value
+    });
+    value
 };
 ```
 
@@ -204,22 +206,24 @@ if let Some(img) = message.image_message.as_option() {
     let data = client.download(img).await?;
     let upload = client.upload(data, MediaType::Image, Default::default()).await?;
 
-    let reply = wa::Message {
-        image_message: buffa::MessageField::some(wa::message::ImageMessage {
-            url: Some(upload.url),
-            direct_path: Some(upload.direct_path),
-            media_key: Some(upload.media_key_vec()),
-            file_sha256: Some(upload.file_sha256_vec()),
-            file_enc_sha256: Some(upload.file_enc_sha256_vec()),
-            file_length: Some(upload.file_length),
-            media_key_timestamp: Some(upload.media_key_timestamp),
-            mimetype: img.mimetype.clone(),
-            jpeg_thumbnail: img.jpeg_thumbnail.clone(), // reuse from original
-            height: img.height,
-            width: img.width,
-            ..Default::default()
-        }),
-        ..Default::default()
+    let reply = {
+        let mut value = wa::Message::default();
+        value.image_message = buffa::MessageField::some({
+            let mut value = wa::message::ImageMessage::default();
+            value.url = Some(upload.url.clone());
+            value.direct_path = Some(upload.direct_path.clone());
+            value.media_key = Some(upload.media_key_vec());
+            value.file_sha256 = Some(upload.file_sha256_vec());
+            value.file_enc_sha256 = Some(upload.file_enc_sha256_vec());
+            value.file_length = Some(upload.file_length);
+            value.media_key_timestamp = Some(upload.media_key_timestamp);
+            value.mimetype = img.mimetype.clone();
+            value.jpeg_thumbnail = img.jpeg_thumbnail.clone(); // Reuse from original
+            value.height = img.height;
+            value.width = img.width;
+            value
+        });
+        value
     };
 }
 ```
@@ -261,12 +265,14 @@ use whatsapp_rust::waproto::whatsapp as wa;
 /// Reuses the original CDN blob, only swaps the caption.
 /// Instant regardless of file size — no download or re-upload.
 fn forward_image(original: &wa::message::ImageMessage) -> wa::Message {
-    wa::Message {
-        image_message: buffa::MessageField::some(wa::message::ImageMessage {
-            caption: Some("Forwarded image".to_string()),
-            ..original.clone() // reuses url, direct_path, media_key, hashes, thumbnail, etc.
-        }),
-        ..Default::default()
+    {
+        let mut value = wa::Message::default();
+        value.image_message = buffa::MessageField::some({
+            let mut value = original.clone(); // Preserve the original media metadata.
+            value.caption = Some("Forwarded image".to_string());
+            value
+        });
+        value
     }
 }
 
@@ -282,12 +288,14 @@ The same pattern works for any media type:
 ```rust
 // Forward a video, keeping all CDN fields intact
 if let Some(vid) = message.video_message.as_option() {
-    let forwarded = wa::Message {
-        video_message: buffa::MessageField::some(wa::message::VideoMessage {
-            caption: Some("Forwarded video".to_string()),
-            ..vid.clone()
-        }),
-        ..Default::default()
+    let forwarded = {
+        let mut value = wa::Message::default();
+        value.video_message = buffa::MessageField::some({
+            let mut value = vid.clone();
+            value.caption = Some("Forwarded video".to_string());
+            value
+        });
+        value
     };
     client.send_message(destination_jid, forwarded).await?;
 }
@@ -351,22 +359,24 @@ use whatsapp_rust::waproto::whatsapp as wa;
 
 let upload = client.upload(image_data, MediaType::Image, Default::default()).await?;
 
-let message = wa::Message {
-    image_message: buffa::MessageField::some(wa::message::ImageMessage {
-        url: Some(upload.url),
-        direct_path: Some(upload.direct_path),
-        media_key: Some(upload.media_key_vec()),
-        file_sha256: Some(upload.file_sha256_vec()),
-        file_enc_sha256: Some(upload.file_enc_sha256_vec()),
-        file_length: Some(upload.file_length),
-        media_key_timestamp: Some(upload.media_key_timestamp),
-        mimetype: Some("image/jpeg".to_string()),
-        caption: Some("Check out this image!".to_string()),
-        width: Some(1920),
-        height: Some(1080),
-        ..Default::default()
-    }),
-    ..Default::default()
+let message = {
+    let mut value = wa::Message::default();
+    value.image_message = buffa::MessageField::some({
+        let mut value = wa::message::ImageMessage::default();
+        value.url = Some(upload.url.clone());
+        value.direct_path = Some(upload.direct_path.clone());
+        value.media_key = Some(upload.media_key_vec());
+        value.file_sha256 = Some(upload.file_sha256_vec());
+        value.file_enc_sha256 = Some(upload.file_enc_sha256_vec());
+        value.file_length = Some(upload.file_length);
+        value.media_key_timestamp = Some(upload.media_key_timestamp);
+        value.mimetype = Some("image/jpeg".to_string());
+        value.caption = Some("Check out this image!".to_string());
+        value.width = Some(1920);
+        value.height = Some(1080);
+        value
+    });
+    value
 };
 
 let result = client.send_message(to, message).await?;
@@ -801,21 +811,23 @@ use image::GenericImageView;
 let img = image::open("photo.jpg")?;
 let (width, height) = img.dimensions();
 
-let message = wa::Message {
-    image_message: buffa::MessageField::some(wa::message::ImageMessage {
-        url: Some(upload.url),
-        direct_path: Some(upload.direct_path),
-        media_key: Some(upload.media_key_vec()),
-        file_sha256: Some(upload.file_sha256_vec()),
-        file_enc_sha256: Some(upload.file_enc_sha256_vec()),
-        file_length: Some(upload.file_length),
-        media_key_timestamp: Some(upload.media_key_timestamp),
-        mimetype: Some("image/jpeg".to_string()),
-        width: Some(width),
-        height: Some(height),
-        ..Default::default()
-    }),
-    ..Default::default()
+let message = {
+    let mut value = wa::Message::default();
+    value.image_message = buffa::MessageField::some({
+        let mut value = wa::message::ImageMessage::default();
+        value.url = Some(upload.url.clone());
+        value.direct_path = Some(upload.direct_path.clone());
+        value.media_key = Some(upload.media_key_vec());
+        value.file_sha256 = Some(upload.file_sha256_vec());
+        value.file_enc_sha256 = Some(upload.file_enc_sha256_vec());
+        value.file_length = Some(upload.file_length);
+        value.media_key_timestamp = Some(upload.media_key_timestamp);
+        value.mimetype = Some("image/jpeg".to_string());
+        value.width = Some(width);
+        value.height = Some(height);
+        value
+    });
+    value
 };
 ```
 

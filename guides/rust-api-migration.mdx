@@ -1,0 +1,135 @@
+---
+title: Migrating a Rust integration
+description: Adapt a Rust integration to merged contracts and distinguish experimental changes
+---
+
+<Warning>
+Merged contracts below were audited at [main snapshot `edaa64b6`](https://github.com/oxidezap/whatsapp-rust/tree/edaa64b68d0de24bdb6848b98a824a32e276c55c). That snapshot is not a published release or an approved release candidate. Installation and reference examples still use [d804acae](/installation); do not use their dependency pin with newer APIs. Unmerged proposals are excluded from the contracts below. Compile your integration against the exact revision you select; this source audit does not qualify a release candidate.
+</Warning>
+
+## Select the source and profile
+
+Pin the same revision for the SDK and any explicitly declared sibling crates. Check your application's actual features and target, including custom storage, HTTP, transport and runtime implementations. A default native build does not validate a browser or VoIP profile.
+
+The merged compatibility registry remains in `preparing` phase with no baseline and MSRV 1.94. It does not establish a general 1.x stability promise or approve every available feature combination for production. Keep optional test and benchmark features out of the production compatibility assumptions.
+
+| Area | Migration boundary |
+|---|---|
+| Rust construction | Use defaults, constructors and setters; handle extensible enum variants. |
+| Host extensions | Keep the documented runtime, transport, HTTP, storage, plugin and interceptor contracts. |
+| Incoming messages | Distinguish pending-message persistence, resident recovery and history-byte capture. |
+| Persistent data | Validate the starting database version and target revision independently of Rust compilation. |
+| Calls | API availability and feature compilation do not certify a live call profile. |
+
+## Construct extensible types
+
+Start protobuf messages with `Default` and assign the fields you need. When modifying an existing value, clone it and change the intended fields so the remaining modeled data survives. This construction works at the installation pin. Generated protobuf types do not yet have the proposed extensibility guarantees in the audited main snapshot.
+
+```rust
+use whatsapp_rust::waproto::whatsapp as wa;
+
+let mut message = wa::Message::default();
+message.conversation = Some("hello".to_owned());
+
+let mut changed = message.clone();
+changed.conversation = Some("updated text".to_owned());
+```
+
+Use `..` in non-exhaustive struct patterns and a fallback arm for non-exhaustive enums. Merged extensible classifications include JID `Server`, media `HostType`, `DisconnectReason`, MEX capping classifications, and app-state `Collection`, `Scope` and `IndexPart`. Construct host-defined app-state schemas with `Schema::new`. `TransportEvent` remains closed.
+
+Rust exhaustiveness does not define protocol parsing. Unknown JID namespaces still fail parsing. `HostType::Other` preserves its wire spelling. The audited main generator disables unknown protobuf field preservation. Do not treat decoding and re-encoding, or a JSON round trip, as lossless storage of an unrecognized payload. Unknown app-state operations remain rejected before state mutation.
+
+Rust names, protobuf tags and serialized names are separate compatibility concerns. Do not manually edit generated Rust to accommodate an upstream schema change.
+
+For passkey hosts, construct `Assertion` with `Assertion::new(assertion_json, credential_id)`. That constructor neither signs nor validates an assertion. Obtain `AssertionRequest` through `parse_request_options` and read its public fields. Do not construct `AssertionRequest` or `SignalSessionInfo` with external literals.
+
+## Preserve host extension points
+
+Replace direct use of built-in stanza handlers, their router, the pairing IQ dispatcher, the PDO response dispatcher, unified-session telemetry internals or socket `SendJob` with the documented client operations and extension traits. These implementation entry points are no longer public production contracts.
+
+Plugins, interceptors, custom `EncHandler` registration and both public `ChatStateEvent` paths remain available. Parse incoming chat activity with `ChatstateStanza::parse`; it no longer implements bidirectional `ProtocolNode`. Send activity through the [chatstate API](/api/chatstate).
+
+Keep `ClientBuild::into_parts` when the host owns the manual sync worker; drain its receiver and pass each task to `Client::process_sync_task`. Dependency reexports remain available for naming types in public signatures.
+
+Use `CacheStore`, `Freshness`, `LidPnEntry` and `LearningSource` for supported host integrations. Concrete cache and SFrame session machinery is restricted to internal or benchmark use. Public key derivation helpers and `E2eSrtpKeys` remain available. Test-only incoming-call constructors require the test utility feature; normal incoming-call construction and media access remain supported.
+
+## Return HTTP status before deciding recovery
+
+Build requests through `HttpRequest::get` or `post` and their setters. Custom HTTP hosts use `HttpResponse::new(status_code, body)` or `StreamingHttpResponse::new(status_code, reader)`. Public fields remain readable; the DTOs no longer allow external literals. Iterate the default endpoint slice instead of requiring a fixed array length.
+
+Return a received non-success HTTP status in `Ok`, including 4xx/5xx. Successful buffered responses require complete bodies. Diagnostic non-success bodies may be bounded or partial while retaining status. A transport failure remains an error.
+
+Recovery belongs to the operation. Session-derived downloads have bounded recovery after 401; 403/404/410 are terminal reference rejections. Upload authentication recovery has a different policy. Neither status classification nor reconnection admission authorizes replaying an operation whose outcome is unknown. See [HTTP hosts](/api/http-client), [downloads](/api/download) and [uploads](/api/upload).
+
+## Inspect parsing causes
+
+The required IQ node helpers expose `wacore::iq::node::IqParseError`, distinguishing `MissingChild { tag }` and `MissingAttribute { name }`. Recover the type through the existing error chain or `anyhow::Error::downcast_ref`; match with a fallback. The error contains the expected field name, not raw response data.
+
+This type does not classify every parser failure. A malformed IQ response is distinct from a server rejection, HTTP status, timeout, transport loss or storage failure. `IqSpec` keeps its existing signature.
+
+For newsletter `get_my_addons`, invalid input remains `NewsletterError::InvalidRequest` before sending. A malformed response becomes `NewsletterError::Iq(IqError::ParseError(_))`, preserving the cause. The [newsletter reference](/api/newsletter#get_my_addons) documents its older source pin; the mapping here is merged in the audited main snapshot. Do not depend on the full text of a parser error.
+
+## Separate history capture from message commits
+
+Move implementations of `InboundDurabilityHook::on_history_sync` to `HistorySyncCaptureHook`, then register that hook separately. One object can implement both traits. Registering only the message hook no longer changes history receipt timing. Capture-only hosts do not need pending-inbound message storage.
+
+```rust
+use std::sync::Arc;
+use whatsapp_rust::{ClientBuilder, HistorySyncCaptureHook};
+
+fn configure_capture(
+    builder: ClientBuilder,
+    capture: Arc<dyn HistorySyncCaptureHook>,
+) -> ClientBuilder {
+    builder.with_history_sync_capture_hook_arc(capture)
+}
+```
+
+`BotBuilder` exposes the same registration. Use `with_history_sync_capture_hook` for an owned implementation. The callback is required; it has no default no-op implementation.
+
+| Configuration or result | History receipt behavior |
+|---|---|
+| No capture hook, including message-only durability | Attempts `hist_sync` before downloading. |
+| Capture hook | Obtains bytes, awaits capture and then attempts `hist_sync`. |
+| Download failure, capture error or cancellation before completion | Withholds `hist_sync` for that attempt. |
+| Skipped or admission-rejected chunk | Acknowledges without capture. |
+
+Capture receives decrypted but still compressed bytes before decompression and protobuf validation. Make it idempotent by message ID within the account and safe for concurrent calls. Persist the bytes before returning success if your application needs them durably.
+
+The SDK does not automatically retry capture or keep a durable history replay buffer. Withholding a receipt does not guarantee phone redelivery or complete history. Shutdown neither joins nor cancels an already-entered callback. Coordinate its lifetime in your host and use `Client::shutdown_signal` when it needs to observe shutdown.
+
+## Implement atomic storage operations
+
+The merged storage contract requires explicit implementations of `ProtocolStore::touch_tc_token_sender_timestamp`, `ProtocolStore::store_received_tc_token` and `AppSyncStore::commit_patch`. Their argument and result types are unchanged. Migrate forwarding wrappers along with the underlying backend.
+
+Token updates atomically preserve the other writer's fields in device scope. Sender timestamps advance by maximum. Received tokens accept newer or equal timestamps; an empty placeholder cannot block the first real token. The two issued-token field merges are individually atomic, not a combined transaction.
+
+A patch commit stores its version/hash and all removed/added MACs together, with removals before additions. Error or cancellation must expose the complete old or complete new patch. A transaction, CAS retry or shared backend-wide lock can provide this boundary; a callback batch or later flush alone cannot.
+
+An error can follow a complete commit. SQLite's `CommitBarrierError` must remain observable, and the processor publishes mutations only after `Ok`. Atomicity does not recover delivery after this post-commit failure or guarantee that restart can replay the committed cursor. These requirements apply to the audited main snapshot, not the older [custom-backend examples](/guides/custom-backends).
+
+## Preserve optional label action times
+
+<Note>
+[Core #1691](https://github.com/oxidezap/whatsapp-rust/pull/1691) is merged in the audited main snapshot. This field is absent from the older `d804acae` reference examples.
+</Note>
+
+Read `action_timestamp: Option<DateTime<Utc>>` on `LabelEditUpdate`, `LabelAssociationUpdate` and `MessageLabelAssociationUpdate` when you need to preserve whether an action time was carried. An absent or unrepresentable value becomes `None`; explicit zero becomes `Some` of the Unix epoch. Existing `timestamp` fallbacks remain: epoch for absence and local dispatch time for an out-of-range value.
+
+This is the carried action time, not a server receipt time or replay/live classification. Keep `from_full_sync` independent. Existing builders can omit the new optional field. Serialized payloads add `action_timestamp` as a timestamp or null; these event types implement serialization, not deserialization. See [label events](/concepts/events#labeleditupdate).
+
+## Check the limits of the merged implementation
+
+Generated protobuf API extensibility and unknown-field retention ([#1676](https://github.com/oxidezap/whatsapp-rust/pull/1676)), pending-message recovery ([#1679](https://github.com/oxidezap/whatsapp-rust/pull/1679)), and a protobuf optimization experiment ([#1686](https://github.com/oxidezap/whatsapp-rust/pull/1686)) remain unmerged at the audited snapshot. Do not depend on their proposed APIs, storage formats or guarantees.
+
+In the merged implementation, a failed pending-buffer write can lose replayable plaintext after the Signal ratchet advances. A stored row only helps while retained and reached by the replay path; withholding a receipt does not guarantee server redelivery. History capture does not repair this gap. See [inbound durability](/advanced/inbound-durability) for the installed revision's behavior.
+
+Newsletter/channel messages and PDO placeholder recoveries remain outside the message durability hook. Persist their events through the appropriate application path. No exactly-once or universal `Event::Messages` delivery guarantee follows from registering the hook.
+
+## Validate data and operational profiles separately
+
+Keep source compatibility separate from persistent-data migration. Stop writers and retain a consistent backup before changing the dependency. Exercise opening, migration, decryption, sending and restart on a copy with your target revision. The available historical-writer evidence covers v0.7.0; it does not prove every older baseline, downgrade or restoration of an old Signal-state backup.
+
+Cancellation can end your wait after an operation produced local or remote effects. Preserve partial results and retry only the documented remaining step, such as synchronization after `PushNameOutcome::SyncPending`.
+
+Before adopting the integrated dependency, compile the complete EN/PT examples and your custom hosts against that exact SHA, then repeat the selected consumers against its packaged artifacts outside the source workspace. Include the actual MSRV, browser and opt-in features you intend to support. Keep data-upgrade tests and profile-specific live qualification as separate evidence. In particular, do not infer VoIP interoperability from compilation, schema tests or skipped call tests.

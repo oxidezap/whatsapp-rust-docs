@@ -122,12 +122,10 @@ Newsletter messages are plaintext — they bypass Signal encryption entirely. Yo
 ### Text messages
 
 ```rust
-use waproto::whatsapp as wa;
+use whatsapp_rust::waproto::whatsapp as wa;
 
-let message = wa::Message {
-    conversation: Some("Hello subscribers!".to_string()),
-    ..Default::default()
-};
+let mut message = wa::Message::default();
+message.conversation = Some("Hello subscribers!".to_string());
 
 let msg_id = client.send_message(newsletter_jid, message).await?;
 
