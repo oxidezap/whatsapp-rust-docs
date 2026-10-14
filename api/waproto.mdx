@@ -883,3 +883,32 @@ Nested `protocolMessage.key` values retain the sender’s wire perspective. Do n
     End-to-end encryption details
   </Card>
 </CardGroup>
+
+## Source evolution
+
+The merged [source snapshot `3e3abeb2`](https://github.com/oxidezap/whatsapp-rust/blob/3e3abeb2e1e2b4ac720bf0236b7d14d88dea0641/waproto/src/lib.rs) marks public generated messages, borrowed views, enums and oneofs non-exhaustive. This section uses that revision; the older dependency above does not provide this contract. Pin the SDK and explicitly declared sibling crates to the same revision.
+
+Construct messages through `Default` and field assignment, or use owned-message `with_*` setters. External literals fail even with `..Default::default()`. Destructure with `..` and match enums and oneofs with a fallback.
+
+```rust
+use whatsapp_rust::waproto::whatsapp as wa;
+
+fn text_message(text: &str) -> wa::Message {
+    wa::Message::default().with_conversation(text)
+}
+
+fn is_encrypted(kind: wa::ADVEncryptionType) -> bool {
+    match kind {
+        wa::ADVEncryptionType::E2EE => true,
+        _ => false,
+    }
+}
+
+fn text_view(text: &str) -> wa::MessageView<'_> {
+    let mut view = wa::MessageView::default();
+    view.conversation = Some(text);
+    view
+}
+```
+
+Additive source evolution does not freeze ABI, layout or serialized JSON shape. Unknown wire fields are not generally preserved by the generated decoder. Cloning a decoded value preserves its modeled fields, not arbitrary original wire occurrences. Keep original bytes when a receiving API requires them; decoding and re-encoding is not an evidence archive. Open enum fields retain their separate `EnumValue::Unknown` behavior.

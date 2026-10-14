@@ -376,3 +376,11 @@ let results = client.contacts().is_on_whatsapp(&[Jid::pn("1234567890")]).await?;
 ```
 
 The `get_info` method and `ContactInfo` type have been removed. Use `is_on_whatsapp` for registration checks (now includes `lid`, `pn_jid`, and `is_business` fields) or `get_user_info` for detailed profile data (status, picture ID).
+
+## Learning LID and phone aliases
+
+On [main snapshot `3e3abeb2`](https://github.com/oxidezap/whatsapp-rust/blob/3e3abeb2e1e2b4ac720bf0236b7d14d88dea0641/src/features/contacts.rs), contact lookups learn PN-primary results with LID fields and LID-primary results with explicit PN fields, including business usync responses. The client validates the identity families and user identifiers before storing a pair. Mapping persistence errors are logged; a successful contact lookup does not itself prove that an alias reached durable storage.
+
+App-state contact actions also persist validated LID/PN pairs before advancing their collection cursor or publishing observations. A mapping write failure leaves that update retryable. Multiple retained mappings keep deterministic application order and the existing last-LID-per-phone policy.
+
+A learned alias helps routing and lookup. It does not authorize rewriting a stored cryptographic creator or merging unrelated message IDs. Preserve the original creator for polls, events and encrypted message actions, and keep consumer deduplication scoped by chat, sender and ID.

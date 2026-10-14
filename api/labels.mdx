@@ -175,13 +175,15 @@ Both calls send one mutation per message. There is no batch form on the wire, ma
 
 ## Inbound label events
 
-Label changes made on a linked device are delivered through the event bus. All three events carry the underlying app state action so you can read the new name, color, deleted flag, or labeled state directly.
+Label edits, chat assignments, message assignments and sublist changes arrive through the event bus. The first three carry the underlying app-state action. `LabelSublistUpdate` instead carries a typed upsert/removal keyed by `(predefined_id, chat_jid)`; it does not assign the parent label.
+
+The four-event example below targets [main snapshot `3e3abeb2`](https://github.com/oxidezap/whatsapp-rust/tree/3e3abeb2e1e2b4ac720bf0236b7d14d88dea0641). Use the [migration dependency pin](/guides/rust-api-migration#select-the-source-and-profile) for it. See [sublist semantics](/concepts/events#labelsublistupdate) for unknown numeric IDs, timestamps, replay and consumer storage.
 
 ```rust
 use whatsapp_rust::wacore::types::events::Event;
 
-.on_event(|event, _client| async move {
-    match &*event {
+fn inspect_label_event(event: &Event) {
+    match event {
         Event::LabelEditUpdate(update) => {
             if update.action.deleted == Some(true) {
                 println!("Label {} deleted", update.label_id);
@@ -213,9 +215,14 @@ use whatsapp_rust::wacore::types::events::Event;
                 update.chat_jid,
             );
         }
+        Event::LabelSublistUpdate(update) => {
+            // Apply change in your store by (predefined_id, chat_jid).
+            println!("Sublist {} in {}: {:?}",
+                update.predefined_id, update.chat_jid, update.change);
+        }
         _ => {}
     }
-})
+}
 ```
 
 `from_full_sync` is `true` when the event came from an initial app state full sync, so you can suppress UI notifications during bootstrap.
@@ -227,6 +234,7 @@ use whatsapp_rust::wacore::types::events::Event;
 | Create / update / delete label | `regular` | 3 |
 | Add / remove chat label association | `regular` | 3 |
 | Add / remove message label association | `regular` | 3 |
+| Observe sublist upsert / removal, inbound only | `regular` | 1 |
 
 <Note>
 App state sync requires the relevant encryption keys, which arrive during initial sync after pairing. Outbound label calls may fail if invoked immediately after pairing before sync completes.
@@ -277,6 +285,6 @@ async fn tag_vip_chats(client: &Arc<Client>) -> anyhow::Result<()> {
 
 ## See also
 
-- [Events](/concepts/events) — Handle `LabelEditUpdate`, `LabelAssociationUpdate`, and `MessageLabelAssociationUpdate`
+- [Events](/concepts/events) — Handle `LabelEditUpdate`, `LabelAssociationUpdate`, `MessageLabelAssociationUpdate`, and `LabelSublistUpdate`
 - [Chat actions](/api/chat-actions) — Archive, pin, mute, star, and other app-state-synced chat operations
 - [State management](/advanced/state-management) — How app state sync works under the hood

@@ -68,3 +68,7 @@ Newer merged contract: [core PR #1681](https://github.com/oxidezap/whatsapp-rust
 Use `SqliteStore::open` for the default account. Configure resources with `SqliteDatabaseConfig` when opening `SqliteDatabase`. Select with `store(id)`, provision a chosen unused ID with `provision_device`, or allocate with `create_device`. Enumeration, reset and removal belong to the database facade.
 
 Selection does not create a row. Stop an account's background tasks before reset/removal; retained handles are not revoked. Keep writer `pool_size` at 1 and use `read_pool_size` for eligible concurrent reads. Count database-wide resource reports once per database. See [storage tasks](/api/store).
+
+## Adopting newer merged contracts
+
+The [migration guide](/guides/rust-api-migration) audits [main `3e3abeb2`](https://github.com/oxidezap/whatsapp-rust/tree/3e3abeb2e1e2b4ac720bf0236b7d14d88dea0641). Keep its revision separate from the older example pin above. Before upgrading, replace generated protobuf literals and exhaustive patterns, implement bounded conditional pending storage for message durability, and register group notification capture independently when you need it. See [protobuf evolution](/api/waproto#source-evolution), [retained plaintext](/advanced/inbound-durability#retained-plaintext-on-current-main), [group capture](/api/groups#durable-notification-capture), and [identity learning](/api/contacts#learning-lid-and-phone-aliases).

@@ -6,7 +6,7 @@ description: Implement validated backend reads and separate SQLite database oper
 <Note>
 Examples on this page target [source snapshot `d804acae`](https://github.com/oxidezap/whatsapp-rust/tree/d804acaec1439e54c43c129e2f90d45016506abe), not a crates.io release. Use the [current API guide](/guides/current-api) to select the matching dependency.
 
-Newer merged contract: the atomic storage sections below describe [main snapshot `edaa64b6`](https://github.com/oxidezap/whatsapp-rust/blob/edaa64b68d0de24bdb6848b98a824a32e276c55c/wacore/src/store/traits.rs), which includes [core PR #1681](https://github.com/oxidezap/whatsapp-rust/pull/1681). The three methods still have defaults in the `d804acae` snapshot used by this page. Adapters inheriting those defaults must implement the operations explicitly when adopting that newer contract. A merge into main does not identify a published release.
+Newer merged contract: the atomic storage sections below describe [main snapshot `3e3abeb2`](https://github.com/oxidezap/whatsapp-rust/blob/3e3abeb2e1e2b4ac720bf0236b7d14d88dea0641/wacore/src/store/traits.rs), which also includes bounded pending-message operations and [core PR #1681](https://github.com/oxidezap/whatsapp-rust/pull/1681). The three methods still have defaults in the `d804acae` snapshot used by this page. Adapters inheriting those defaults must implement the operations explicitly when adopting that newer contract. A merge into main does not identify a published release.
 </Note>
 
 ## Backend
@@ -32,6 +32,12 @@ In the merged #1681 contract, `AppSyncStore::commit_patch` and `ProtocolStore::{
 The token methods atomically merge their respective fields in the device scope. Sender timestamps advance by maximum. Received bytes and their timestamp use newer-wins, accepting equal timestamps and replacing empty placeholders regardless of the placeholder timestamp. Preserve the other writer's fields.
 
 Follow the [custom-backend implementation guidance](/guides/custom-backends#implement-atomic-storage-operations) for transactions, shared locks, callback adapters, and post-commit durability errors.
+
+## Pending-inbound durability operations
+
+At [main `3e3abeb2`](https://github.com/oxidezap/whatsapp-rust/blob/3e3abeb2e1e2b4ac720bf0236b7d14d88dea0641/wacore/src/store/traits.rs), message durability requires `ProtocolStore::read_pending_inbound_bounded`, `read_pending_inbound_group_bounded`, `replace_pending_inbound_if` and `delete_pending_inbound_if`. Their unsupported defaults do not make an adapter durability-capable. The builder probes these operations and rejects unsupported adapters with `UnsupportedDurabilityBackend`.
+
+Exact and unique group-alias reads must enforce the supplied bound before allocating payloads and share a row snapshot. Conditional replacement/deletion must atomically compare the observed revision and preserve conflicting successors. Keep leases and exclusive ownership alive through detached workers and cancellation. Implement the [complete bounded storage semantics](/guides/custom-backends#bounded-pending-message-storage), not an unbounded-read fallback or an unconditional delete. Passing the probe does not certify crash durability or batch atomicity.
 
 ## MsgSecretStore
 
@@ -145,4 +151,4 @@ Inspect typed `StoreError` causes. Malformed message secrets use `InvalidMessage
 
 ## TCToken storage
 
-`ProtocolStore::store_received_tc_token` and `get_tc_tokens` support privacy-token persistence and batched reads. Received-token writes must preserve newer-wins semantics atomically; a byte-less placeholder can accept the first real token. The built-in SQLite adapter performs its check and write in an immediate transaction, while the in-memory backend holds its state lock. In the merged #1681 contract, custom adapters must explicitly implement the atomic merge so concurrent notification and identity-migration writes preserve the other fields. The linked [privacy token reference](/api/tctoken) describes the older `d804acae` snapshot; its default-method discussion does not apply to this merged contract. Use the [trait contract](https://github.com/oxidezap/whatsapp-rust/blob/edaa64b68d0de24bdb6848b98a824a32e276c55c/wacore/src/store/traits.rs).
+`ProtocolStore::store_received_tc_token` and `get_tc_tokens` support privacy-token persistence and batched reads. Received-token writes must preserve newer-wins semantics atomically; a byte-less placeholder can accept the first real token. The built-in SQLite adapter performs its check and write in an immediate transaction, while the in-memory backend holds its state lock. In the merged #1681 contract, custom adapters must explicitly implement the atomic merge so concurrent notification and identity-migration writes preserve the other fields. The linked [privacy token reference](/api/tctoken) describes the older `d804acae` snapshot; its default-method discussion does not apply to this merged contract. Use the [trait contract](https://github.com/oxidezap/whatsapp-rust/blob/3e3abeb2e1e2b4ac720bf0236b7d14d88dea0641/wacore/src/store/traits.rs).

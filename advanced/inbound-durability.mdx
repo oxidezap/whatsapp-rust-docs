@@ -259,3 +259,15 @@ Use `InboundMessage::message_ref()` for chat actions and `newsletter_ref()` for 
 PDO placeholder recovery remains event-only. A later encrypted retry still must complete its durability hook even when the equivalent user event was already dispatched. The retry can promote that recovery to committed state without publishing the same event again. Distinct user payloads in an SKDM-bearing retry retain separate dispatch claims; adding an SKDM envelope does not make their user content identical. Hooks and event consumers still need idempotent `(chat, sender, id)` handling.
 
 [PDO retry and durability regression scenarios](https://github.com/oxidezap/whatsapp-rust/blob/d804acaec1439e54c43c129e2f90d45016506abe/src/message/tests.rs)
+
+## Retained plaintext on current main
+
+The earlier examples describe their pinned revision. On [main snapshot `3e3abeb2`](https://github.com/oxidezap/whatsapp-rust/blob/3e3abeb2e1e2b4ac720bf0236b7d14d88dea0641/src/types/durability_hook.rs), plaintext retention changes the buffer-write failure boundary described above. Admission reserves encoded backing before Signal decryption under a 4 MiB budget and 400 reservations. The budget includes carrier, consumer projection and metadata, so the maximum accepted ciphertext is smaller than 4 MiB. Capacity refusal leaves Signal untouched and sends no positive ACK. Oversized stanzas remain refused under this bound.
+
+If persistence fails, the same Client owns an encoded plaintext copy across cancellation and reconnect. Redelivery can retry storage without advancing Signal again. This is resident retention, not disk persistence: a process exit loses copies that never reached durable pending storage. Decoded graphs held by active processing, callbacks and consumers are outside this backing budget.
+
+The pending envelope retains the consumer projection, including a resolved secret-message payload. Bounded exact/group-alias reads and revision-conditional replacement/deletion are now required by the backend probe. See [custom backend requirements](/guides/custom-backends#bounded-pending-message-storage).
+
+After the hook commits, event publication precedes conditional pending-row cleanup. ACK waits for cleanup to complete. An error or cancellation can therefore leave a pending row after the event already fired. The same Client's dispatch cache survives reconnect and suppresses repeated events within its retention window; a process restart still needs your durable deduplication by `(chat, sender, id)`. Neither that cache nor the hook provides exactly-once delivery.
+
+Message durability, [history capture](/guides/rust-api-migration#separate-history-capture-from-message-commits) and [group notification capture](/api/groups#durable-notification-capture) require separate registration. Enabling one does not enable the others.
