@@ -612,3 +612,9 @@ fn receipt_roundtrip() -> Result<(), serde_json::Error> {
 ```
 
 Use `parse` and `as_wire_str` for protocol values such as `read-self` and `delivery`. Protocol parsing can normalize an `Other` payload into a known variant; use Serde for exact persistence.
+
+## Status receipt identity
+
+On [main snapshot `3e3abeb2`](https://github.com/oxidezap/whatsapp-rust/blob/3e3abeb2e1e2b4ac720bf0236b7d14d88dea0641/wacore/src/types/events.rs), `Receipt.source.sender` identifies the receipt actor, not the referenced post's author. The chat stays `status@broadcast`; the participant identifies the actor and an explicit recipient identifies the post author. `is_from_me` describes our receipt, not our post. Own reads and plays use the corresponding self receipt type.
+
+An absent or invalid participant retains the broadcast sender fallback without an alias. The SDK does not fill missing aliases or post authors from cached identities. Keep these roles separate when correlating receipts to persisted Status posts.

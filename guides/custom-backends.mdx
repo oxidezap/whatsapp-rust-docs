@@ -754,3 +754,18 @@ CREATE TABLE IF NOT EXISTS sessions (
 - [Receiving Messages](/guides/receiving-messages) - Store received messages
 - [Group Management](/guides/group-management) - Store group metadata
 - [Inbound Durability Hook](/advanced/inbound-durability) - At-least-once delivery with your backend
+
+## Bounded pending-message storage
+
+Message durability on [main snapshot `3e3abeb2`](https://github.com/oxidezap/whatsapp-rust/blob/3e3abeb2e1e2b4ac720bf0236b7d14d88dea0641/wacore/src/store/traits.rs) requires more than the legacy pending-row getters and batch writes shown above. Implement these `ProtocolStore` operations explicitly:
+
+| Operation | Required behavior |
+|---|---|
+| `read_pending_inbound_bounded` | Check length and read the same row snapshot before allocating. Oversized or non-BLOB data is an error; empty bytes are present data. |
+| `read_pending_inbound_group_bounded` | Find a unique physical sender alias in one snapshot. Bound discovery to 400 keys of at most 128 bytes each and return the stored sender spelling. Reject ambiguity. |
+| `replace_pending_inbound_if` | Compare the observed revision and replace atomically, with explicit expected absence and bounded payload sizes. |
+| `delete_pending_inbound_if` | Delete only the observed bytes atomically. Preserve a conflicting successor row. |
+
+There is no fallback from bounded reads to an unbounded getter. Retain the supplied `PendingInboundLease` through detached workers and retries, including after cancellation. The replacement payload owns its bytes and lease. Revision comparison alone does not prevent an absent-row ABA race after a successor creates and deletes a row; worker-terminal ownership is part of the contract.
+
+Construction probes these operations and rejects unsupported durability backends. Passing the probe does not certify crash durability, batch atomicity, retention or cancellation safety. Exercise concurrent replacement, stale cleanup, alias conflicts and restart against your actual backend. A successful batch flush alone does not satisfy the conditional mutation contract.

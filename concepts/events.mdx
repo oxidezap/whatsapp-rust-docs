@@ -3732,3 +3732,9 @@ Over-budget chunks can suppress typed call events while leaving raw lazy history
 ## Mutation timestamps
 
 Chat-action payloads exposing `action_timestamp: Option<DateTime<Utc>>` distinguish a missing or invalid wire timestamp from a valid Unix-epoch timestamp. The compatibility `timestamp` can contain a fallback. Use the optional observation for ordering decisions instead of treating a fallback as server evidence.
+
+## LabelSublistUpdate
+
+On [main snapshot `3e3abeb2`](https://github.com/oxidezap/whatsapp-rust/blob/3e3abeb2e1e2b4ac720bf0236b7d14d88dea0641/wacore/src/types/events.rs), apply `Event::LabelSublistUpdate` idempotently by `(predefined_id, chat_jid)`. `LabelSublistChange::Upsert { sub_list_id }` replaces an entry and `Remove` deletes it. Keep a fallback arm because the change enum is non-exhaustive. Unknown signed numeric IDs are retained; zero is a value, not a removal.
+
+This event does not assign the parent label, reorder lists or describe computed AI handoff filters. The SDK has no sublist membership store and does not synthesize removals from a deleted parent or an omitted snapshot entry. Persist membership in your own store. Preserve `action_timestamp: Option<DateTime<Utc>>` and `from_full_sync` separately; `false` can include recovery/replay and does not certify live traffic.

@@ -4,10 +4,17 @@ description: Adapt a Rust integration to merged contracts and distinguish experi
 ---
 
 <Warning>
-Merged contracts below were audited at [main snapshot `edaa64b6`](https://github.com/oxidezap/whatsapp-rust/tree/edaa64b68d0de24bdb6848b98a824a32e276c55c). That snapshot is not a published release or an approved release candidate. Installation and reference examples still use [d804acae](/installation); do not use their dependency pin with newer APIs. Unmerged proposals are excluded from the contracts below. Compile your integration against the exact revision you select; this source audit does not qualify a release candidate.
+Merged contracts below were audited at [main snapshot `3e3abeb2`](https://github.com/oxidezap/whatsapp-rust/tree/3e3abeb2e1e2b4ac720bf0236b7d14d88dea0641). That snapshot is not a published release or an approved release candidate. Installation and reference examples still use [d804acae](/installation); do not use their dependency pin with newer APIs. Unmerged proposals are excluded from the contracts below. Compile your integration against the exact revision you select; this source audit does not qualify a release candidate.
 </Warning>
 
 ## Select the source and profile
+
+For the contracts on this page, use the audited revision explicitly:
+
+```toml Cargo.toml
+[dependencies]
+whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "3e3abeb2e1e2b4ac720bf0236b7d14d88dea0641" }
+```
 
 Pin the same revision for the SDK and any explicitly declared sibling crates. Check your application's actual features and target, including custom storage, HTTP, transport and runtime implementations. A default native build does not validate a browser or VoIP profile.
 
@@ -17,13 +24,13 @@ The merged compatibility registry remains in `preparing` phase with no baseline 
 |---|---|
 | Rust construction | Use defaults, constructors and setters; handle extensible enum variants. |
 | Host extensions | Keep the documented runtime, transport, HTTP, storage, plugin and interceptor contracts. |
-| Incoming messages | Distinguish pending-message persistence, resident recovery and history-byte capture. |
+| Incoming messages | Distinguish pending-message persistence, resident recovery, history-byte capture and group notification capture. |
 | Persistent data | Validate the starting database version and target revision independently of Rust compilation. |
 | Calls | API availability and feature compilation do not certify a live call profile. |
 
 ## Construct extensible types
 
-Start protobuf messages with `Default` and assign the fields you need. When modifying an existing value, clone it and change the intended fields so the remaining modeled data survives. This construction works at the installation pin. Generated protobuf types do not yet have the proposed extensibility guarantees in the audited main snapshot.
+Start protobuf messages with `Default` and assign the fields you need. When modifying an existing value, clone it and change the intended fields so the remaining modeled data survives. This construction works at the installation pin. Public generated messages, views, enums and oneofs are now non-exhaustive. External struct literals, including literals with `..Default::default()`, no longer compile. Owned messages also expose generated `with_*` setters. See [protobuf construction](/api/waproto#source-evolution).
 
 ```rust
 use whatsapp_rust::waproto::whatsapp as wa;
@@ -118,11 +125,11 @@ Read `action_timestamp: Option<DateTime<Utc>>` on `LabelEditUpdate`, `LabelAssoc
 
 This is the carried action time, not a server receipt time or replay/live classification. Keep `from_full_sync` independent. Existing builders can omit the new optional field. Serialized payloads add `action_timestamp` as a timestamp or null; these event types implement serialization, not deserialization. See [label events](/concepts/events#labeleditupdate).
 
-## Check the limits of the merged implementation
+## Check replay and recovery limits
 
-Generated protobuf API extensibility and unknown-field retention ([#1676](https://github.com/oxidezap/whatsapp-rust/pull/1676)), pending-message recovery ([#1679](https://github.com/oxidezap/whatsapp-rust/pull/1679)), and a protobuf optimization experiment ([#1686](https://github.com/oxidezap/whatsapp-rust/pull/1686)) remain unmerged at the audited snapshot. Do not depend on their proposed APIs, storage formats or guarantees.
+The audited main includes generated protobuf source evolution and retained inbound plaintext. These contracts do not promise lossless protobuf editing or exactly-once delivery. Session batching optimizations do not change the public hook, retry or storage contract. Register [group capture](/api/groups#durable-notification-capture) independently if you need a durable notification outbox. [App-state recovery](/concepts/architecture#peer-snapshot-recovery) accepts bounded gzip payloads and rejects stale connection responses while ordinary snapshot MAC validation remains enabled. [Contact lookups](/api/contacts#learning-lid-and-phone-aliases) learn validated PN/LID pairs without rewriting stored cryptographic creators. Consume [label sublist updates](/concepts/events#labelsublistupdate) separately from label assignments.
 
-In the merged implementation, a failed pending-buffer write can lose replayable plaintext after the Signal ratchet advances. A stored row only helps while retained and reached by the replay path; withholding a receipt does not guarantee server redelivery. History capture does not repair this gap. See [inbound durability](/advanced/inbound-durability) for the installed revision's behavior.
+A failed pending-buffer write now retains encoded plaintext in the same Client across cancellation and reconnect. Redelivery retries persistence without decrypting the Signal ciphertext again. Process termination still loses a resident-only copy. Adopt the bounded reads and conditional mutations required by [custom backends](/guides/custom-backends#bounded-pending-message-storage), and retain consumer deduplication. A stored row only helps while retained and reached by the replay path; withholding an ACK does not guarantee redelivery. See [inbound durability](/advanced/inbound-durability#retained-plaintext-on-current-main).
 
 Newsletter/channel messages and PDO placeholder recoveries remain outside the message durability hook. Persist their events through the appropriate application path. No exactly-once or universal `Event::Messages` delivery guarantee follows from registering the hook.
 
