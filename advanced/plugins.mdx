@@ -183,6 +183,8 @@ Each delivered envelope carries six fields: the plugin ID, the topic, a schema v
 
 `PluginCapability::CoreEvents` lets a plugin *watch* the stream. `PluginCapability::StanzaInterception` lets it *act*: a plugin that models a stanza this client does not can claim it before the built-in pipeline sees it, instead of watching it get nacked. The underlying seam — `Client::add_stanza_interceptor`, the `StanzaInterceptor` trait, what is never offered, and the ack a claim still owes the server — is documented on [`add_stanza_interceptor`](/api/client#add_stanza_interceptor); this section covers what the plugin host adds on top of it.
 
+On current main, group notification capture precedes plugin interception for `w:gp2` when `GroupNotificationDurabilityHook` is registered. An error or cancellation can prevent the plugin callback from running. Plugin claims do not bypass capture or provide durable replay. See the [client ordering exception](/api/client#add_stanza_interceptor) and [group capture contract](/api/groups#durable-notification-capture).
+
 ```rust
 use std::sync::Arc;
 
