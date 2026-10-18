@@ -502,6 +502,7 @@ pub enum EncType {
 Read-only information from a currently open pairwise session, returned by [`session_info`](#session_info):
 
 ```rust
+#[non_exhaustive]
 pub struct SignalSessionInfo {
     /// Local base key identifying the active session state.
     pub base_key: Vec<u8>,

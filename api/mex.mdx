@@ -87,6 +87,7 @@ pub struct NewChatMessageCapping {
 Where you stand against the cap.
 
 ```rust
+#[non_exhaustive]
 pub enum CappingStatus {
     None,
     FirstWarning,
@@ -101,6 +102,7 @@ pub enum CappingStatus {
 Whether you're eligible for the one-time extension that lifts the cap for a cycle.
 
 ```rust
+#[non_exhaustive]
 pub enum CappingOteStatus {
     NotEligible,
     Eligible,
@@ -115,6 +117,7 @@ pub enum CappingOteStatus {
 Your Meta Verified subscription state, which lifts the cap permanently.
 
 ```rust
+#[non_exhaustive]
 pub enum CappingMvStatus {
     NotEligible,
     NotActive,

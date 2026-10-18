@@ -172,13 +172,16 @@ fn resource_report(&self) -> Option<wacore::stats::HttpResourceReport> {
 
 Feeds into [`Client::resource_report()`](/api/client#resource_report). `UreqHttpClient` overrides this (below) with an estimate for its default agent's idle pool; media downloads are a real transient-RAM source, so even a coarse estimate is worth reporting.
 
-## Data Structures
+## Data structures
+
+HTTP DTOs are non-exhaustive. Use the constructors below rather than external literals, and keep `..` in struct patterns.
 
 ### HttpRequest
 
 Represents an HTTP request with headers and optional body.
 
 ```rust
+#[non_exhaustive]
 pub struct HttpRequest {
     pub url: String,
     pub method: String,  // "GET" or "POST"
@@ -213,9 +216,10 @@ let request = HttpRequest::post("https://example.com/upload")
 
 ### HttpResponse
 
-Represents an HTTP response with buffered body.
+Construct a buffered response with `HttpResponse::new(status_code, body)`.
 
 ```rust
+#[non_exhaustive]
 pub struct HttpResponse {
     pub status_code: u16,
     pub body: Vec<u8>,
@@ -232,9 +236,10 @@ println!("Response text: {}", text);
 
 ### StreamingHttpResponse
 
-Represents an HTTP response with streaming body reader.
+Construct a streaming response with `StreamingHttpResponse::new(status_code, reader)`.
 
 ```rust
+#[non_exhaustive]
 pub struct StreamingHttpResponse {
     pub status_code: u16,
     pub body: Box<dyn std::io::Read + Send>,

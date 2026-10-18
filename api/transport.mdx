@@ -186,6 +186,7 @@ TransportEvent::DataReceived(bytes)
 Emitted when the connection is closed (gracefully or due to error). The attached `DisconnectReason` says why:
 
 ```rust
+#[non_exhaustive]
 pub enum DisconnectReason {
     /// Server sent a WebSocket close frame. `code` is the RFC 6455 close
     /// code when present; `reason` is the close payload text.

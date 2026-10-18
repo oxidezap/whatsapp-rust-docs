@@ -140,6 +140,7 @@ The `server` field is a `Server` enum (`#[repr(u8)]`) that maps to the wire prot
 ```rust
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(u8)]
+#[non_exhaustive]
 pub enum Server {
     #[default]
     Pn = 0,          // s.whatsapp.net — Standard phone-number JIDs

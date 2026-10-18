@@ -689,6 +689,7 @@ pub struct QueryRequest {
 }
 
 #[derive(StringEnum)]
+#[non_exhaustive]
 pub enum Action {
     #[str = "block"]
     Block,
