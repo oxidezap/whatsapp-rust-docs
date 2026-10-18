@@ -114,7 +114,7 @@ The library is fully runtime-agnostic. All async operations go through four plug
 The `Runtime` trait requires four methods plus two optional methods with defaults:
 
 ```rust
-pub trait Runtime: Send + Sync + 'static {
+pub trait Runtime: MaybeSendSync + 'static {
     fn spawn(&self, future: Pin<Box<dyn Future<Output = ()> + Send + 'static>>) -> AbortHandle;
 
     /// Fire-and-forget spawn. Defaults to `self.spawn(future).detach()`.
@@ -130,7 +130,9 @@ pub trait Runtime: Send + Sync + 'static {
 }
 ```
 
-`AbortHandle` is `#[must_use]` — dropping the handle aborts the spawned task. Call `.detach()` on the handle for fire-and-forget tasks that should run to completion independently. See [custom backends — AbortHandle](/guides/custom-backends#aborthandle) for implementation details.
+The signatures above show native future bounds. On `wasm32`, runtime objects, futures and cancellation closures may hold local state. See [runtime cancellation](/api/wacore#local-runtimes-and-cancellation).
+
+`AbortHandle` is `#[must_use]`. Dropping it requests cancellation without joining task destruction. Call `.detach()` on the handle for fire-and-forget tasks that should run to completion independently. See [custom backends — AbortHandle](/guides/custom-backends#aborthandle) for implementation details.
 
 As of [#1124](https://github.com/oxidezap/whatsapp-rust/pull/1124), `spawn_detached` exists so fire-and-forget callers no longer have to write `spawn(future).detach()` themselves. The trait-level default above is exactly that call: `self.spawn(future).detach()`. It still builds the `AbortHandle` and immediately drops it, so the default alone saves nothing. That `AbortHandle` boxes a `dyn FnOnce` capturing the executor's own handle — the cost this method exists to avoid. The saving comes from `TokioRuntime`'s own override, which calls `tokio::spawn(future)` directly and never constructs an `AbortHandle` at all. #1124 migrated two of the library's own fire-and-forget spawns to `spawn_detached`: the event-callback dispatcher in `bot.rs`, and the read loop's spawned-processing branch (see [WebSocket handling](/advanced/websocket-handling)). Those two pick up the saving automatically under the bundled `TokioRuntime`. Override `spawn_detached` yourself only if your executor can spawn a task with no cancellation bookkeeping at all.
 
