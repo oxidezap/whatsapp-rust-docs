@@ -70,14 +70,14 @@ use std::fs::File;
 if let Some(video) = message.video_message.as_option() {
     let file = File::create("video.mp4")?;
     let file = client.download_to_writer(video, file, whatsapp_rust::download::DownloadLimits::default()).await?;
-    println!("Video downloaded with constant memory usage!");
+    println!("Video downloaded and verified");
 }
 ```
 
 See [Download API reference](/api/download#download_to_writer) for streaming details.
 
 <Note>
-When the HTTP client supports streaming (like the default `UreqHttpClient`), downloads use ~40KB of memory regardless of file size (8KB buffer + decryption state). If the HTTP client doesn't support streaming, `download_to_writer` automatically falls back to a buffered download — the file is fetched into memory first, then decrypted and written. This fallback ensures the method works with any `HttpClient` implementation.
+With a streaming HTTP adapter and a file destination, `download_to_writer` keeps bounded crypto/read state. This excludes adapter/TLS buffers and destination storage. With default limits, non-streaming adapters can buffer the whole response before writing it. Explicit byte limits require streaming and refuse a non-streaming adapter before HTTP. See [download limits](/api/download#download-byte-limits).
 </Note>
 
 ### From raw parameters
@@ -765,7 +765,7 @@ let _file = client.download_to_writer(video, file, whatsapp_rust::download::Down
 ```
 
 <Note>
-`download_to_writer` works with any HTTP client. With streaming-capable clients (like `UreqHttpClient`), memory usage is constant ~40KB. With non-streaming clients, unbounded calls fall back to buffered downloads. Bounded calls require streaming. See [byte limits](/api/download#download-byte-limits).
+`download_to_writer` uses bounded crypto/read state with streaming adapters; adapter buffers and destination storage are separate. With non-streaming clients, unbounded calls fall back to buffered downloads. Bounded calls require streaming. See [byte limits](/api/download#download-byte-limits).
 </Note>
 
 ### Verify media type
