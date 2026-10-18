@@ -186,6 +186,7 @@ TransportEvent::DataReceived(bytes)
 Emitted when the connection is closed (gracefully or due to error). The attached `DisconnectReason` says why:
 
 ```rust
+#[non_exhaustive]
 pub enum DisconnectReason {
     /// Server sent a WebSocket close frame. `code` is the RFC 6455 close
     /// code when present; `reason` is the close payload text.
@@ -335,6 +336,8 @@ This is useful as a starting point when you need to inspect or replicate the def
 Its session-resumption store is sized for the one host a factory dials: 8 tickets, rustls's per-server maximum, rather than the ~32-server table (`⌈256/8⌉` slots) rustls's `Resumption::default()` provisions for. A connector reused across several hosts (for example, shared deliberately across factories) still works, but only the most recently dialled hosts keep their tickets; build a larger `rustls::client::Resumption` store yourself if that's the shape you need. `TokioWebSocketTransportFactory` itself only ever dials the one URL it was built with, so the default sizing is a straight win there — see [`TokioWebSocketTransportFactory`](#tokiowebsockettransportfactory) above for how the resulting connector is cached and reused across reconnects.
 
 ### Usage with Bot builder
+
+This integration fragment assumes an existing `backend` and `http_client`.
 
 ```rust
 use whatsapp_rust::Bot;
@@ -494,7 +497,7 @@ Enable the `danger-skip-tls-verify` feature to disable certificate verification:
 
 ```toml
 [dependencies]
-whatsapp-rust-tokio-transport = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "d804acaec1439e54c43c129e2f90d45016506abe", features = ["danger-skip-tls-verify"] }
+whatsapp-rust-tokio-transport = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "35a69a14149fa2cd2a0cc719f875f441d1c6e1dc", features = ["danger-skip-tls-verify"] }
 ```
 
 This allows connecting through MITM proxies or self-signed certificates.

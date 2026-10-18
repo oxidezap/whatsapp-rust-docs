@@ -11,7 +11,7 @@ Examples use `waproto` through the main crate's re-export. Declare `whatsapp-rus
 
 ```toml
 [dependencies]
-whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "d804acaec1439e54c43c129e2f90d45016506abe" }
+whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "35a69a14149fa2cd2a0cc719f875f441d1c6e1dc" }
 ```
 
 ## Structure
@@ -75,6 +75,7 @@ Plain scalar fields (`String`, `Vec<u8>`, `bool`, integers) are still `Option<T>
 The main message container used for all WhatsApp messages.
 
 ```rust
+#[non_exhaustive]
 pub struct Message {
     // Text message
     pub conversation: Option<String>,
@@ -145,6 +146,7 @@ let img = {
 Identifies a specific message in a conversation.
 
 ```rust
+#[non_exhaustive]
 pub struct MessageKey {
     pub remote_jid: Option<String>,  // Chat JID
     pub from_me: Option<bool>,       // Sent by me?
@@ -158,6 +160,7 @@ pub struct MessageKey {
 #### ImageMessage
 
 ```rust
+#[non_exhaustive]
 pub struct ImageMessage {
     pub url: Option<String>,
     pub mimetype: Option<String>,
@@ -177,6 +180,7 @@ pub struct ImageMessage {
 #### VideoMessage
 
 ```rust
+#[non_exhaustive]
 pub struct VideoMessage {
     pub url: Option<String>,
     pub mimetype: Option<String>,
@@ -195,6 +199,7 @@ pub struct VideoMessage {
 #### AudioMessage
 
 ```rust
+#[non_exhaustive]
 pub struct AudioMessage {
     pub url: Option<String>,
     pub mimetype: Option<String>,
@@ -211,6 +216,7 @@ pub struct AudioMessage {
 #### DocumentMessage
 
 ```rust
+#[non_exhaustive]
 pub struct DocumentMessage {
     pub url: Option<String>,
     pub mimetype: Option<String>,
@@ -229,6 +235,7 @@ pub struct DocumentMessage {
 #### StickerMessage
 
 ```rust
+#[non_exhaustive]
 pub struct StickerMessage {
     pub url: Option<String>,
     pub file_sha256: Option<Vec<u8>>,
@@ -249,6 +256,7 @@ pub struct StickerMessage {
 Text with formatting, links, and quoted messages.
 
 ```rust
+#[non_exhaustive]
 pub struct ExtendedTextMessage {
     pub text: Option<String>,
     pub matched_text: Option<String>,
@@ -265,6 +273,7 @@ pub struct ExtendedTextMessage {
 Buttons, lists, and other interactive elements.
 
 ```rust
+#[non_exhaustive]
 pub struct InteractiveMessage {
     pub header: MessageField<interactive_message::Header>,
     pub body: MessageField<interactive_message::Body>,
@@ -280,6 +289,7 @@ pub struct InteractiveMessage {
 #### ButtonsMessage
 
 ```rust
+#[non_exhaustive]
 pub struct ButtonsMessage {
     pub content_text: Option<String>,
     pub footer_text: Option<String>,
@@ -293,6 +303,7 @@ pub struct ButtonsMessage {
 #### ListMessage
 
 ```rust
+#[non_exhaustive]
 pub struct ListMessage {
     pub title: Option<String>,
     pub description: Option<String>,
@@ -311,6 +322,7 @@ pub struct ListMessage {
 Used for group message encryption.
 
 ```rust
+#[non_exhaustive]
 pub struct SenderKeyDistributionMessage {
     pub group_id: Option<String>,
     pub axolotl_sender_key_distribution_message: Option<Vec<u8>>,
@@ -322,6 +334,7 @@ pub struct SenderKeyDistributionMessage {
 Used for establishing 1:1 encryption.
 
 ```rust
+#[non_exhaustive]
 pub struct PreKeySignalMessage {
     // Signal Protocol encrypted message
 }
@@ -334,6 +347,7 @@ pub struct PreKeySignalMessage {
 For protocol-level operations.
 
 ```rust
+#[non_exhaustive]
 pub struct ProtocolMessage {
     pub key: MessageField<MessageKey>,
     pub r#type: Option<protocol_message::Type>,  // MESSAGE_EDIT, REVOKE, etc.
@@ -351,6 +365,7 @@ pub struct ProtocolMessage {
 #### ReactionMessage
 
 ```rust
+#[non_exhaustive]
 pub struct ReactionMessage {
     pub key: MessageField<MessageKey>,
     pub text: Option<String>,  // Emoji
@@ -362,6 +377,7 @@ pub struct ReactionMessage {
 #### EditMessage
 
 ```rust
+#[non_exhaustive]
 pub struct EditMessage {
     pub key: MessageField<MessageKey>,
     pub message: MessageField<MessageText>,  // New text content
@@ -374,6 +390,7 @@ pub struct EditMessage {
 Parent message for grouped media albums. Declares expected image/video counts so WhatsApp clients know how many items to group together.
 
 ```rust
+#[non_exhaustive]
 pub struct AlbumMessage {
     pub expected_image_count: Option<u32>,
     pub expected_video_count: Option<u32>,
@@ -384,6 +401,7 @@ pub struct AlbumMessage {
 Each child media message is wrapped in `associated_child_message` (a `FutureProofMessage`) and linked to the parent via a `MessageAssociation`:
 
 ```rust
+#[non_exhaustive]
 pub struct MessageAssociation {
     pub association_type: Option<message_association::AssociationType>, // MEDIA_ALBUM = 1
     pub parent_message_key: MessageField<MessageKey>,
@@ -398,6 +416,7 @@ Use `whatsapp_rust::proto_helpers::wrap_as_album_child` to construct album child
 #### AIRichResponseMessage
 
 ```rust
+#[non_exhaustive]
 pub struct AIRichResponseMessage {
     pub message_type: Option<AIRichResponseMessageType>,
     pub submessages: Vec<AIRichResponseSubMessage>,
@@ -409,6 +428,7 @@ pub struct AIRichResponseMessage {
 #### BotFeedbackMessage
 
 ```rust
+#[non_exhaustive]
 pub struct BotFeedbackMessage {
     pub message_key: MessageField<MessageKey>,
     pub kind: Option<bot_feedback_message::BotFeedbackKind>,  // Thumbs up/down
@@ -422,6 +442,7 @@ pub struct BotFeedbackMessage {
 #### MessageContextInfo
 
 ```rust
+#[non_exhaustive]
 pub struct MessageContextInfo {
     pub device_list_metadata: MessageField<DeviceListMetadata>,
     pub device_list_metadata_version: Option<i32>,
@@ -438,6 +459,7 @@ pub struct MessageContextInfo {
 Quoted messages, mentions, and forwarding info.
 
 ```rust
+#[non_exhaustive]
 pub struct ContextInfo {
     pub stanza_id: Option<String>,
     pub participant: Option<String>,
@@ -458,6 +480,7 @@ pub struct ContextInfo {
 Account Device Verification messages.
 
 ```rust
+#[non_exhaustive]
 pub struct ADVDeviceIdentity {
     pub raw_id: Option<u32>,
     pub timestamp: Option<u64>,
@@ -466,6 +489,7 @@ pub struct ADVDeviceIdentity {
     pub device_type: Option<ADVEncryptionType>,
 }
 
+#[non_exhaustive]
 pub struct ADVSignedDeviceIdentity {
     pub details: Option<Vec<u8>>,
     pub account_signature_key: Option<Vec<u8>>,
@@ -473,6 +497,7 @@ pub struct ADVSignedDeviceIdentity {
     pub device_signature: Option<Vec<u8>>,
 }
 
+#[non_exhaustive]
 pub struct ADVKeyIndexList {
     pub raw_id: Option<u32>,
     pub timestamp: Option<u64>,
@@ -489,12 +514,14 @@ These ADV types are capitalized `ADV...` (not `Adv...`) to match buffa's acronym
 ### Signal protocol structures
 
 ```rust
+#[non_exhaustive]
 pub struct PreKeyRecordStructure {
     pub id: Option<u32>,
     pub public_key: Option<Vec<u8>>,
     pub private_key: Option<Vec<u8>>,
 }
 
+#[non_exhaustive]
 pub struct SignedPreKeyRecordStructure {
     pub id: Option<u32>,
     pub public_key: Option<Vec<u8>>,
@@ -513,6 +540,7 @@ These are all-scalar structs (no nested messages), so they're unaffected by the 
 Used during initial connection handshake.
 
 ```rust
+#[non_exhaustive]
 pub struct HandshakeMessage {
     pub client_hello: MessageField<handshake_message::ClientHello>,
     pub server_hello: MessageField<handshake_message::ServerHello>,
@@ -525,6 +553,7 @@ pub struct HandshakeMessage {
 Device and client information during pairing.
 
 ```rust
+#[non_exhaustive]
 pub struct ClientPayload {
     pub username: Option<u64>,
     pub passive: Option<bool>,
@@ -544,6 +573,7 @@ pub struct ClientPayload {
 ### HistorySyncNotification
 
 ```rust
+#[non_exhaustive]
 pub struct HistorySyncNotification {
     pub file_sha256: Option<Vec<u8>>,
     pub file_length: Option<u64>,
@@ -559,6 +589,7 @@ pub struct HistorySyncNotification {
 ### HistorySync
 
 ```rust
+#[non_exhaustive]
 pub struct HistorySync {
     pub sync_type: history_sync::HistorySyncType,
     pub conversations: Vec<Conversation>,
@@ -576,6 +607,7 @@ pub struct HistorySync {
 References to uploaded media files.
 
 ```rust
+#[non_exhaustive]
 pub struct ExternalBlobReference {
     pub media_key: Option<Vec<u8>>,
     pub direct_path: Option<String>,
@@ -593,6 +625,7 @@ pub struct ExternalBlobReference {
 App state synchronization actions.
 
 ```rust
+#[non_exhaustive]
 pub struct SyncActionValue {
     pub timestamp: Option<i64>,
     // One of many action types:
@@ -614,6 +647,7 @@ waproto generates real Rust enums (not raw `i32` constants). Variant names are `
 ```rust
 // Message types
 pub mod protocol_message {
+    #[non_exhaustive]
     pub enum Type {
         REVOKE = 0,
         EPHEMERAL_SETTING = 3,
@@ -628,6 +662,7 @@ pub mod protocol_message {
 
 // Media types
 pub mod video_message {
+    #[non_exhaustive]
     pub enum Attribution {
         NONE = 0,
         GIPHY = 1,
@@ -662,8 +697,8 @@ Enable them in your `Cargo.toml`:
 
 ```toml
 [dependencies]
-whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "d804acaec1439e54c43c129e2f90d45016506abe" }
-waproto = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "d804acaec1439e54c43c129e2f90d45016506abe", features = ["serde-snake-case"] }
+whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "35a69a14149fa2cd2a0cc719f875f441d1c6e1dc" }
+waproto = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "35a69a14149fa2cd2a0cc719f875f441d1c6e1dc", features = ["serde-snake-case"] }
 ```
 
 ### Default behavior (no feature flags)
@@ -673,6 +708,7 @@ All types derive `Serialize` only:
 ```rust
 #[derive(Clone, PartialEq, Default)]
 #[derive(serde::Serialize)]
+#[non_exhaustive]
 pub struct Message {
     // ...
 }
@@ -693,6 +729,7 @@ All types also derive `Deserialize` with `#[serde(default)]`, matching protobuf 
 #[derive(serde::Serialize)]
 #[cfg_attr(feature = "serde-deserialize", derive(serde::Deserialize))]
 #[cfg_attr(feature = "serde-deserialize", serde(default))]
+#[non_exhaustive]
 pub struct Message {
     // ...
 }
@@ -831,20 +868,13 @@ use whatsapp_rust::wacore::download::{Downloadable, MediaType};
 
 if let Some(img) = message.image_message.as_option() {
     // Use the Downloadable trait to download and decrypt
-    let data = client.download(img).await?;
+    let data = client.download(img, whatsapp_rust::download::DownloadLimits::default()).await?;
 }
 ```
 
-## WhatsApp Version
+## Schema source
 
-The protobuf definitions are based on:
-
-```rust
-// This file is @generated by buffa-build.
-// WhatsApp Version: 2.3000.1035617621
-```
-
-This version is automatically included in the generated file header.
+Read the WhatsApp snapshot version in the [pinned protobuf source](https://github.com/oxidezap/whatsapp-rust/blob/35a69a14149fa2cd2a0cc719f875f441d1c6e1dc/waproto/src/whatsapp.proto). The source version identifies that schema snapshot; it does not certify compatibility with every current server or client.
 
 ## Relationship with wacore
 
@@ -886,7 +916,7 @@ Nested `protocolMessage.key` values retain the sender’s wire perspective. Do n
 
 ## Source evolution
 
-The merged [source snapshot `3e3abeb2`](https://github.com/oxidezap/whatsapp-rust/blob/3e3abeb2e1e2b4ac720bf0236b7d14d88dea0641/waproto/src/lib.rs) marks public generated messages, borrowed views, enums and oneofs non-exhaustive. This section uses that revision; the older dependency above does not provide this contract. Pin the SDK and explicitly declared sibling crates to the same revision.
+The merged [source snapshot `35a69a14`](https://github.com/oxidezap/whatsapp-rust/blob/35a69a14149fa2cd2a0cc719f875f441d1c6e1dc/waproto/src/lib.rs) marks public generated messages, borrowed views, enums and oneofs non-exhaustive. The dependency above uses that same revision. Pin the SDK and explicitly declared sibling crates to the same revision.
 
 Construct messages through `Default` and field assignment, or use owned-message `with_*` setters. External literals fail even with `..Default::default()`. Destructure with `..` and match enums and oneofs with a fallback.
 

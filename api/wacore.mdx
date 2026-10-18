@@ -11,7 +11,7 @@ Examples use `wacore` through the main crate's re-export. Declare `whatsapp-rust
 
 ```toml
 [dependencies]
-whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "d804acaec1439e54c43c129e2f90d45016506abe" }
+whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "35a69a14149fa2cd2a0cc719f875f441d1c6e1dc" }
 ```
 
 ## Philosophy
@@ -165,8 +165,11 @@ pub mod net;      // Transport, TransportFactory, HttpClient, TransportEvent
 
 The `runtime` module defines the `Runtime` trait that all async operations go through:
 
+Native signatures retain `Send` futures and closures:
+
 ```rust
-pub trait Runtime: Send + Sync + 'static {
+#[cfg(not(target_arch = "wasm32"))]
+pub trait Runtime: MaybeSendSync + 'static {
     fn spawn(&self, future: Pin<Box<dyn Future<Output = ()> + Send + 'static>>) -> AbortHandle;
 
     /// Spawn a task nobody will cancel. Defaults to `self.spawn(future).detach()`.
@@ -176,6 +179,26 @@ pub trait Runtime: Send + Sync + 'static {
     fn sleep(&self, duration: Duration) -> Pin<Box<dyn Future<Output = ()> + Send>>;
     fn spawn_blocking(&self, f: Box<dyn FnOnce() + Send + 'static>) -> Pin<Box<dyn Future<Output = ()> + Send>>;
     fn yield_now(&self) -> Option<Pin<Box<dyn Future<Output = ()> + Send>>>;
+
+    /// How often to yield in tight loops (every N items). Defaults to 10.
+    fn yield_frequency(&self) -> u32 { 10 }
+}
+```
+
+On `wasm32`, the local-executor signatures permit non-`Send` futures and closures:
+
+```rust
+#[cfg(target_arch = "wasm32")]
+pub trait Runtime: MaybeSendSync + 'static {
+    fn spawn(&self, future: Pin<Box<dyn Future<Output = ()> + 'static>>) -> AbortHandle;
+
+    /// Spawn a task nobody will cancel. Defaults to `self.spawn(future).detach()`.
+    fn spawn_detached(&self, future: Pin<Box<dyn Future<Output = ()> + 'static>>) {
+        self.spawn(future).detach();
+    }
+    fn sleep(&self, duration: Duration) -> Pin<Box<dyn Future<Output = ()>>>;
+    fn spawn_blocking(&self, f: Box<dyn FnOnce() + 'static>) -> Pin<Box<dyn Future<Output = ()>>>;
+    fn yield_now(&self) -> Option<Pin<Box<dyn Future<Output = ()>>>>;
 
     /// How often to yield in tight loops (every N items). Defaults to 10.
     fn yield_frequency(&self) -> u32 { 10 }
@@ -666,6 +689,7 @@ pub struct QueryRequest {
 }
 
 #[derive(StringEnum)]
+#[non_exhaustive]
 pub enum Action {
     #[str = "block"]
     Block,
@@ -880,3 +904,9 @@ Both benchmark types run from a single workflow, `.github/workflows/codspeed.yml
     Device state and commands
   </Card>
 </CardGroup>
+
+## Local runtimes and cancellation
+
+`Runtime` uses `MaybeSendSync`: native runtime objects still require `Send + Sync`, while `wasm32` objects and cancellation closures may hold `Rc` or local JS state. `AbortHandle::new` accepts a `MaybeSend` closure. `TaskInstrument` and `VideoTeardownHook` follow the same platform-local convention. This contract covers local WASM executors, not qualification of WASI or threaded/atomics WASM.
+
+Calling `abort` or dropping an undetached handle requests cancellation without joining task destruction. `timeout` drops its supplied future on expiry, including any undetached handles that future owns. Detached tasks and already-submitted blocking work may continue. A timeout does not provide a deadline for cleanup elsewhere or prove that local/remote effects were rolled back.

@@ -4,7 +4,7 @@ description: Adapt a Rust integration to merged contracts and distinguish experi
 ---
 
 <Warning>
-Merged contracts below were audited at [main snapshot `3e3abeb2`](https://github.com/oxidezap/whatsapp-rust/tree/3e3abeb2e1e2b4ac720bf0236b7d14d88dea0641). That snapshot is not a published release or an approved release candidate. Installation and reference examples still use [d804acae](/installation); do not use their dependency pin with newer APIs. Unmerged proposals are excluded from the contracts below. Compile your integration against the exact revision you select; this source audit does not qualify a release candidate.
+Merged contracts below were audited at [main snapshot `35a69a14`](https://github.com/oxidezap/whatsapp-rust/tree/35a69a14149fa2cd2a0cc719f875f441d1c6e1dc). That snapshot is not a published release or an approved release candidate. Installation and reference examples use [the same dependency pin](/installation). Unmerged proposals are excluded from the contracts below. Compile your integration against the exact revision you select; this source audit does not qualify a release candidate.
 </Warning>
 
 ## Select the source and profile
@@ -13,7 +13,7 @@ For the contracts on this page, use the audited revision explicitly:
 
 ```toml Cargo.toml
 [dependencies]
-whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "3e3abeb2e1e2b4ac720bf0236b7d14d88dea0641" }
+whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "35a69a14149fa2cd2a0cc719f875f441d1c6e1dc" }
 ```
 
 Pin the same revision for the SDK and any explicitly declared sibling crates. Check your application's actual features and target, including custom storage, HTTP, transport and runtime implementations. A default native build does not validate a browser or VoIP profile.
@@ -74,7 +74,7 @@ The required IQ node helpers expose `wacore::iq::node::IqParseError`, distinguis
 
 This type does not classify every parser failure. A malformed IQ response is distinct from a server rejection, HTTP status, timeout, transport loss or storage failure. `IqSpec` keeps its existing signature.
 
-For newsletter `get_my_addons`, invalid input remains `NewsletterError::InvalidRequest` before sending. A malformed response becomes `NewsletterError::Iq(IqError::ParseError(_))`, preserving the cause. The [newsletter reference](/api/newsletter#get_my_addons) documents its older source pin; the mapping here is merged in the audited main snapshot. Do not depend on the full text of a parser error.
+For newsletter `get_my_addons`, invalid input remains `NewsletterError::InvalidRequest` before sending. A malformed response becomes `NewsletterError::Iq(IqError::ParseError(_))`, preserving the cause. See the [newsletter reference](/api/newsletter#get_my_addons). Do not depend on the full text of a parser error.
 
 ## Separate history capture from message commits
 
@@ -113,15 +113,15 @@ Token updates atomically preserve the other writer's fields in device scope. Sen
 
 A patch commit stores its version/hash and all removed/added MACs together, with removals before additions. Error or cancellation must expose the complete old or complete new patch. A transaction, CAS retry or shared backend-wide lock can provide this boundary; a callback batch or later flush alone cannot.
 
-An error can follow a complete commit. SQLite's `CommitBarrierError` must remain observable, and the processor publishes mutations only after `Ok`. Atomicity does not recover delivery after this post-commit failure or guarantee that restart can replay the committed cursor. These requirements apply to the audited main snapshot, not the older [custom-backend examples](/guides/custom-backends).
+An error can follow a complete commit. SQLite's `CommitBarrierError` must remain observable, and the processor publishes mutations only after `Ok`. Atomicity does not recover delivery after this post-commit failure or guarantee that restart can replay the committed cursor. These requirements apply to the audited main snapshot, the [custom-backend requirements](/guides/custom-backends).
 
 ## Preserve optional label action times
 
 <Note>
-[Core #1691](https://github.com/oxidezap/whatsapp-rust/pull/1691) is merged in the audited main snapshot. This field is absent from the older `d804acae` reference examples.
+[Core #1691](https://github.com/oxidezap/whatsapp-rust/pull/1691) is merged in the audited main snapshot. Installation and examples use the audited revision.
 </Note>
 
-Read `action_timestamp: Option<DateTime<Utc>>` on `LabelEditUpdate`, `LabelAssociationUpdate` and `MessageLabelAssociationUpdate` when you need to preserve whether an action time was carried. An absent or unrepresentable value becomes `None`; explicit zero becomes `Some` of the Unix epoch. Existing `timestamp` fallbacks remain: epoch for absence and local dispatch time for an out-of-range value.
+Read `action_timestamp: Option<DateTime<Utc>>` on `LabelEditUpdate`, `LabelAssociationUpdate`, `MessageLabelAssociationUpdate` and `LabelSublistUpdate` when you need to preserve whether an action time was carried. An absent or unrepresentable value becomes `None`; explicit zero becomes `Some` of the Unix epoch. The three legacy label events retain their `timestamp` fallbacks: epoch for absence and local dispatch time for an out-of-range value. `LabelSublistUpdate` has no fallback timestamp field; preserve its optional action time and `from_full_sync` directly.
 
 This is the carried action time, not a server receipt time or replay/live classification. Keep `from_full_sync` independent. Existing builders can omit the new optional field. Serialized payloads add `action_timestamp` as a timestamp or null; these event types implement serialization, not deserialization. See [label events](/concepts/events#labeleditupdate).
 
@@ -140,3 +140,15 @@ Keep source compatibility separate from persistent-data migration. Stop writers 
 Cancellation can end your wait after an operation produced local or remote effects. Preserve partial results and retry only the documented remaining step, such as synchronization after `PushNameOutcome::SyncPending`.
 
 Before adopting the integrated dependency, compile the complete EN/PT examples and your custom hosts against that exact SHA, then repeat the selected consumers against its packaged artifacts outside the source workspace. Include the actual MSRV, browser and opt-in features you intend to support. Keep data-upgrade tests and profile-specific live qualification as separate evidence. In particular, do not infer VoIP interoperability from compilation, schema tests or skipped call tests.
+
+## Update policy, download and host integrations
+
+Replace `RetryAdmission::admit` and client retry-policy setters with builder registration and borrowed-context `decide` methods. Register decrypt-failure admission independently and account for its ACK and recovery-loss boundary. See [retry admission](/advanced/retry-admission).
+
+Pass `DownloadLimits` to every client or standalone download call. Use `Default` for no added media byte cap or explicit wire/plaintext budgets with streaming. Configure app-state retained blob capacity separately through `CacheConfig::app_state_downloads`. See [download limits](/api/download#download-byte-limits) and [app-state memory](/advanced/state-management#app-state-blob-memory).
+
+Construct generated MEX variables, nested input and response shapes with `Default` plus field assignment. They are non-exhaustive, including the retained historical modules. Keep omission distinct from server-requiredness. Generated open `StanzaMessageType` and `EncMediaType` enums also require wildcard match arms; their `Unknown(String)` fallback preserves unmodeled wire values. Closed enums retain their existing policy. See [MEX](/api/mex).
+
+Implement explicit pairwise session locking and handle unsupported Signal adapter operations. Preserve retry-exhaustion attempts and sources. Local WASM runtimes may hold local state; cancellation requests do not join tasks or roll back effects. See [custom backends](/guides/custom-backends#session-locking-and-signal-adapter-failures), [storage errors](/api/errors#storage-retry-exhaustion) and [runtime cancellation](/api/wacore#local-runtimes-and-cancellation).
+
+Use the generation-scoped `CallHandle::phase` for signaling snapshots, independently of media diagnostics. Custom encrypted handlers remain detached application work. See [calls](/guides/voip-calls#signaling-phase-and-media-limits) and [extension lifetime](/advanced/plugins#custom-encrypted-payload-lifetime).

@@ -4,7 +4,7 @@ description: Contact lookup, profile picture, and user info operations
 ---
 
 <Note>
-Examples on this page target [source snapshot `d804acae`](https://github.com/oxidezap/whatsapp-rust/tree/d804acaec1439e54c43c129e2f90d45016506abe), not a crates.io release. Use the [current API guide](/guides/current-api) to select the matching dependency.
+Examples on this page target [source snapshot `35a69a14`](https://github.com/oxidezap/whatsapp-rust/tree/35a69a14149fa2cd2a0cc719f875f441d1c6e1dc), not a crates.io release. Use the [current API guide](/guides/current-api) to select the matching dependency.
 </Note>
 
 The `Contacts` struct provides methods for checking WhatsApp registration status and retrieving profile pictures and user information.
@@ -379,8 +379,10 @@ The `get_info` method and `ContactInfo` type have been removed. Use `is_on_whats
 
 ## Learning LID and phone aliases
 
-On [main snapshot `3e3abeb2`](https://github.com/oxidezap/whatsapp-rust/blob/3e3abeb2e1e2b4ac720bf0236b7d14d88dea0641/src/features/contacts.rs), contact lookups learn PN-primary results with LID fields and LID-primary results with explicit PN fields, including business usync responses. The client validates the identity families and user identifiers before storing a pair. Mapping persistence errors are logged; a successful contact lookup does not itself prove that an alias reached durable storage.
+On [main snapshot `35a69a14`](https://github.com/oxidezap/whatsapp-rust/blob/35a69a14149fa2cd2a0cc719f875f441d1c6e1dc/src/features/contacts.rs), contact lookups learn PN-primary results with LID fields and LID-primary results with explicit PN fields, including business usync responses. The client validates the identity families and user identifiers before storing a pair. Mapping persistence errors are logged; a successful contact lookup does not itself prove that an alias reached durable storage.
 
 App-state contact actions also persist validated LID/PN pairs before advancing their collection cursor or publishing observations. A mapping write failure leaves that update retryable. Multiple retained mappings keep deterministic application order and the existing last-LID-per-phone policy.
 
 A learned alias helps routing and lookup. It does not authorize rewriting a stored cryptographic creator or merging unrelated message IDs. Preserve the original creator for polls, events and encrypted message actions, and keep consumer deduplication scoped by chat, sender and ID.
+
+Startup PN/LID warm-up preserves newer live mappings learned while backend reads are in flight. Treat cached aliases as validated observations with provenance, not authority to rewrite original cryptographic creators or message IDs. A completed lookup still does not prove durable persistence of a learned pair.

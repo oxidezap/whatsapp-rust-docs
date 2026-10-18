@@ -1,125 +1,71 @@
 ---
-title: Retry Admission Hook
-description: Opt in to bounding a storm of inbound group/status retry receipts, without changing the SDK's default WhatsApp Web-compliant behavior.
+title: Retry admission
+description: Configure synchronous policies for inbound retry repair and automatic decrypt-failure requests
 ---
 
-## Overview
+Register retry policies on `ClientBuilder` or `BotBuilder` before building. Use `with_retry_admission` and `with_decrypt_failure_admission` for owned implementations, or their `_arc` variants for shared trait objects. The last registration for each policy wins. Policies remain fixed after assembly; keep live tuning inside the policy, for example with atomics. These hooks need no plugin feature.
 
-WhatsApp Web has **no volume-based throttle on inbound retry receipts**. `WAWebHandleRetryRequest` serializes them per chat, refuses past `MAX_RETRY`, and otherwise processes every receipt — its gates are all semantic (`ALREADY_DELIVERED`, `CHANGED_IDENTITY`, `RECORD_MISSING`, `DEVICE_NOT_RECIPIENT`, `HIGH_RETRY_COUNT`, `MESSAGE_EXPIRED`), never "this member is asking too often." This SDK mirrors that: by default, every inbound `<receipt type="retry">` runs the full repair path (`markForgetSenderKey`, key-bundle processing, resend).
+Both traits use `MaybeSendSync`: native policies require `Send + Sync`, while `wasm32` policies can keep local state. Callbacks run synchronously and must return promptly without I/O or blocking. A panic is not converted into a fallback decision; it follows the application's panic strategy.
 
-<Note>
-**The sender-key repair (`markForgetSenderKey`) no longer waits on finding the original message ([#1300](https://github.com/oxidezap/whatsapp-rust/pull/1300)).** A group/status send marks its *entire* distribution list as holding the sender key, including a device whose SKDM failed to encrypt. That makes the retry receipt's cold mark the only path back for that device. Before #1300, the mark ran behind the recent-message lookup, along with everything else downstream in the handler: the group-info fetch, the unknown-participant `rotateKey` block, key-bundle processing, and the resend itself. The lookup carries its own TTL (`sent_message_ttl_secs`, default 2h), and a genuine retry storm can outlive it — a device that did stayed stranded warm forever, even across restarts. #1300 moved only the cold mark ahead of the lookup. The group-info fetch, `rotateKey` block, and resend stayed gated on a lookup hit — and so, at the time, did key-bundle processing. [#1303](https://github.com/oxidezap/whatsapp-rust/pull/1303) later moved part of key-bundle processing ahead of the lookup too; see the next note.
-</Note>
+## Inbound retry repair
 
-<Note>
-**Key-bundle installation now joins the cold mark ahead of the lookup, for every route except a DM ([#1303](https://github.com/oxidezap/whatsapp-rust/pull/1303)).** #1303 splits `update_local_signal_session` into two steps. `install_retry_key_bundle` runs the `processKeyBundle` step: it only reads keys the receipt already carries, with no network call and no deletion. `reconcile_retry_session` runs the reg-ID-mismatch session delete and the base-key bookkeeping; only the gated resend can undo either one. For `Group`, `Status`, and broadcast-list retries, `install_retry_key_bundle` now also runs before the recent-message lookup, immediately ahead of the cold mark: install first, then mark, so a device only reads warm once its session can actually carry the next SKDM. `reconcile_retry_session` still waits for the lookup on every route, since its branches either delete a session nothing else rebuilds or stamp a row keyed by the message ID. A DM's encryption JID stays unsettled until the lookup runs, because an alternate PN/LID hit can still rewrite it — so `Direct` retries keep both steps behind the lookup, unchanged from before #1303.
-</Note>
+`RetryAdmission::decide(&RetryContext<'_>) -> RetryDecision` gates eligible group and status retry receipts from other accounts. Its borrowed context contains `chat`, the requesting device's `requester` JID, and `retry_count`. You may share a budget across a user's devices.
 
-<Note>
-**A primary device for which local SKDM encryption produced no node stopped being part of that "entire distribution list" marking, as of [#1328](https://github.com/oxidezap/whatsapp-rust/pull/1328).** This covers a *local* failure only — a failed pre-key fetch, a session-setup error — not a node that was sent but never reached or was never processed by the recipient; that case has no sender-side signal and still relies on this page's retry-receipt repair, same as before. The whole-set marking described above (`markHasSenderKey(x, M)`, unchanged) still applies to every *external participant's companion* device that was targeted — such a companion whose SKDM failed to encrypt is still marked keyed, and this page's retry-receipt cold mark is still the only path back for it. A **primary** device is now excluded from that marking when local encryption produced no SKDM for it, matching `getKeyDistributionMsg`'s `isPrimaryDevice` gate: WA Web can never reach the marking with a failed primary in the target set at all, because a primary's encryption failure rejects the entire send. This SDK's best-effort send carries on instead of failing the whole group over one member, so it enforces the same guarantee directly, by excluding that device from the marking rather than failing the send. Such a primary is retargeted on the very next send instead of depending on this page's retry-receipt repair — closing what had been a stall that, in the field report motivating this fix, only cleared once the affected member sent traffic of her own.
-</Note>
+Without a policy, eligible receipts enter repair. Own-account devices, DMs and broadcast-list retries bypass this gate. Routing and unknown-device validation run first. `RetryDecision::Drop` stops key-bundle installation, sender-key repair and resend. Nothing is queued for later. Allow recovery over time when imposing a budget.
 
-A single-user WA Web client never sends at a volume where this matters. A bot in a large group can, if a cohort of members has pairwise sessions that never establish — each of those members retries on every message, driving the repair path at storm rate.
-
-Registering a `RetryAdmission` policy lets you bound that cost **without the SDK diverging from WhatsApp Web by default**. Leaving it unset keeps exact WA Web behavior, at zero cost — the check on the receive path is a single `OnceLock::get()`.
-
-<Note>
-This is an opt-in seam for bot-scale deployments. Dropping a retry receipt is a deliberate decision to skip an eligible repair request; the SDK will never do this on its own.
-</Note>
-
-## Scope
-
-The policy is only consulted for **group and `status@broadcast`** retry receipts from **other accounts**. It is never consulted for:
-
-- Retries from your own companion devices (`is_peer`) — their session must always be able to rebuild.
-- Any 1:1 (DM) retry.
-
-The check runs immediately after the unknown-device (`hasDevice`) gate, before the sender-key repair and the rest of the handler. For an *unknown* device, note that `schedule_unknown_device_sync` (a device-list resync) queues **before** both the `hasDevice` gate and this admission check — a policy cannot bound that resync, only the repair work that follows it. A `false` from `admit` skips all repair work: the sender-key cold mark (`markForgetSenderKey`), key-bundle installation (`install_retry_key_bundle`, pre-lookup for the routes this policy covers), the recent-message lookup, the group-info fetch, the unknown-participant `rotateKey` block, session reconciliation (`reconcile_retry_session`, post-lookup), and the resend. The SDK does not queue a dropped receipt; the requester re-requests it on its own timer, so a policy should refill over time to keep genuine recovery possible.
-
-<Note>
-As of [#1300](https://github.com/oxidezap/whatsapp-rust/pull/1300) and [#1303](https://github.com/oxidezap/whatsapp-rust/pull/1303), `install_retry_key_bundle` and `mark_requester_for_fresh_skdm` (`markForgetSenderKey`) both run right after this admission check, ahead of the recent-message lookup, the group-info fetch, and the `rotateKey` block. The install step runs first; the cold mark runs last, so a device only reads warm once its session is actually installed. The admission check still gates all of that repair work — only the position of these two steps relative to the lookup changed.
-</Note>
-
-## The `RetryAdmission` trait
+`RetryDecision::Accept` permits repair. The client installs the retry key bundle and marks the requester for a fresh sender key before recent-message lookup. An admitted request can repair the session even when the original message has left the recent-message cache; resending that original message still needs its content.
 
 ```rust
-pub trait RetryAdmission: wacore::sync_marker::MaybeSendSync {
-    /// Return `true` to admit the retry receipt (WA Web behavior), `false` to
-    /// drop it before any repair work runs. Must return promptly (no I/O, no
-    /// blocking).
-    fn admit(&self, chat: &Jid, requester: &Jid, retry_count: u8) -> bool;
-}
-```
+use whatsapp_rust::{Client, ClientBuilder, RetryAdmission, RetryContext, RetryDecision};
 
-Object-safe and WASM-safe (`MaybeSendSync` is `Send + Sync` on native targets, unbounded on `wasm32`).
+struct RepairPolicy;
 
-| Parameter | Description |
-|---|---|
-| `chat` | The group or `status@broadcast` JID the retry receipt was sent in. |
-| `requester` | The retrying participant's device JID. |
-| `retry_count` | The receipt's attempt number. |
-
-`admit` is called **inline on the receive path** and is deliberately synchronous — a slow or awaiting policy would stall retry processing for the pending key, and a gate never needs to wait. Keep it to a fast, local decision (an atomic counter, a token-bucket check); do no I/O or blocking inside it.
-
-The device is intentionally part of `requester`, but a policy may key on the user alone: WhatsApp Web re-targets a whole user's sender key when its primary device goes cold, so all devices of one broken account can reasonably share a single budget.
-
-`RetryAdmission` is re-exported from the crate root and from the `prelude`.
-
-<Warning>
-A `RetryAdmission` policy that never admits another retry from a given `(chat, requester)` pair permanently excludes that device from SKDM distribution — this was already true before [#1300](https://github.com/oxidezap/whatsapp-rust/pull/1300). #1300 and [#1303](https://github.com/oxidezap/whatsapp-rust/pull/1303) both improve the policy's odds, not worsen them. Previously, a dropped receipt's eventual repair depended on a *later admitted* retry arriving before the original message aged out of the recent-message cache (`sent_message_ttl_secs`, default 2h). Since #1300, any later admitted retry repairs the sender key regardless of whether that message is still cached. Since #1303, that same admitted retry also installs the device's session from the receipt's own key bundle, not just the cold mark. A policy with a slow refill rate now recovers a fully working session more reliably than before, not less.
-</Warning>
-
-## Opting in
-
-```rust
-use whatsapp_rust::RetryAdmission;
-use whatsapp_rust::prelude::*;
-use std::sync::Arc;
-
-struct AlwaysAdmit;
-
-impl RetryAdmission for AlwaysAdmit {
-    fn admit(&self, _chat: &Jid, _requester: &Jid, _retry_count: u8) -> bool {
-        true
+impl RetryAdmission for RepairPolicy {
+    fn decide(&self, context: &RetryContext<'_>) -> RetryDecision {
+        if context.retry_count <= 2 {
+            RetryDecision::Accept
+        } else {
+            RetryDecision::Drop
+        }
     }
 }
 
-let bot = Bot::builder()
-    .with_backend(SqliteStore::open("whatsapp.db").await?)
-    .build()
-    .await?;
-
-// Register before connecting. Without this call the client keeps its
-// default behavior: every retry receipt admitted, matching WhatsApp Web.
-bot.client().set_retry_admission(Arc::new(AlwaysAdmit));
-
-let handle = bot.spawn();
-let outcome = handle.await;
-println!("Bot stopped: {outcome:?}");
+fn configure_repair() -> ClientBuilder {
+    Client::builder().with_retry_admission(RepairPolicy)
+}
 ```
 
-`Client::set_retry_admission` returns `false` (and keeps the previously-registered policy) if called more than once — set it once, before connecting. Live tuning belongs inside the policy itself (e.g. atomics), not in re-registration.
+This example demonstrates registration and decisions, not a time-based budget. The core's `examples/retry_quarantine.rs` implements a bounded token bucket keyed by chat and requester user, with refill over time and a fail-open tracked-pair cap.
 
-## Example: token-bucket quarantine
+## Automatic decrypt-failure requests
 
-The repository ships `examples/retry_quarantine.rs`: a per-`(chat, requester)` token bucket, burst 2 / refill 2 per day, with a bounded keyspace (fails open — admits — once the tracked-pair cap is reached, rather than growing unbounded or blocking a brand-new pair).
+`DecryptFailureAdmission::decide(&DecryptFailureContext<'_>) -> DecryptFailureDecision` gates automatic outbound retry receipts after an eligible decrypt failure. The context borrows `chat` and `sender`; `retry_count` is the attempt after per-message accounting, including refused attempts.
 
-```bash
-cargo run --example retry_quarantine
+Without a policy, eligible failures request a retry up to the per-message cap. Own messages, explicit retry requests, permanently suppressed bot retries and attempts beyond the cap bypass the policy.
+
+```rust
+use whatsapp_rust::{
+    Client, ClientBuilder, DecryptFailureAdmission,
+    DecryptFailureContext, DecryptFailureDecision,
+};
+
+struct RecoveryPolicy;
+
+impl DecryptFailureAdmission for RecoveryPolicy {
+    fn decide(&self, context: &DecryptFailureContext<'_>) -> DecryptFailureDecision {
+        if context.retry_count <= 2 {
+            DecryptFailureDecision::RequestRetry
+        } else {
+            DecryptFailureDecision::AcknowledgeWithoutRetry
+        }
+    }
+}
+
+fn configure_recovery() -> ClientBuilder {
+    Client::builder().with_decrypt_failure_admission(RecoveryPolicy)
+}
 ```
 
-Key points from that example:
+`AcknowledgeWithoutRetry` skips the retry receipt but keeps the transport ACK, undecryptable event and first-attempt phone recovery. Refusal consumes an attempt. The ACK can stop server redelivery, so refusal can lose recovery of that message. This policy is independent of inbound retry repair and [pre-decrypt durability admission](/advanced/inbound-durability).
 
-- **Keyed by user, not device** — `(chat.user, requester.user)`, matching the "one broken account, one budget" rationale above.
-- **Burst 2** repairs a healthy member immediately (one mark is enough — the next send already carries the SKDM); receipts past the burst from the same pair are dropped before any repair work.
-- **Refill 2/day** keeps genuine recovery possible for a member whose session is intermittently broken, without allowing a sustained storm.
-- **`burst = 0` disables the policy outright** (always admits), useful for a kill switch without unregistering.
-
-## Design rationale
-
-This hook is a decoupled, WA Web-compliant alternative to embedding a quarantine directly in the SDK's default retry-receipt path: the core stays byte-for-byte WA Web, and any volume-based policy — including the exact mechanism above — lives in operator code via this trait instead of being on by default.
-
-## See also
-
-- [Inbound Durability Hook](/advanced/inbound-durability) — the sibling opt-in hook idiom (`OnceLock`, zero overhead unset) that this trait follows.
-- [History Sync Admission Hook](/advanced/history-sync-admission) — the sibling opt-in policy for rejecting inbound history-sync chunks before they enter the major-sync queue.
+Match the non-exhaustive decision enums with a fallback arm when inspecting them. Contexts are non-exhaustive borrowed values supplied by the client, not externally constructed request objects.

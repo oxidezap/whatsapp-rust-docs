@@ -2005,7 +2005,7 @@ pub fn add_stanza_interceptor(
 
 Register an interceptor that sees eligible decoded stanzas before built-in handling, and may take them. This is the seam for acting on a stanza this client does not model — `StanzaRouter::register` panics on a duplicate tag, so even an existing tag can't be handled differently any other way — instead of watching it get nacked.
 
-On [main snapshot `3e3abeb2`](https://github.com/oxidezap/whatsapp-rust/blob/3e3abeb2e1e2b4ac720bf0236b7d14d88dea0641/src/types/group_notification_durability.rs), an optional `GroupNotificationDurabilityHook` runs before interceptors for `notification type="w:gp2"`. Failed or canceled capture prevents that stanza from reaching an interceptor and withholds its effects and ACK. A successful capture admits interception only while the connection remains active. RawNode diagnostic observers can run before capture. See [group notification capture](/api/groups#durable-notification-capture).
+On [main snapshot `35a69a14`](https://github.com/oxidezap/whatsapp-rust/blob/35a69a14149fa2cd2a0cc719f875f441d1c6e1dc/src/types/group_notification_durability.rs), an optional `GroupNotificationDurabilityHook` runs before interceptors for `notification type="w:gp2"` with a valid `from` JID. Failed or canceled capture prevents that stanza from reaching an interceptor and withholds its effects and ACK. A successful capture admits interception only while the connection remains active. RawNode diagnostic observers can run before capture. See [group notification capture](/api/groups#durable-notification-capture).
 
 <ParamField path="interceptor" type="Arc<dyn StanzaInterceptor>" required>
   The interceptor to register. A plain closure of type `Fn(&OwnedNodeRef) -> Interception` implements `StanzaInterceptor` too, so `client.add_stanza_interceptor(Arc::new(|node: &OwnedNodeRef| { .. }))` works without a named type.
@@ -2662,3 +2662,7 @@ As of PR #1090, `connect()`/`wait_for_socket_ready()`/`wait_for_session_ready()`
 ## Pictures
 
 Use [`client.pictures().lookup(ProfilePictureRequest)`](/api/pictures) for contact, group, and community lookups. Set and remove operations remain on the owning feature facade.
+
+## Retry policies
+
+Configure `with_retry_admission` or `with_retry_admission_arc` to gate inbound group/status retry repair. Configure `with_decrypt_failure_admission` or `with_decrypt_failure_admission_arc` to gate automatic outbound decrypt-failure retry receipts. Both builders accept owned or shared implementations; the last registration for each policy wins before assembly. Keep runtime tuning inside the policy. See [retry admission](/advanced/retry-admission) for contexts, decisions and refusal consequences.

@@ -23,7 +23,7 @@ These examples target the same source snapshot as [installation](/installation).
 
 ```toml
 [dependencies]
-whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "d804acaec1439e54c43c129e2f90d45016506abe", features = ["voip"] }
+whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "35a69a14149fa2cd2a0cc719f875f441d1c6e1dc", features = ["voip"] }
 tokio = { version = "1.53", features = ["macros", "rt-multi-thread"] }
 ```
 
@@ -341,7 +341,7 @@ WA_AUDIO_CODEC=opus WA_AUDIO_PROFILE=pt111 cargo run -p whatsapp-rust-voip-cli -
 
 [PR #1111](https://github.com/oxidezap/whatsapp-rust/pull/1111) added a per-call counters surface because every discard on the audio receive path used to be silent — a wrong payload type, an SRTP tag that didn't verify, a frame the decoder refused, a jitter buffer trimming its own head all returned with nothing logged, so a call carrying no audio and a call where nobody was talking looked identical.
 
-`handle.media_stats()` returns a `whatsapp_rust::voip::CallMediaStats` (`#[non_exhaustive]`) snapshot of named counters — `rtp_received`, `srtp_unprotect_failed`, `audio_frames_decoded`, `mlow_off_point_dropped`, `playout_trimmed_samples`, and others, one per discard reason. `CallMediaStats::audio_produced()` sums the three "a consumer actually got a frame" counters (`audio_frames_decoded`, `audio_frames_delivered`, `foreign_frames_decoded`) regardless of which audio path the call uses. This is a separate, per-call surface from the app-wide [`wa_*` metrics](/advanced/metrics) and [tracing spans](/advanced/observability) — it dies with the call and isn't in `Client::stats()`.
+`handle.media_stats()` returns a `whatsapp_rust::voip_control::MediaStats` (`#[non_exhaustive]`) snapshot of named counters — `rtp_received`, `srtp_unprotect_failed`, `audio_frames_decoded`, `mlow_off_point_dropped`, `playout_trimmed_samples`, and others, one per discard reason. `MediaStats::audio_produced()` sums the three "a consumer actually got a frame" counters (`audio_frames_decoded`, `audio_frames_delivered`, `foreign_frames_decoded`) regardless of which audio path the call uses. This is a separate, per-call surface from the app-wide [`wa_*` metrics](/advanced/metrics) and [tracing spans](/advanced/observability) — it dies with the call and isn't in `Client::stats()`.
 
 [PR #1385](https://github.com/oxidezap/whatsapp-rust/pull/1385) added the video-side counterparts: `video_sink_dropped` (a reassembled access unit your `VideoSink` refused, mirroring `audio_sink_dropped`) and `peer_keyframe_requests` (RTCP PLIs that reached the outbox after the throttle — the engine sends these on its own initiative as well as yours, so a count is the only way to tell a recovering call from one asking in a loop).
 
@@ -481,6 +481,7 @@ handle.resume_video(camera_source, video_sink).await?;
 | `handle.terminate().await` | Sends `<terminate>` to the peer **and** tears down local media. Addressed at the call scope (group/call-link), the device that answered (direct call), or every rung device (still-ringing outgoing call). Returns a [`CallTermination`](#call-termination) instead of a `Result`, so ending a call never requires handling an error |
 | `handle.hangup_local().await` | Tears down local media only — **no peer signaling**. Use only when the call is already over for the peer (it sent `<terminate>`/`<reject>`, or this handle was superseded); to end a live call use `terminate()` |
 | `handle.call_id()` | The call ID |
+| `handle.phase()` | Generation-scoped signaling snapshot, or `None` after removal/supersession. See [signaling phase](#signaling-phase-and-media-limits) |
 | `handle.peer_jid()` | The peer's JID |
 | `handle.call_creator()` | The call creator's JID |
 | `handle.set_muted(true).await?` | Mute or unmute the local microphone and announce the new state to the peer. Async, returns `Result<(), CallError>`. An outgoing call nobody has answered yet is muted locally only — call it again once the call is up to announce a state chosen while it rang |
@@ -492,7 +493,7 @@ handle.resume_video(camera_source, video_sink).await?;
 | `handle.video_states()` | Read back this call's `(self, peer)` `VideoState` pair, or `None` when the call is gone. Diagnostics for clients driving upgrades from outside |
 | `handle.request_peer_keyframe(urgency)` | Ask the peer to send a video keyframe, by RTCP PLI — call it when your decoder loses or discards an access unit. `urgency` is a `KeyframeUrgency`: `Coalesced` for an ordinary gap, `Immediate` for a decoder that has already failed and reset. Fire-and-forget, throttled in the engine, does nothing in a group call — see [H.264 video plane](#h-264-video-plane) below |
 | `handle.take_events()` | Acquire the owned, single-reader `CallEvents` once |
-| `handle.media_stats()` | Snapshot of per-call audio- and video-path counters (`CallMediaStats`) — see [Media stats and silence detection](#media-stats-and-silence-detection) |
+| `handle.media_stats()` | Snapshot of per-call audio- and video-path counters (`MediaStats`) — see [Media stats and silence detection](#media-stats-and-silence-detection) |
 | `handle.group_state()` | Roster/relay/waiting-room snapshot for a group or call-link call, `None` on a plain 1:1 call — see [Group calls](#group-calls) |
 | `handle.invite_participant(&jid).await` | Add a participant who isn't in the call yet, including promoting a 1:1 call to a group call — see [Promoting a 1:1 call to a group call](#promoting-a-11-call-to-a-group-call) |
 | `handle.ring_participant(&jid).await` | Re-ring a participant already in the roster but not currently connected — see [Promoting a 1:1 call to a group call](#promoting-a-11-call-to-a-group-call) |
@@ -726,7 +727,7 @@ The core `CallEngine` lives in `wacore` and is **sans-IO** — it owns no socket
 | Embedded (esp32) | `wacore` with `voip` (+ `voip-mlow` for the bundled codec), sans-IO only, or `whatsapp-rust` with the same feature split as WebAssembly above |
 
 <Note>
-  Building `whatsapp-rust` itself (not just `wacore`) for `wasm32` also needs `default-features = false`: the crate's defaults (`tokio-native`, `sqlite-storage`, `tokio-transport`, `ureq-client`, `signal`) assume a native multi-threaded runtime, SQLite storage, and a native HTTP client, none of which build on `wasm32-unknown-unknown`. `cargo check -p whatsapp-rust --lib --target wasm32-unknown-unknown --no-default-features --features voip-mlow` is exactly the check this PR added to CI — mirror both flags in your own `Cargo.toml`, e.g. `whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "d804acaec1439e54c43c129e2f90d45016506abe", default-features = false, features = ["voip-mlow"] }`, and supply your own storage/transport/HTTP implementations in their place.
+  Building `whatsapp-rust` itself (not just `wacore`) for `wasm32` also needs `default-features = false`: the crate's defaults (`tokio-native`, `sqlite-storage`, `tokio-transport`, `ureq-client`, `signal`) assume a native multi-threaded runtime, SQLite storage, and a native HTTP client, none of which build on `wasm32-unknown-unknown`. `cargo check -p whatsapp-rust --lib --target wasm32-unknown-unknown --no-default-features --features voip-mlow` is exactly the check this PR added to CI — mirror both flags in your own `Cargo.toml`, e.g. `whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "35a69a14149fa2cd2a0cc719f875f441d1c6e1dc", default-features = false, features = ["voip-mlow"] }`, and supply your own storage/transport/HTTP implementations in their place.
 </Note>
 
 ### Pluggable media backend
@@ -918,3 +919,11 @@ Group-call invitation join keeps the invited call's ownership and participant ID
 ## MLOW activity
 
 The MLOW encoder classifies activity per frame and can emit inactive frames during silence. Do not assume every packet's TOC is the active-speech byte `0x50`, or treat a successfully encoded silent frame as active speech. Read activity/media counters within their documented scope.
+
+## Signaling phase and media limits
+
+`CallHandle::phase() -> Option<CallPhase>` reads the signaling phase for the handle's registry generation. It returns `None` after that generation is removed or superseded, even if another call uses the same ID. A signaling phase does not prove that media is flowing; sample `media_stats()` for media diagnostics.
+
+The native 1:1 video path supports inbound audio in a video call, paced outbound video, bounded retransmission in response to peer NACKs and keyframe requests after inbound packet loss. These recovery paths do not guarantee packet delivery or live interoperability for every codec, device or network. Qualify the actual call profile separately from feature compilation.
+
+`MediaStats` adds `video_rtp_received`, `video_srtp_unprotect_failed`, `piggybacked_audio_received`, `auxiliary_rtp_authenticated`, `video_rtp_lost`, `video_nack_requested` and `video_retransmitted`. Lost video counts forward sequence gaps; late arrivals do not reduce it. Retransmitted packets count emitted recovery packets, not delivery confirmation. Window reports subtract these counters with saturation. `last_unexpected_payload_type` is the latest type value, initially zero, and is not a counter delta.

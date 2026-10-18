@@ -18,13 +18,13 @@ let mex = client.mex();
 use whatsapp_rust::{mex_operation, wacore::iq::mex_operations::join_newsletter};
 
 let operation = mex_operation!(join_newsletter);
-let request = operation.request(join_newsletter::Variables {
-    newsletter_id: Some(jid.to_string()),
-});
+let mut variables = join_newsletter::Variables::default();
+variables.newsletter_id = Some(jid.to_string());
+let request = operation.request(variables);
 let response = client.mex().execute(request).await?;
 ```
 
-`mex_operation!` binds operation name, persisted document ID, declared keys, and generated variables type from the same module. An unrelated variables type fails to compile. Generated top-level `Variables` do not implement `Default`; explicitly choose every declared field. `None` can still mean omission where the generated serializer allows it.
+`mex_operation!` binds operation name, persisted document ID, declared keys, and generated variables type from the same module. An unrelated variables type fails to compile. Generated `Variables`, nested input/response shapes and response mirrors are non-exhaustive and implement `Default`. Construct with `Default` and assign the fields you need. External struct literals, including `..Default::default()`, no longer compile. `None` omits a key where the serializer allows it; it supplies no protocol default or validation of server-required variables.
 
 ## execute
 
@@ -87,6 +87,7 @@ pub struct NewChatMessageCapping {
 Where you stand against the cap.
 
 ```rust
+#[non_exhaustive]
 pub enum CappingStatus {
     None,
     FirstWarning,
@@ -101,6 +102,7 @@ pub enum CappingStatus {
 Whether you're eligible for the one-time extension that lifts the cap for a cycle.
 
 ```rust
+#[non_exhaustive]
 pub enum CappingOteStatus {
     NotEligible,
     Eligible,
@@ -115,6 +117,7 @@ pub enum CappingOteStatus {
 Your Meta Verified subscription state, which lifts the cap permanently.
 
 ```rust
+#[non_exhaustive]
 pub enum CappingMvStatus {
     NotEligible,
     NotActive,
@@ -168,7 +171,7 @@ match client.mex().execute(request).await {
 
 ### MexFatalError
 
-`whatsapp_rust::wacore::iq::mex::MexFatalError` retains the operation's `query: &'static str`, numeric `code: i32`, and `message: String`. Use typed matching or source-chain inspection rather than parse its display text. Read the [pinned MEX response parser](https://github.com/oxidezap/whatsapp-rust/blob/d804acaec1439e54c43c129e2f90d45016506abe/wacore/src/iq/mex.rs) for fatal selection and parsing.
+`whatsapp_rust::wacore::iq::mex::MexFatalError` retains the operation's `query: &'static str`, numeric `code: i32`, and `message: String`. Use typed matching or source-chain inspection rather than parse its display text. Read the [pinned MEX response parser](https://github.com/oxidezap/whatsapp-rust/blob/35a69a14149fa2cd2a0cc719f875f441d1c6e1dc/wacore/src/iq/mex.rs) for fatal selection and parsing.
 
 ## Response handling
 

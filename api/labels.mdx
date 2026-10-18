@@ -177,7 +177,7 @@ Both calls send one mutation per message. There is no batch form on the wire, ma
 
 Label edits, chat assignments, message assignments and sublist changes arrive through the event bus. The first three carry the underlying app-state action. `LabelSublistUpdate` instead carries a typed upsert/removal keyed by `(predefined_id, chat_jid)`; it does not assign the parent label.
 
-The four-event example below targets [main snapshot `3e3abeb2`](https://github.com/oxidezap/whatsapp-rust/tree/3e3abeb2e1e2b4ac720bf0236b7d14d88dea0641). Use the [migration dependency pin](/guides/rust-api-migration#select-the-source-and-profile) for it. See [sublist semantics](/concepts/events#labelsublistupdate) for unknown numeric IDs, timestamps, replay and consumer storage.
+The four-event example below targets [main snapshot `35a69a14`](https://github.com/oxidezap/whatsapp-rust/tree/35a69a14149fa2cd2a0cc719f875f441d1c6e1dc). Use the [migration dependency pin](/guides/rust-api-migration#select-the-source-and-profile) for it. See [sublist semantics](/concepts/events#labelsublistupdate) for unknown numeric IDs, timestamps, replay and consumer storage.
 
 ```rust
 use whatsapp_rust::wacore::types::events::Event;

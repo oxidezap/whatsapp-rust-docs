@@ -7,8 +7,8 @@ description: "Download and decrypt media from WhatsApp messages"
 ## download
 
 ```rust
-let bytes = client.download(&image_message).await?;
-let bytes = client.download(&persisted_params).await?;
+let bytes = client.download(&image_message, whatsapp_rust::download::DownloadLimits::default()).await?;
+let bytes = client.download(&persisted_params, whatsapp_rust::download::DownloadLimits::default()).await?;
 ```
 
 Both message media and `DownloadParams` implement `Downloadable`. The client returns `Result<Vec<u8>, ClientDownloadError>` after applicable session refresh and host failover. Static URLs bypass media IQs and their first reference rejection is final.
@@ -17,7 +17,7 @@ Both message media and `DownloadParams` implement `Downloadable`. The client ret
 
 ```rust
 use std::io::Cursor;
-let writer = client.download_to_writer(&persisted_params, Cursor::new(Vec::new())).await?;
+let writer = client.download_to_writer(&persisted_params, Cursor::new(Vec::new()), whatsapp_rust::download::DownloadLimits::default()).await?;
 ```
 
 The call consumes and returns the writer. Success replaces previous contents with verified media and rewinds the destination. Each attempt truncates before writing, so a shorter successful retry cannot retain a prior tail. Streaming keeps bounded crypto/read state; a non-streaming HTTP adapter still buffers its response.
@@ -34,6 +34,7 @@ A writer must implement `Write`, `Seek`, and `truncate`. `Cursor<Vec<u8>>` and `
 
 | Variant | Final outcome |
 | --- | --- |
+| `ResourcePolicy` | Application byte or memory policy refused the operation; no host retry |
 | `ReferenceRejected` | CDN rejected the reference after applicable refresh |
 | `HostsUnreachable` | Every host failed; last transport, HTTP, or integrity cause retained |
 | `NoHosts` | No host route existed; no HTTP exchange |
@@ -62,7 +63,7 @@ Call `ErrorChainExt::http_status()` on the typed `ClientDownloadError`. It walks
 ```rust
 use whatsapp_rust::wacore::download::MusicArtwork;
 let artwork = MusicArtwork::for_chat(&embedded_music, &chat_jid);
-let bytes = client.download(&artwork).await?;
+let bytes = client.download(&artwork, whatsapp_rust::download::DownloadLimits::default()).await?;
 ```
 
 Only an actual newsletter JID selects plaintext channel artwork. Other chats require the media key. `MediaType::MusicArtwork` and `NewsletterMusicArtwork` provide the corresponding routes.
@@ -163,12 +164,14 @@ impl MediaDownloader {
     pub async fn download(
         &self,
         downloadable: &dyn Downloadable,
+        limits: DownloadLimits,
     ) -> Result<Vec<u8>, MediaDownloadError>;
 
     pub async fn download_to_writer<W: DownloadWriter + MaybeSend + 'static>(
         &self,
         downloadable: &dyn Downloadable,
         writer: W,
+        limits: DownloadLimits,
     ) -> Result<W, MediaDownloadError>;
 }
 ```
@@ -209,7 +212,7 @@ let params = DownloadParams::encrypted(
     MediaType::Image,
 )?;
 
-let bytes = downloader.download(&params).await?;
+let bytes = downloader.download(&params, whatsapp_rust::download::DownloadLimits::default()).await?;
 ```
 
 <Tip>
@@ -221,18 +224,24 @@ let bytes = downloader.download(&params).await?;
 ```rust
 #[non_exhaustive]
 pub enum MediaDownloadError {
+    ResourcePolicy(DownloadPolicyError),
     ReferenceRejected(anyhow::Error),
     HostsUnreachable(anyhow::Error),
+    WriterIo(anyhow::Error),
     NoHosts,
     Other(anyhow::Error),
+    WriterCleanup { failure: Box<MediaDownloadError>, cleanup: std::io::Error },
 }
 ```
 
 | Variant | Meaning |
 |---------|---------|
+| `ResourcePolicy` | Application byte or memory policy refused the operation; no host retry |
 | `ReferenceRejected` | The CDN rejected the reference with 401/403/404/410. The standalone downloader returns this error without refreshing a session or trying another host. |
 | `HostsUnreachable` | Every host in the route failed for a reason other than the reference (transport failure, unexpected status, a body that failed to decrypt/verify). |
+| `WriterIo` | Local destination I/O failed; no host retry. |
 | `NoHosts` | The `MediaRoute` named no hosts, so nothing was ever contacted. |
+| `WriterCleanup` | Cleanup also failed; inspect the original failure and cleanup error. |
 | `Other` | The `Downloadable` didn't have the fields needed to build a request at all (e.g. no `direct_path` and no `static_url`), so — unlike `NoHosts` — no host was ever *going* to be contacted. Fix the metadata, not the network. |
 
 `MediaDownloadError` is `#[non_exhaustive]`; match it with a wildcard (`_ => `) arm so a future variant doesn't break your build.
@@ -278,7 +287,7 @@ pub async fn fetch_sticker_pack(
 </ParamField>
 
 <ResponseField name="pack" type="StickerPack">
-  Pack metadata plus a `Vec<StickerPackItem>` of individual stickers. Each `StickerPackItem` implements [`Downloadable`](#downloadable-trait), so you can pass it straight to `client.download(...)`.
+  Pack metadata plus a `Vec<StickerPackItem>` of individual stickers. Each `StickerPackItem` implements [`Downloadable`](#downloadable-trait), so you can pass it straight to `client.download(..., whatsapp_rust::download::DownloadLimits::default())`.
 </ResponseField>
 
 Under the hood the client GETs `https://static.whatsapp.net/sticker?lottie=1&cat=sticker_pack_data&id={pack_id}&lg={locale}`, parses the JSON envelope, and constructs the `StickerPack`. The endpoint is unauthenticated — the call works whether or not you are paired.
@@ -291,7 +300,7 @@ use whatsapp_rust::Client;
 let pack = client.fetch_sticker_pack("3F9Z2…", "en").await?;
 println!("Pack {:?} by {:?}", pack.name, pack.publisher);
 for (index, sticker) in pack.stickers.iter().enumerate() {
-    let bytes = client.download(sticker).await?;
+    let bytes = client.download(sticker, whatsapp_rust::download::DownloadLimits::default()).await?;
     std::fs::write(format!("sticker-{index}.webp"), bytes)?;
 }
 ```
@@ -533,3 +542,13 @@ use whatsapp_rust::download::DownloadUtils;
 ## Safe diagnostics
 
 `ClientDownloadError` and `MediaDownloadError` omit opaque cause text from both `Display` and `Debug`. Library media tracing records safe classifications and typed facts such as HTTP status or I/O kind. Original causes remain accessible through `Error::source` and downcasting. Explicitly formatting those causes can still expose signed URLs or other backend data.
+
+## Download byte limits
+
+Every `Client` and `MediaDownloader` `download` and `download_to_writer` call takes a final `DownloadLimits` argument. Import it from `whatsapp_rust::download`. `DownloadLimits::default()` adds no media-layer byte cap. Use `DownloadLimits::new(max_wire_bytes, max_plaintext_bytes)` for explicit budgets.
+
+Wire accounting includes padding and MAC. Both totals include failed attempts across host failover and session refresh; retrying within the operation does not reset the budget. Limits count media-layer bytes, not HTTP/TLS buffers, allocator capacity or process memory. Declared file sizes and response headers do not replace this accounting.
+
+Bounded downloads require a streaming HTTP adapter. Without one they return `DownloadPolicyError::StreamingRequired` before HTTP. SDK budget failures are terminal `ResourcePolicy` errors on `ClientDownloadError` or `MediaDownloadError`; they do not trigger another host or refresh. `LimitExceeded` identifies the `MediaByteDomain` and limit. Match all these non-exhaustive enums with a fallback. An adapter or writer error containing the same public error type retains its I/O origin.
+
+Dropping a bounded download future requests cancellation at cooperative I/O checkpoints. It cannot interrupt a blocked adapter or writer call; already-scheduled cleanup may continue. Keep the writer publication rules above even with a small byte budget.

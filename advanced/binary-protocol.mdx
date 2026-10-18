@@ -140,6 +140,7 @@ The `server` field is a `Server` enum (`#[repr(u8)]`) that maps to the wire prot
 ```rust
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[repr(u8)]
+#[non_exhaustive]
 pub enum Server {
     #[default]
     Pn = 0,          // s.whatsapp.net — Standard phone-number JIDs
@@ -168,7 +169,7 @@ assert_eq!(parsed, Server::Group);
 ```
 
 <Note>
-  If you previously compared `jid.server` to string constants like `"s.whatsapp.net"`, the `PartialEq<str>` impl on `Server` preserves backward compatibility. However, `match` on the enum variant is preferred for exhaustiveness checking and performance.
+  `PartialEq<str>` still supports comparisons such as `jid.server == "s.whatsapp.net"`. When matching `Server` in a downstream crate, include a wildcard arm because the enum is non-exhaustive. Unknown wire namespaces remain parsing errors.
 </Note>
 
 `Server::parse_known(s: &str) -> Option<Self>` is an allocation-free alternative to `TryFrom<&str>`: it returns `None` for an unknown suffix instead of building a `JidError::InvalidFormat` (and the `String` message inside it). `TryFrom` is implemented on top of it, so the two always agree:

@@ -615,6 +615,6 @@ Use `parse` and `as_wire_str` for protocol values such as `read-self` and `deliv
 
 ## Status receipt identity
 
-On [main snapshot `3e3abeb2`](https://github.com/oxidezap/whatsapp-rust/blob/3e3abeb2e1e2b4ac720bf0236b7d14d88dea0641/wacore/src/types/events.rs), `Receipt.source.sender` identifies the receipt actor, not the referenced post's author. The chat stays `status@broadcast`; the participant identifies the actor and an explicit recipient identifies the post author. `is_from_me` describes our receipt, not our post. Own reads and plays use the corresponding `ReadSelf` or `PlayedSelf` receipt type.
+On [main snapshot `35a69a14`](https://github.com/oxidezap/whatsapp-rust/blob/35a69a14149fa2cd2a0cc719f875f441d1c6e1dc/wacore/src/types/events.rs), `Receipt.source.sender` identifies the receipt actor, not the referenced post's author. The chat stays `status@broadcast`; the participant identifies the actor and an explicit recipient identifies the post author. `is_from_me` describes our receipt, not our post. Own reads and plays use the corresponding `ReadSelf` or `PlayedSelf` receipt type.
 
 For a simple Status receipt without a `<participants>` child, an absent or invalid participant retains the broadcast sender fallback without an alias. Aggregated receipts instead emit each `<user>` JID as the sender and do not populate the stanza-level recipient. The SDK does not fill missing aliases or post authors from cached identities. Keep these roles separate when correlating receipts to persisted Status posts.

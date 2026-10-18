@@ -18,6 +18,7 @@ The client supports both buffered and streaming responses for efficient handling
 ```rust
 use async_trait::async_trait;
 use whatsapp_rust::wacore::sync_marker::MaybeSendSync;
+use whatsapp_rust::wacore::{net::StreamingRequestPermit, runtime::BoxFuture};
 
 #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
@@ -29,6 +30,13 @@ pub trait HttpClient: MaybeSendSync {
     /// Defaults to `false`. Override to return `true` if you implement
     /// `execute_streaming`.
     fn supports_streaming(&self) -> bool { false }
+
+    /// Optional capacity reservation before entering a blocking worker.
+    fn streaming_admission(
+        &self,
+    ) -> Option<BoxFuture<'_, Result<StreamingRequestPermit>>> {
+        None
+    }
 
     /// Synchronous streaming variant. Returns a reader over the response body
     /// instead of buffering it all in memory.
@@ -78,7 +86,7 @@ Some HTTP crates default the wrong way. `ureq`'s `http_status_as_error` turns no
 
 #### supports_streaming
 
-Returns whether this HTTP client supports synchronous streaming downloads via `execute_streaming`. The default implementation returns `false`. When this returns `false`, `download_to_writer` automatically falls back to a buffered download using `execute` instead.
+Returns whether this HTTP client supports synchronous streaming downloads via `execute_streaming`. The default implementation returns `false`. When this returns `false`, unbounded `download_to_writer` calls fall back to a buffered download using `execute`. Bounded calls return `DownloadPolicyError::StreamingRequired` before HTTP.
 
 ```rust
 fn supports_streaming(&self) -> bool { false }
@@ -164,13 +172,16 @@ fn resource_report(&self) -> Option<wacore::stats::HttpResourceReport> {
 
 Feeds into [`Client::resource_report()`](/api/client#resource_report). `UreqHttpClient` overrides this (below) with an estimate for its default agent's idle pool; media downloads are a real transient-RAM source, so even a coarse estimate is worth reporting.
 
-## Data Structures
+## Data structures
+
+HTTP DTOs are non-exhaustive. Use the constructors below rather than external literals, and keep `..` in struct patterns.
 
 ### HttpRequest
 
 Represents an HTTP request with headers and optional body.
 
 ```rust
+#[non_exhaustive]
 pub struct HttpRequest {
     pub url: String,
     pub method: String,  // "GET" or "POST"
@@ -205,9 +216,10 @@ let request = HttpRequest::post("https://example.com/upload")
 
 ### HttpResponse
 
-Represents an HTTP response with buffered body.
+Construct a buffered response with `HttpResponse::new(status_code, body)`.
 
 ```rust
+#[non_exhaustive]
 pub struct HttpResponse {
     pub status_code: u16,
     pub body: Vec<u8>,
@@ -224,9 +236,10 @@ println!("Response text: {}", text);
 
 ### StreamingHttpResponse
 
-Represents an HTTP response with streaming body reader.
+Construct a streaming response with `StreamingHttpResponse::new(status_code, reader)`.
 
 ```rust
+#[non_exhaustive]
 pub struct StreamingHttpResponse {
     pub status_code: u16,
     pub body: Box<dyn std::io::Read + Send>,
@@ -514,7 +527,7 @@ impl HttpClient for UreqHttpClient {
             let status_code = response.status().as_u16();
             let body = read_body(response, max_body_bytes)?;
 
-            Ok(HttpResponse { status_code, body })
+            Ok(HttpResponse::new(status_code, body))
         })
         .await?
     }
@@ -569,10 +582,7 @@ fn execute_streaming(&self, request: HttpRequest) -> Result<StreamingHttpRespons
     let status_code = response.status().as_u16();
     let reader = std::io::Read::take(response.into_body().into_reader(), self.max_body_bytes);
 
-    Ok(StreamingHttpResponse {
-        status_code,
-        body: Box::new(reader),
-    })
+    Ok(StreamingHttpResponse::new(status_code, Box::new(reader)))
 }
 ```
 
@@ -628,12 +638,11 @@ impl HttpClient for ReqwestHttpClient {
         let status_code = response.status().as_u16();
         let body = response.bytes().await?.to_vec();
         
-        Ok(HttpResponse { status_code, body })
+        Ok(HttpResponse::new(status_code, body))
     }
     
-    // supports_streaming() defaults to false, so download_to_writer
-    // will use a buffered fallback automatically — no need to implement
-    // execute_streaming.
+    // With default DownloadLimits, downloads can use the buffered fallback.
+    // Bounded downloads require a streaming adapter.
 }
 ```
 
@@ -676,14 +685,13 @@ impl HttpClient for MockHttpClient {
 let client = MockHttpClient::new()
     .with_response(
         "https://api.example.com/test",
-        HttpResponse {
-            status_code: 200,
-            body: b"test data".to_vec(),
-        },
+        HttpResponse::new(200, b"test data".to_vec()),
     );
 ```
 
 ## Usage with Bot builder
+
+This integration fragment assumes an existing `backend` and `transport_factory`.
 
 ```rust
 use whatsapp_rust::Bot;
@@ -795,3 +803,9 @@ mod tests {
 - [Transport Trait](/api/transport) - Network transport abstraction
 - [Client API](/api/client) - Main client interface
 - [Media Handling](/guides/media-handling) - Guide to sending and receiving media
+
+## Streaming resource admission
+
+Custom adapters can implement `HttpClient::streaming_admission() -> Option<BoxFuture<'_, Result<StreamingRequestPermit>>>`. `BoxFuture` comes from `wacore::runtime`; `StreamingRequestPermit` comes from `wacore::net` and is an adapter-owned `Box<dyn MaybeSend>`. The default returns `None` without allocating a future.
+
+Downloads await admission before occupying a blocking worker and retain the permit through response-body and connection release, including cancellation. Use this hook to reserve adapter capacity without parking blocking workers while they wait. It does not make synchronous `Read + Send` streaming into browser Fetch streaming or impose a cap on buffered HTTP responses. See [download limits](/api/download#download-byte-limits).

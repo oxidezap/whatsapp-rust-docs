@@ -21,7 +21,7 @@ Enable `plugins` on the same source and revision used by your host application:
 
 ```toml Cargo.toml
 [dependencies]
-whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "d804acaec1439e54c43c129e2f90d45016506abe", features = ["plugins"] }
+whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "35a69a14149fa2cd2a0cc719f875f441d1c6e1dc", features = ["plugins"] }
 ```
 
 A default build has neither plugin fields nor their runtime branches. If you're implementing a plugin directly in your application, enable `plugins` there. If you're publishing a reusable plugin crate, enable `plugins` on its own `whatsapp-rust` dependency. Cargo's [feature unification](https://doc.rust-lang.org/cargo/reference/features.html#feature-unification) activates the host only when both dependencies resolve to the same package identity: source, version, and git revision must match. A crates.io dependency and a git dependency are distinct packages even when their versions match; mixing them also produces incompatible plugin trait types.
@@ -246,3 +246,7 @@ The current host deliberately does not support dynamic plugin loading, pre-ack d
 
 - [Observability](/advanced/observability) — the `tracing` instrumentation that plugin diagnostics complement.
 - [Custom backends](/guides/custom-backends) — the other `ClientBuilder` seam, for swapping storage/transport/runtime instead of adding behavior.
+
+## Custom encrypted payload lifetime
+
+`EncHandler` callbacks run as best-effort application work in detached runtime tasks. Shutdown neither joins nor cancels them, and plugin tracked-task drain does not include their completion. An error is logged without built-in retry, NACK or transport ACK. For a custom-only envelope, the handler owns the response; a mixed envelope may still be acknowledged by its built-in payload path. Use [inbound durability](/advanced/inbound-durability) for supported message commit boundaries.
