@@ -638,8 +638,11 @@ The budget is shared by concurrent prefetches on one client and includes complet
 
 ```rust
 use std::num::NonZeroUsize;
-use whatsapp_rust::{AppStateDownloadConfig, CacheConfig};
+use whatsapp_rust::{AppStateDownloadConfig, CacheConfig, Client, ClientBuilder};
 
-let mut cache = CacheConfig::default();
-cache.app_state_downloads = AppStateDownloadConfig::new(32 * 1024, NonZeroUsize::MIN);
+fn configured_client() -> ClientBuilder {
+    let mut cache = CacheConfig::default();
+    cache.app_state_downloads = AppStateDownloadConfig::new(32 * 1024, NonZeroUsize::MIN);
+    Client::builder().with_cache_config(cache)
+}
 ```

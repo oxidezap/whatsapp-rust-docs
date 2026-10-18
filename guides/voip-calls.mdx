@@ -481,6 +481,7 @@ handle.resume_video(camera_source, video_sink).await?;
 | `handle.terminate().await` | Sends `<terminate>` to the peer **and** tears down local media. Addressed at the call scope (group/call-link), the device that answered (direct call), or every rung device (still-ringing outgoing call). Returns a [`CallTermination`](#call-termination) instead of a `Result`, so ending a call never requires handling an error |
 | `handle.hangup_local().await` | Tears down local media only — **no peer signaling**. Use only when the call is already over for the peer (it sent `<terminate>`/`<reject>`, or this handle was superseded); to end a live call use `terminate()` |
 | `handle.call_id()` | The call ID |
+| `handle.phase()` | Generation-scoped signaling snapshot, or `None` after removal/supersession. See [signaling phase](#signaling-phase-and-media-limits) |
 | `handle.peer_jid()` | The peer's JID |
 | `handle.call_creator()` | The call creator's JID |
 | `handle.set_muted(true).await?` | Mute or unmute the local microphone and announce the new state to the peer. Async, returns `Result<(), CallError>`. An outgoing call nobody has answered yet is muted locally only — call it again once the call is up to announce a state chosen while it rang |

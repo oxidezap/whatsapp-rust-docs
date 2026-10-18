@@ -18,6 +18,7 @@ The client supports both buffered and streaming responses for efficient handling
 ```rust
 use async_trait::async_trait;
 use whatsapp_rust::wacore::sync_marker::MaybeSendSync;
+use whatsapp_rust::wacore::{net::StreamingRequestPermit, runtime::BoxFuture};
 
 #[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
 #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
@@ -29,6 +30,13 @@ pub trait HttpClient: MaybeSendSync {
     /// Defaults to `false`. Override to return `true` if you implement
     /// `execute_streaming`.
     fn supports_streaming(&self) -> bool { false }
+
+    /// Optional capacity reservation before entering a blocking worker.
+    fn streaming_admission(
+        &self,
+    ) -> Option<BoxFuture<'_, Result<StreamingRequestPermit>>> {
+        None
+    }
 
     /// Synchronous streaming variant. Returns a reader over the response body
     /// instead of buffering it all in memory.
