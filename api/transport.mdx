@@ -337,6 +337,8 @@ Its session-resumption store is sized for the one host a factory dials: 8 ticket
 
 ### Usage with Bot builder
 
+This integration fragment assumes an existing `backend` and `http_client`.
+
 ```rust
 use whatsapp_rust::Bot;
 use whatsapp_rust::transport::TokioWebSocketTransportFactory;

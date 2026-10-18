@@ -421,9 +421,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .on_logged_out(|_info| async {
             error!("Bot was logged out!");
         })
-        .on_message(|ctx| async move {
-            handle_message(ctx).await;
-        })
+        .on_message(handle_message)
         .build()
         .await?;
 

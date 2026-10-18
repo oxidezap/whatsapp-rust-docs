@@ -647,6 +647,7 @@ waproto generates real Rust enums (not raw `i32` constants). Variant names are `
 ```rust
 // Message types
 pub mod protocol_message {
+    #[non_exhaustive]
     pub enum Type {
         REVOKE = 0,
         EPHEMERAL_SETTING = 3,
@@ -661,6 +662,7 @@ pub mod protocol_message {
 
 // Media types
 pub mod video_message {
+    #[non_exhaustive]
     pub enum Attribution {
         NONE = 0,
         GIPHY = 1,
