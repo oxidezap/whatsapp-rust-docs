@@ -23,33 +23,33 @@ match event {
         for InboundMessage { message, info, .. } in batch.iter() {
             // Image
             if let Some(img) = message.image_message.as_option() {
-                let data = client.download(img).await?;
+                let data = client.download(img, whatsapp_rust::download::DownloadLimits::default()).await?;
                 std::fs::write("image.jpg", data)?;
             }
 
             // Video
             if let Some(video) = message.video_message.as_option() {
-                let data = client.download(video).await?;
+                let data = client.download(video, whatsapp_rust::download::DownloadLimits::default()).await?;
                 std::fs::write("video.mp4", data)?;
             }
 
             // Audio
             if let Some(audio) = message.audio_message.as_option() {
-                let data = client.download(audio).await?;
+                let data = client.download(audio, whatsapp_rust::download::DownloadLimits::default()).await?;
                 let ext = if audio.ptt() { "ogg" } else { "mp3" };
                 std::fs::write(format!("audio.{}", ext), data)?;
             }
 
             // Document
             if let Some(doc) = message.document_message.as_option() {
-                let data = client.download(doc).await?;
+                let data = client.download(doc, whatsapp_rust::download::DownloadLimits::default()).await?;
                 let filename = doc.file_name.as_deref().unwrap_or("document");
                 std::fs::write(filename, data)?;
             }
 
             // Sticker
             if let Some(sticker) = message.sticker_message.as_option() {
-                let data = client.download(sticker).await?;
+                let data = client.download(sticker, whatsapp_rust::download::DownloadLimits::default()).await?;
                 std::fs::write("sticker.webp", data)?;
             }
         }
@@ -69,7 +69,7 @@ use std::fs::File;
 
 if let Some(video) = message.video_message.as_option() {
     let file = File::create("video.mp4")?;
-    let file = client.download_to_writer(video, file).await?;
+    let file = client.download_to_writer(video, file, whatsapp_rust::download::DownloadLimits::default()).await?;
     println!("Video downloaded with constant memory usage!");
 }
 ```
@@ -97,7 +97,7 @@ let params = DownloadParams::encrypted(
     MediaType::Image,      // media_type
 )?;
 
-let data = client.download(&params).await?;
+let data = client.download(&params, whatsapp_rust::download::DownloadLimits::default()).await?;
 
 std::fs::write("downloaded.jpg", data)?;
 ```
@@ -117,14 +117,14 @@ let params = DownloadParams::encrypted(
 )?;
 
 let file = File::create("large_video.mp4")?;
-let file = client.download_to_writer(&params, file).await?;
+let file = client.download_to_writer(&params, file, whatsapp_rust::download::DownloadLimits::default()).await?;
 ```
 
 See [Download API reference](/api/download#download_to_writer) for streaming from raw parameters.
 
 ### Downloading without an active session
 
-`client.download()` and its variants need a connected `Client` for most media; they ask the server for CDN hosts (cached and refreshed automatically, not fetched on every call). The exception is `static_url` media (newsletter/channel content), which skips that entirely; see the [Download API reference](/api/download#download) for details. If you've persisted a message's CDN fields (for example as a [`DownloadParams`](/api/download#downloadparams)) and want to fetch that media later, after the session that received it has disconnected, use [`MediaDownloader`](/api/download#mediadownloader) instead. It needs only an `HttpClient` and a `Runtime`; no `Client`, no pairing:
+`Client::download` and its variants need a connected `Client` for most media; they ask the server for CDN hosts (cached and refreshed automatically, not fetched on every call). The exception is `static_url` media (newsletter/channel content), which skips that entirely; see the [Download API reference](/api/download#download) for details. If you've persisted a message's CDN fields (for example as a [`DownloadParams`](/api/download#downloadparams)) and want to fetch that media later, after the session that received it has disconnected, use [`MediaDownloader`](/api/download#mediadownloader) instead. It needs only an `HttpClient` and a `Runtime`; no `Client`, no pairing:
 
 ```rust
 use std::sync::Arc;
@@ -143,7 +143,7 @@ let params = DownloadParams::encrypted(
     MediaType::Image,
 )?;
 
-let data = downloader.download(&params).await?;
+let data = downloader.download(&params, whatsapp_rust::download::DownloadLimits::default()).await?;
 ```
 
 <Note>
@@ -203,7 +203,7 @@ When re-uploading media (for example, after processing or transcoding), you can 
 
 ```rust
 if let Some(img) = message.image_message.as_option() {
-    let data = client.download(img).await?;
+    let data = client.download(img, whatsapp_rust::download::DownloadLimits::default()).await?;
     let upload = client.upload(data, MediaType::Image, Default::default()).await?;
 
     let reply = {
@@ -250,7 +250,7 @@ let params = DownloadParams::encrypted(
     MediaType::LinkThumbnail,
 )?;
 
-let thumbnail = client.download(&params).await?;
+let thumbnail = client.download(&params, whatsapp_rust::download::DownloadLimits::default()).await?;
 ```
 
 ## Forwarding media via CDN reuse
@@ -549,7 +549,7 @@ Decryption is automatic when downloading:
 
 ```rust
 // Decryption happens automatically in download()
-let data = client.download(image_message).await?;
+let data = client.download(image_message, whatsapp_rust::download::DownloadLimits::default()).await?;
 // `data` is already decrypted and verified
 ```
 
@@ -568,7 +568,7 @@ async fn safe_download(
     client: &Client,
     downloadable: &dyn Downloadable,
 ) -> Result<Vec<u8>, ClientDownloadError> {
-    match client.download(downloadable).await {
+    match client.download(downloadable, whatsapp_rust::download::DownloadLimits::default()).await {
         Ok(data) => Ok(data),
         Err(error) => {
             match &error {
@@ -614,7 +614,7 @@ use image::DynamicImage;
 
 // Download and process image
 if let Some(img) = message.image_message.as_option() {
-    let data = client.download(img).await?;
+    let data = client.download(img, whatsapp_rust::download::DownloadLimits::default()).await?;
     
     // Load with image crate
     let image = image::load_from_memory(&data)?;
@@ -678,7 +678,7 @@ let progress_writer = ProgressWriter {
     total: Arc::new(Mutex::new(0)),
 };
 
-let _file = client.download_to_writer(video, progress_writer).await?;
+let _file = client.download_to_writer(video, progress_writer, whatsapp_rust::download::DownloadLimits::default()).await?;
 ```
 
 ### Automatic retry and failover
@@ -704,7 +704,7 @@ async fn download_with_retry(
 ) -> Result<Vec<u8>, ClientDownloadError> {
     let mut attempt = 0;
     loop {
-        match client.download(downloadable).await {
+        match client.download(downloadable, whatsapp_rust::download::DownloadLimits::default()).await {
             Ok(data) => return Ok(data),
             Err(e @ ClientDownloadError::HostsUnreachable(_)) if attempt < max_retries => {
                 attempt += 1;
@@ -726,7 +726,7 @@ The client caches media connection information. Downloads use its CDN hosts; upl
 ```rust
 // Each operation applies its own refresh policy
 let upload = client.upload(data, MediaType::Image, Default::default()).await?;
-let download = client.download(downloadable).await?;
+let download = client.download(downloadable, whatsapp_rust::download::DownloadLimits::default()).await?;
 
 // The client manages the cached media connection.
 ```
@@ -756,16 +756,16 @@ Media connection refresh and invalidation are managed internally by the client. 
 
 ```rust
 // ❌ Bad: Loads entire file into memory
-let data = client.download(video).await?;
+let data = client.download(video, whatsapp_rust::download::DownloadLimits::default()).await?;
 std::fs::write("video.mp4", data)?;
 
 // ✅ Good: Constant memory usage (with streaming HTTP client)
 let file = File::create("video.mp4")?;
-let _file = client.download_to_writer(video, file).await?;
+let _file = client.download_to_writer(video, file, whatsapp_rust::download::DownloadLimits::default()).await?;
 ```
 
 <Note>
-`download_to_writer` works with any HTTP client. With streaming-capable clients (like `UreqHttpClient`), memory usage is constant ~40KB. With non-streaming clients, it falls back to buffered downloads automatically.
+`download_to_writer` works with any HTTP client. With streaming-capable clients (like `UreqHttpClient`), memory usage is constant ~40KB. With non-streaming clients, unbounded calls fall back to buffered downloads. Bounded calls require streaming. See [byte limits](/api/download#download-byte-limits).
 </Note>
 
 ### Verify media type

@@ -629,3 +629,17 @@ For full details including the write-policy gate, the live-query reconcile path,
 - Device structure: `wacore/src/store/device.rs`
 - Backend trait: `wacore/src/store/traits.rs`
 - SQLite backend: `storages/sqlite-storage/src/sqlite_store.rs`
+
+## App-state blob memory
+
+Set `CacheConfig::app_state_downloads` with `AppStateDownloadConfig::new(max_bytes, NonZeroUsize)` before client construction. The default permits 64 MiB of retained blob capacity and four concurrent downloads. Zero bytes refuses nonempty blobs. Exhaustion returns an error instead of waiting for capacity held by the current batch.
+
+The budget is shared by concurrent prefetches on one client and includes completed buffers and shared slices until their last owner drops. Streaming and buffered HTTP adapters are supported. The bound excludes HTTP/TLS and decoded protobuf storage; a buffered adapter may transiently allocate its complete response before the retained output is checked. Cancellation releases reservations when the executor drops queued closures or processing reaches a checkpoint. It cannot interrupt blocked I/O.
+
+```rust
+use std::num::NonZeroUsize;
+use whatsapp_rust::{AppStateDownloadConfig, CacheConfig};
+
+let mut cache = CacheConfig::default();
+cache.app_state_downloads = AppStateDownloadConfig::new(32 * 1024, NonZeroUsize::MIN);
+```

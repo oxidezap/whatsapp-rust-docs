@@ -29,7 +29,7 @@ Add `whatsapp-rust` with the `metrics` feature, plus the recorder you want to ex
 
 ```toml Cargo.toml
 [dependencies]
-whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "d804acaec1439e54c43c129e2f90d45016506abe", features = ["metrics"] }
+whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "35a69a14149fa2cd2a0cc719f875f441d1c6e1dc", features = ["metrics"] }
 metrics = "0.24"
 metrics-exporter-prometheus = "0.16"
 ```
@@ -145,3 +145,7 @@ Durations use the pluggable `wacore::time::Instant`, so WASM and deterministic b
 
 - [Observability with tracing](/advanced/observability) — per-case spans that complement the aggregate metrics here.
 - [Installation — feature flags](/installation#feature-flags) — full feature matrix including `metrics`, `tracing`, and `tracing-pii`.
+
+## Pre-decrypt admission refusals
+
+With `metrics` enabled, `wa_live_admission_refused_total` counts live attempts stopped before decryption by durability admission. Its `reason` is `capacity`, `receipts` or `retained_write`. Repeated server deliveries count as separate attempts. A successful flush retry is not a refusal. These counts do not measure unique lost messages.

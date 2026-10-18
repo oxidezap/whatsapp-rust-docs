@@ -4,7 +4,7 @@ description: Commit encrypted inbound messages before acknowledgment, within bac
 ---
 
 <Note>
-Examples on this page target [source snapshot `d804acae`](https://github.com/oxidezap/whatsapp-rust/tree/d804acaec1439e54c43c129e2f90d45016506abe), not a crates.io release. Use the [current API guide](/guides/current-api) to select the matching dependency.
+Examples on this page target [source snapshot `35a69a14`](https://github.com/oxidezap/whatsapp-rust/tree/35a69a14149fa2cd2a0cc719f875f441d1c6e1dc), not a crates.io release. Use the [current API guide](/guides/current-api) to select the matching dependency.
 </Note>
 
 ## Overview
@@ -30,7 +30,7 @@ During the **offline drain** (the backlog replayed on reconnect), the client acc
 
 These triggers are internal constants, not currently exposed as configuration. The message-count trigger matches WhatsApp Web's `web_message_processing_cache_size` (the snapshot flush granularity — distinct from the 200-stanza `<offline_batch>` server pull size). The drain→live transition is raceless: the tail batch of the drain always commits before any live-mode message is processed, so a consumer never observes drain and live messages out of order across the boundary.
 
-The normal batch path writes the durable buffer, flushes Signal state, calls your hook, clears the pending rows, sends acknowledgments, flushes offline delivery receipts and dispatches `Event::Messages`. Do not treat that sequence as one transaction across your backend and the server. An error during acknowledgment can leave some acknowledgments already sent. Make the consumer commit idempotent and keep application recovery independent of event callback delivery.
+The normal batch path writes the durable buffer, flushes Signal state, calls your hook, publishes `Event::Messages`, conditionally clears pending rows, then permits acknowledgments and offline delivery receipts. Do not treat that sequence as one transaction across your backend and the server. An error during acknowledgment can leave some acknowledgments already sent. Make the consumer commit idempotent and keep application recovery independent of event callback delivery.
 
 <Note>
 Offline delivery receipts are flushed once **per durable drain batch**, not only at the end of the full offline drain, matching WA Web's `createSnapshot` → `sendAggregateOfflineReceipts` per snapshot. This bounds the receipt buffer over a large backlog and caps redelivery on a mid-drain disconnect to a single snapshot instead of the whole backlog.
@@ -157,7 +157,7 @@ Durable cross-crash replay requires a backend that implements the pending-inboun
 
 Two additional batch-oriented methods, `store_pending_inbound_batch` and `delete_pending_inbound_batch`, default to looping the single-row methods above, which does not make an arbitrary custom backend transactional. The bundled `SqliteStore` overrides both to commit a whole batch in one transaction — see [Custom Backends](/guides/custom-backends#preserve-durability) if you want the same atomicity in your own backend.
 
-With an inbound hook configured, construction probes pending-inbound store, read and delete operations. A failed probe returns `UnsupportedDurabilityBackend` from the builder. Passing that probe does not certify batch atomicity, crash durability or retention behavior. Implement and test those properties in your backend.
+With an inbound hook configured, construction probes pending-inbound store, read and delete operations. A failed probe returns `UnsupportedDurabilityBackend` from the builder. Passing that probe does not certify batch atomicity, crash durability or retention behavior. Implement the [bounded reads and conditional mutations](/guides/custom-backends#bounded-pending-message-storage) as well as the legacy methods, and test those properties in your backend.
 
 ## Caveats
 
@@ -171,11 +171,11 @@ With an inbound hook configured, construction probes pending-inbound store, read
 
 **Scope.** The hook covers end-to-end encrypted messages (1:1 and group). Newsletter and broadcast channel messages use a separate ack path and are never gated by the hook — they dispatch `Event::Messages` directly. PDO placeholder recoveries (`info.unavailable_request_id` set) bypass the hook the same way.
 
-**Buffer-write failure.** If the durable buffer write itself fails (e.g. disk full), the acks for that batch are suppressed, but if the process does not crash the Signal ratchet still advances. Those messages degrade to at-most-once on their next redelivery (they can no longer be decrypted and there is no buffered copy to replay). A successfully stored copy can support replay while retained; it does not guarantee server redelivery.
+**Buffer-write failure.** The same Client retains encoded plaintext across cancellation and reconnect so redelivery can retry persistence without advancing Signal again. A process exit loses resident-only copies. See [retained plaintext](#retained-plaintext-on-current-main) for admission bounds and cleanup ordering.
 
 **Redelivery `info` fields.** On a redelivery replay, `info` is re-parsed from the stanza. A few fields derived during the first dispatch (the ephemeral timer, encrypted comment threading) may be absent. The `message` body is always the original.
 
-**Event callbacks can receive duplicates.** A redelivery whose buffered copy survived (e.g. the post-commit cleanup failed and the ack was lost) replays through the same commit and dispatches the event again — event handlers need the same idempotency discipline as the hook if they perform side effects.
+**Event callbacks can receive duplicates.** The same Client suppresses repeated publication while its dispatch claim survives. Process restart, expiry or eviction can allow another event if a retained pending copy is replayed. Keep event handlers idempotent independently of the hook.
 
 **Resent messages get their own, separate gate.** The redelivery handling above covers a byte-identical stanza the server replays. A sender-side outbox retry instead re-encrypts the same message under a new sender-key iteration, so it isn't byte-identical and reaches the pipeline as an apparently-fresh decrypt. Since [#1352](https://github.com/oxidezap/whatsapp-rust/pull/1352), an in-memory dispatch-once gate (`dispatched_messages` in `CacheConfig`, default 5-minute TTL) collapses that case to one `Event::Messages` too — see [Resend collapse](/concepts/events#messages). Unlike the pending-inbound buffer, this gate has no durable backing and does not survive a restart of your process, so it narrows the window for a duplicate dispatch rather than closing it: your hook and event handlers still need their own idempotency for the reasons above.
 
@@ -258,11 +258,11 @@ Use `InboundMessage::message_ref()` for chat actions and `newsletter_ref()` for 
 
 PDO placeholder recovery remains event-only. A later encrypted retry still must complete its durability hook even when the equivalent user event was already dispatched. The retry can promote that recovery to committed state without publishing the same event again. Distinct user payloads in an SKDM-bearing retry retain separate dispatch claims; adding an SKDM envelope does not make their user content identical. Hooks and event consumers still need idempotent `(chat, sender, id)` handling.
 
-[PDO retry and durability regression scenarios](https://github.com/oxidezap/whatsapp-rust/blob/d804acaec1439e54c43c129e2f90d45016506abe/src/message/tests.rs)
+[PDO retry and durability regression scenarios](https://github.com/oxidezap/whatsapp-rust/blob/35a69a14149fa2cd2a0cc719f875f441d1c6e1dc/src/message/tests.rs)
 
 ## Retained plaintext on current main
 
-The earlier examples describe their pinned revision. On [main snapshot `3e3abeb2`](https://github.com/oxidezap/whatsapp-rust/blob/3e3abeb2e1e2b4ac720bf0236b7d14d88dea0641/src/types/durability_hook.rs), plaintext retention changes the buffer-write failure boundary described above. Admission reserves encoded backing before Signal decryption under a 4 MiB budget and 400 reservations. The budget includes carrier, consumer projection and metadata, so the maximum accepted ciphertext is smaller than 4 MiB. Capacity refusal leaves Signal untouched and sends no positive ACK. Oversized stanzas remain refused under this bound.
+On [main snapshot `35a69a14`](https://github.com/oxidezap/whatsapp-rust/blob/35a69a14149fa2cd2a0cc719f875f441d1c6e1dc/src/types/durability_hook.rs), plaintext retention provides recovery within the same Client after a buffer-write failure. Admission reserves encoded backing before Signal decryption under a 4 MiB budget and 400 reservations. The budget includes carrier, consumer projection and metadata, so the maximum accepted ciphertext is smaller than 4 MiB. Capacity refusal leaves Signal untouched and sends no positive ACK. Oversized stanzas remain refused under this bound.
 
 If persistence fails, the same Client owns an encoded plaintext copy across cancellation and reconnect. Redelivery can retry storage without advancing Signal again. This is resident retention, not disk persistence: a process exit loses copies that never reached durable pending storage. Decoded graphs held by active processing, callbacks and consumers are outside this backing budget.
 

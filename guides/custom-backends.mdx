@@ -4,9 +4,9 @@ description: Learn how to implement custom storage, transport, and HTTP backends
 ---
 
 <Note>
-Examples on this page target [source snapshot `d804acae`](https://github.com/oxidezap/whatsapp-rust/tree/d804acaec1439e54c43c129e2f90d45016506abe), not a crates.io release. Use the [current API guide](/guides/current-api) to select the matching dependency.
+Examples on this page target [source snapshot `35a69a14`](https://github.com/oxidezap/whatsapp-rust/tree/35a69a14149fa2cd2a0cc719f875f441d1c6e1dc), not a crates.io release. Use the [current API guide](/guides/current-api) to select the matching dependency.
 
-Newer merged contract: the atomic storage sections below describe [main snapshot `edaa64b6`](https://github.com/oxidezap/whatsapp-rust/blob/edaa64b68d0de24bdb6848b98a824a32e276c55c/wacore/src/store/traits.rs), which includes [core PR #1681](https://github.com/oxidezap/whatsapp-rust/pull/1681). The three methods still have defaults in the `d804acae` snapshot used by this page. Adapters inheriting those defaults must implement the operations explicitly when adopting that newer contract. A merge into main does not identify a published release.
+Custom backends must explicitly implement atomic patch commits and token merges. The sections below describe their required semantics.
 </Note>
 
 
@@ -64,7 +64,7 @@ For crash replay, implement the pending-inbound methods on `ProtocolStore`. Stor
 
 Device-scoped operations must isolate one account from another. The scope of `DeviceStore::resource_report` depends on the adapter. SQLite reports the shared database pool through this legacy trait method; count it once per database. Use `SqliteStore::scoped_resource_report()` for an account and `SqliteDatabase::resource_report()` for the database-wide report. Register an owned adapter with `with_backend` or an `Arc<dyn Backend>` with `with_backend_arc`.
 
-[Storage trait reference](https://github.com/oxidezap/whatsapp-rust/blob/d804acaec1439e54c43c129e2f90d45016506abe/wacore/src/store/traits.rs) · [SQLite reference implementation](https://github.com/oxidezap/whatsapp-rust/blob/d804acaec1439e54c43c129e2f90d45016506abe/storages/sqlite-storage/src/lib.rs)
+[Storage trait reference](https://github.com/oxidezap/whatsapp-rust/blob/35a69a14149fa2cd2a0cc719f875f441d1c6e1dc/wacore/src/store/traits.rs) · [SQLite reference implementation](https://github.com/oxidezap/whatsapp-rust/blob/35a69a14149fa2cd2a0cc719f875f441d1c6e1dc/storages/sqlite-storage/src/lib.rs)
 
 ## Custom Runtime
 
@@ -126,7 +126,7 @@ impl Runtime for MyRuntime {
 
 ### AbortHandle
 
-`AbortHandle` is a type-erased cancellation handle marked `#[must_use]`. Dropping an `AbortHandle` aborts the spawned task, ensuring cleanup. Call `.detach()` to prevent automatic cancellation for fire-and-forget tasks where the task should run to completion even if the parent scope is dropped.
+`AbortHandle` is a type-erased cancellation handle marked `#[must_use]`. Dropping an `AbortHandle` requests cancellation of the spawned task without waiting for destruction or cleanup. Call `.detach()` to prevent automatic cancellation for fire-and-forget tasks where the task should run to completion even if the parent scope is dropped.
 
 <Warning>
 Because `AbortHandle` is `#[must_use]`, the compiler warns if you discard the return value of `Runtime::spawn()`. You must either store the handle (to abort later), call `.detach()` (to let the task run freely), or explicitly call `.abort()`.
@@ -470,7 +470,7 @@ impl HttpClient for MyCustomHttpClient {
 ```
 
 <Note>
-If your HTTP client doesn't support streaming, you only need to implement `execute`. The `supports_streaming` method defaults to `false`, and `download_to_writer` will automatically use a buffered fallback.
+If your HTTP client doesn't support streaming, you only need to implement `execute`. The `supports_streaming` method defaults to `false`, and unbounded `download_to_writer` calls use a buffered fallback. Bounded calls require streaming and fail before HTTP when it is unavailable.
 </Note>
 
 ## SQLite reference implementation
@@ -757,7 +757,7 @@ CREATE TABLE IF NOT EXISTS sessions (
 
 ## Bounded pending-message storage
 
-Message durability on [main snapshot `3e3abeb2`](https://github.com/oxidezap/whatsapp-rust/blob/3e3abeb2e1e2b4ac720bf0236b7d14d88dea0641/wacore/src/store/traits.rs) requires more than the legacy pending-row getters and batch writes shown above. Implement these `ProtocolStore` operations explicitly:
+Message durability on [main snapshot `35a69a14`](https://github.com/oxidezap/whatsapp-rust/blob/35a69a14149fa2cd2a0cc719f875f441d1c6e1dc/wacore/src/store/traits.rs) requires more than the legacy pending-row getters and batch writes shown above. Implement these `ProtocolStore` operations explicitly:
 
 | Operation | Required behavior |
 |---|---|
@@ -769,3 +769,11 @@ Message durability on [main snapshot `3e3abeb2`](https://github.com/oxidezap/wha
 There is no fallback from bounded reads to an unbounded getter. Retain the supplied `PendingInboundLease` through detached workers and retries, including after cancellation. The replacement payload owns its bytes and lease. Revision comparison alone does not prevent an absent-row ABA race after a successor creates and deletes a row; worker-terminal ownership is part of the contract.
 
 Construction probes these operations and rejects unsupported durability backends. Passing the probe does not certify crash durability, batch atomicity, retention or cancellation safety. Exercise concurrent replacement, stale cleanup, alias conflicts and restart against your actual backend. A successful batch flush alone does not satisfy the conditional mutation contract.
+
+## Session locking and Signal adapter failures
+
+Custom `SendContextResolver` implementations must implement `lock_device_sessions`. Use the same canonical addresses and locks as direct sends, deduplicate targets and acquire locks in a stable order. Return a `SessionLockGuard` owning the locks until drop, including cancellation. `SessionLockGuard::none()` is valid only when the caller serializes every overlapping pairwise session operation. A sender-key lock alone does not protect pairwise ratchets.
+
+The `Device` adapter returns an `io::ErrorKind::Unsupported` cause for signed-prekey enumeration, insertion and removal, sub-device session enumeration and bulk session deletion. These operations no longer report empty results or successful no-ops. `SignalProtocolStoreAdapter` likewise rejects `save_signed_pre_key`; `PersistenceManager` owns rotation. Successful session, identity and sender-key writes admit state to cache. Flush and propagate errors before relying on durability.
+
+Default `SignalStore` batch methods run individual writes in order and stop at the first error. Earlier writes can already have committed. Backends used by `SignalStoreCache` must accept replay of the same snapshot after a failed flush. This does not authorize replay of an externally visible send.

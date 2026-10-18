@@ -11,7 +11,7 @@ Add the dependencies — one crate is enough; `whatsapp-rust` re-exports the ent
 
 ```toml Cargo.toml
 [dependencies]
-whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "d804acaec1439e54c43c129e2f90d45016506abe" }
+whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "35a69a14149fa2cd2a0cc719f875f441d1c6e1dc" }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
@@ -600,4 +600,4 @@ See the [wacore benchmarks documentation](/api/wacore#benchmarks) for details on
   </Card>
 </CardGroup>
 
-Before changing the dependency, read the [Rust migration guide](/guides/rust-api-migration). Its newer merged contracts and experimental proposals are separate from this page's source pin.
+Before changing the dependency, read the [Rust migration guide](/guides/rust-api-migration). It uses the same source pin as this page and excludes unmerged proposals.

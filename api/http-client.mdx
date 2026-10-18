@@ -78,7 +78,7 @@ Some HTTP crates default the wrong way. `ureq`'s `http_status_as_error` turns no
 
 #### supports_streaming
 
-Returns whether this HTTP client supports synchronous streaming downloads via `execute_streaming`. The default implementation returns `false`. When this returns `false`, `download_to_writer` automatically falls back to a buffered download using `execute` instead.
+Returns whether this HTTP client supports synchronous streaming downloads via `execute_streaming`. The default implementation returns `false`. When this returns `false`, unbounded `download_to_writer` calls fall back to a buffered download using `execute`. Bounded calls return `DownloadPolicyError::StreamingRequired` before HTTP.
 
 ```rust
 fn supports_streaming(&self) -> bool { false }
@@ -795,3 +795,9 @@ mod tests {
 - [Transport Trait](/api/transport) - Network transport abstraction
 - [Client API](/api/client) - Main client interface
 - [Media Handling](/guides/media-handling) - Guide to sending and receiving media
+
+## Streaming resource admission
+
+Custom adapters can implement `HttpClient::streaming_admission() -> Option<BoxFuture<'_, Result<StreamingRequestPermit>>>`. `BoxFuture` comes from `wacore::runtime`; `StreamingRequestPermit` comes from `wacore::net` and is an adapter-owned `Box<dyn MaybeSend>`. The default returns `None` without allocating a future.
+
+Downloads await admission before occupying a blocking worker and retain the permit through response-body and connection release, including cancellation. Use this hook to reserve adapter capacity without parking blocking workers while they wait. It does not make synchronous `Read + Send` streaming into browser Fetch streaming or impose a cap on buffered HTTP responses. See [download limits](/api/download#download-byte-limits).

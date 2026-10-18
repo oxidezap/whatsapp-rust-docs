@@ -122,7 +122,7 @@ Call `http_status()` directly on typed download errors. An upload error returned
 ```rust
 use whatsapp_rust::ErrorChainExt;
 
-match client.download(downloadable).await {
+match client.download(downloadable, whatsapp_rust::download::DownloadLimits::default()).await {
     Ok(bytes) => { /* ... */ }
     Err(e) => {
         match e.http_status() {
@@ -581,7 +581,7 @@ pub enum SignalMaintenanceError {
 
 ### MessageEditError
 
-Returned by `EncryptedEdit::original_sender_jid`, `SecretEncrypted::original_sender_jid`, and `SecretEncrypted::original_sender_for_dispatch` — the target-key sender resolvers used when decrypting `secret_encrypted_message` envelopes (message edits, poll edits/add-option, event edits). Added in PR #1090, replacing bare `anyhow::Error`. Read the [pinned target-key resolvers](https://github.com/oxidezap/whatsapp-rust/blob/d804acaec1439e54c43c129e2f90d45016506abe/wacore/src/proto_helpers.rs) when handling an encrypted add-on.
+Returned by `EncryptedEdit::original_sender_jid`, `SecretEncrypted::original_sender_jid`, and `SecretEncrypted::original_sender_for_dispatch` — the target-key sender resolvers used when decrypting `secret_encrypted_message` envelopes (message edits, poll edits/add-option, event edits). Added in PR #1090, replacing bare `anyhow::Error`. Read the [pinned target-key resolvers](https://github.com/oxidezap/whatsapp-rust/blob/35a69a14149fa2cd2a0cc719f875f441d1c6e1dc/wacore/src/proto_helpers.rs) when handling an encrypted add-on.
 
 ```rust
 #[non_exhaustive]
@@ -722,3 +722,9 @@ A successful send returns `SendResult`, including the constructed message and op
 Edits, revokes, pins, and keeps also return `SendResult`. Construct an `EditRequest` or use a typed `MessageRef` as shown in [message actions](/api/send). Channel actions use `NewsletterMessageRef` and return the outcome documented by the [newsletter API](/api/newsletter).
 
 Use fallback arms when matching extensible errors. Community creation may have succeeded before a configuration failure: `ConfigurationFailed` retains the created JID and operation so you can continue safely without creating a duplicate community.
+
+## Storage retry exhaustion
+
+`wacore::store::error::StoreError::RetriesExhausted` carries `op`, `attempts` and a source error. `attempts` includes the initial attempt. Preserve all three fields when forwarding or constructing this error; match with `..` when you only need one field.
+
+`is_database_busy_or_locked()` recognizes typed retry exhaustion as contention and follows typed `Database`/`Connection` wrappers. A typed non-contention `StoreError` remains non-contention even if its display text contains "busy" or "locked". Text fallback remains for opaque database causes such as Diesel's SQLite errors. Inspect sources rather than treating display text as a stable classification API.

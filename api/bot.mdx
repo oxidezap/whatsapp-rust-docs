@@ -1475,3 +1475,7 @@ let config = {
 - [Events](/concepts/events) - All event types
 - [Sending Messages](/guides/sending-messages) - Sending messages
 - [Storage](/concepts/storage) - Storage and multi-account patterns
+
+## Retry policies
+
+Configure `with_retry_admission` or `with_retry_admission_arc` to gate inbound group/status retry repair. Configure `with_decrypt_failure_admission` or `with_decrypt_failure_admission_arc` to gate automatic outbound decrypt-failure retry receipts. Both builders accept owned or shared implementations; the last registration for each policy wins before assembly. Keep runtime tuning inside the policy. See [retry admission](/advanced/retry-admission) for contexts, decisions and refusal consequences.

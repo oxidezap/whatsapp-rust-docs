@@ -4,7 +4,7 @@ description: Choose group projections, construct inputs and manage group state
 ---
 
 <Note>
-Examples on this page target [source snapshot `d804acae`](https://github.com/oxidezap/whatsapp-rust/tree/d804acaec1439e54c43c129e2f90d45016506abe), not a crates.io release. Use the [current API guide](/guides/current-api) to select the matching dependency.
+Examples on this page target [source snapshot `35a69a14`](https://github.com/oxidezap/whatsapp-rust/tree/35a69a14149fa2cd2a0cc719f875f441d1c6e1dc), not a crates.io release. Use the [current API guide](/guides/current-api) to select the matching dependency.
 </Note>
 
 ## Choose a projection
@@ -116,15 +116,15 @@ Use typed modes and the source reference for exact arguments:
 Use the [pictures facade](/api/pictures) for a single normal group or community parent. Group picture mutations remain `set_profile_picture` and `remove_profile_picture`.
 
 ## Source reference
-[Facade, projections, history outcomes and DTO constructors](https://github.com/oxidezap/whatsapp-rust/blob/d804acaec1439e54c43c129e2f90d45016506abe/src/features/groups.rs) · [Core group inputs, typed modes and IQ contracts](https://github.com/oxidezap/whatsapp-rust/blob/d804acaec1439e54c43c129e2f90d45016506abe/wacore/src/iq/groups.rs)
+[Facade, projections, history outcomes and DTO constructors](https://github.com/oxidezap/whatsapp-rust/blob/35a69a14149fa2cd2a0cc719f875f441d1c6e1dc/src/features/groups.rs) · [Core group inputs, typed modes and IQ contracts](https://github.com/oxidezap/whatsapp-rust/blob/35a69a14149fa2cd2a0cc719f875f441d1c6e1dc/wacore/src/iq/groups.rs)
 
 ## GroupError
 
-Group operations return their typed `GroupError`, preserving IQ, storage and validation causes. Description conflicts require reconciling current state before another update. Keep a fallback arm when matching this extensible enum. See [the pinned error definition](https://github.com/oxidezap/whatsapp-rust/blob/d804acaec1439e54c43c129e2f90d45016506abe/src/features/groups.rs) and [error-chain recovery](/api/errors#error-chain-recovery).
+Group operations return their typed `GroupError`, preserving IQ, storage and validation causes. Description conflicts require reconciling current state before another update. Keep a fallback arm when matching this extensible enum. See [the pinned error definition](https://github.com/oxidezap/whatsapp-rust/blob/35a69a14149fa2cd2a0cc719f875f441d1c6e1dc/src/features/groups.rs) and [error-chain recovery](/api/errors#error-chain-recovery).
 
 ## Durable notification capture
 
-This API requires [main snapshot `3e3abeb2`](https://github.com/oxidezap/whatsapp-rust/blob/3e3abeb2e1e2b4ac720bf0236b7d14d88dea0641/src/types/group_notification_durability.rs), newer than this page's earlier examples. Register `GroupNotificationDurabilityHook` on `ClientBuilder` or `BotBuilder` using `with_group_notification_durability_hook` or its `_arc` variant. The last registration wins.
+This API requires [main snapshot `35a69a14`](https://github.com/oxidezap/whatsapp-rust/blob/35a69a14149fa2cd2a0cc719f875f441d1c6e1dc/src/types/group_notification_durability.rs). Register `GroupNotificationDurabilityHook` on `ClientBuilder` or `BotBuilder` using `with_group_notification_durability_hook` or its `_arc` variant. The last registration wins.
 
 ```rust
 use std::sync::Arc;

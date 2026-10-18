@@ -23,7 +23,7 @@ These examples target the same source snapshot as [installation](/installation).
 
 ```toml
 [dependencies]
-whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "d804acaec1439e54c43c129e2f90d45016506abe", features = ["voip"] }
+whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "35a69a14149fa2cd2a0cc719f875f441d1c6e1dc", features = ["voip"] }
 tokio = { version = "1.53", features = ["macros", "rt-multi-thread"] }
 ```
 
@@ -726,7 +726,7 @@ The core `CallEngine` lives in `wacore` and is **sans-IO** — it owns no socket
 | Embedded (esp32) | `wacore` with `voip` (+ `voip-mlow` for the bundled codec), sans-IO only, or `whatsapp-rust` with the same feature split as WebAssembly above |
 
 <Note>
-  Building `whatsapp-rust` itself (not just `wacore`) for `wasm32` also needs `default-features = false`: the crate's defaults (`tokio-native`, `sqlite-storage`, `tokio-transport`, `ureq-client`, `signal`) assume a native multi-threaded runtime, SQLite storage, and a native HTTP client, none of which build on `wasm32-unknown-unknown`. `cargo check -p whatsapp-rust --lib --target wasm32-unknown-unknown --no-default-features --features voip-mlow` is exactly the check this PR added to CI — mirror both flags in your own `Cargo.toml`, e.g. `whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "d804acaec1439e54c43c129e2f90d45016506abe", default-features = false, features = ["voip-mlow"] }`, and supply your own storage/transport/HTTP implementations in their place.
+  Building `whatsapp-rust` itself (not just `wacore`) for `wasm32` also needs `default-features = false`: the crate's defaults (`tokio-native`, `sqlite-storage`, `tokio-transport`, `ureq-client`, `signal`) assume a native multi-threaded runtime, SQLite storage, and a native HTTP client, none of which build on `wasm32-unknown-unknown`. `cargo check -p whatsapp-rust --lib --target wasm32-unknown-unknown --no-default-features --features voip-mlow` is exactly the check this PR added to CI — mirror both flags in your own `Cargo.toml`, e.g. `whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "35a69a14149fa2cd2a0cc719f875f441d1c6e1dc", default-features = false, features = ["voip-mlow"] }`, and supply your own storage/transport/HTTP implementations in their place.
 </Note>
 
 ### Pluggable media backend
@@ -918,3 +918,11 @@ Group-call invitation join keeps the invited call's ownership and participant ID
 ## MLOW activity
 
 The MLOW encoder classifies activity per frame and can emit inactive frames during silence. Do not assume every packet's TOC is the active-speech byte `0x50`, or treat a successfully encoded silent frame as active speech. Read activity/media counters within their documented scope.
+
+## Signaling phase and media limits
+
+`CallHandle::phase() -> Option<CallPhase>` reads the signaling phase for the handle's registry generation. It returns `None` after that generation is removed or superseded, even if another call uses the same ID. A signaling phase does not prove that media is flowing; sample `media_stats()` for media diagnostics.
+
+The native 1:1 video path supports inbound audio in a video call, paced outbound video, bounded retransmission in response to peer NACKs and keyframe requests after inbound packet loss. These recovery paths do not guarantee packet delivery or live interoperability for every codec, device or network. Qualify the actual call profile separately from feature compilation.
+
+`CallMediaStats` adds `video_rtp_received`, `video_srtp_unprotect_failed`, `piggybacked_audio_received`, `auxiliary_rtp_authenticated`, `video_rtp_lost`, `video_nack_requested` and `video_retransmitted`. Lost video counts forward sequence gaps; late arrivals do not reduce it. Retransmitted packets count emitted recovery packets, not delivery confirmation. Window reports subtract these counters with saturation. `last_unexpected_payload_type` is the latest type value, initially zero, and is not a counter delta.

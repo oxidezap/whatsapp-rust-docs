@@ -4,7 +4,7 @@ description: Newsletter (channel) operations — create, manage, administer, sub
 ---
 
 <Note>
-Examples on this page target [source snapshot `d804acae`](https://github.com/oxidezap/whatsapp-rust/tree/d804acaec1439e54c43c129e2f90d45016506abe), not a crates.io release. Use the [current API guide](/guides/current-api) to select the matching dependency.
+Examples on this page target [source snapshot `35a69a14`](https://github.com/oxidezap/whatsapp-rust/tree/35a69a14149fa2cd2a0cc719f875f441d1c6e1dc), not a crates.io release. Use the [current API guide](/guides/current-api) to select the matching dependency.
 </Note>
 
 The `Newsletter` feature provides methods for managing WhatsApp newsletter channels, including creation, subscription management, admin operations, reactions, and live updates. Newsletter operations use MEX (GraphQL) for metadata/management and IQ stanzas for message operations.
@@ -464,7 +464,7 @@ async fn vote(client: &Client, poll: &NewsletterMessageRef<'_>) -> whatsapp_rust
 
 Consult the pinned source for exact signatures and ownership checks. A reference's optional ownership declaration does not grant server permission.
 
-[Channel actions and history message references](https://github.com/oxidezap/whatsapp-rust/blob/d804acaec1439e54c43c129e2f90d45016506abe/src/features/newsletter.rs)
+[Channel actions and history message references](https://github.com/oxidezap/whatsapp-rust/blob/35a69a14149fa2cd2a0cc719f875f441d1c6e1dc/src/features/newsletter.rs)
 
 ### get_messages
 
@@ -525,7 +525,7 @@ Poll tallies on [`NewsletterMessage::votes`](#newslettermessage) and in live upd
 
 A removed vote is still returned. Its `poll_vote` is `Some` with an empty `option_hashes` list. `poll_vote` is `None` only if you never voted on that message.
 
-**Errors:** At this page's pinned source snapshot `d804acae`, `get_my_addons` returns `NewsletterError::InvalidRequest` without sending anything if `jid` is not a newsletter JID. A malformed server response also returns `NewsletterError::InvalidRequest`.
+**Errors:** At this page's pinned source snapshot `35a69a14`, `get_my_addons` returns `NewsletterError::InvalidRequest` without sending anything if `jid` is not a newsletter JID. A malformed server response also returns `NewsletterError::InvalidRequest`.
 
 
 **Example:**

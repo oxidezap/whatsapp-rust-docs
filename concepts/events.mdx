@@ -2168,7 +2168,7 @@ Event::DeleteMessageForMeUpdate(update) => {
 ### LabelEditUpdate
 
 <Note>
-Newer merged contract: [core #1691](https://github.com/oxidezap/whatsapp-rust/pull/1691), included in [main snapshot `edaa64b6`](https://github.com/oxidezap/whatsapp-rust/tree/edaa64b68d0de24bdb6848b98a824a32e276c55c), adds `action_timestamp: Option<DateTime<Utc>>` to `LabelEditUpdate`, `LabelAssociationUpdate` and `MessageLabelAssociationUpdate`. It is `None` when the carried value is absent or outside the date-time range, and `Some(epoch)` for explicit zero. The legacy `timestamp` still falls back to the Unix epoch for absence and local dispatch time for an out-of-range value. Neither the optional field nor its presence identifies replay versus live traffic; `from_full_sync` remains independent. This addition is outside this page's `d804acae` pin; the signatures below retain that older snapshot. The earlier `b7b0b9ec` example checks did not qualify this field. See [label timestamp migration](/guides/rust-api-migration#preserve-optional-label-action-times).
+`LabelEditUpdate`, `LabelAssociationUpdate` and `MessageLabelAssociationUpdate` expose `action_timestamp: Option<DateTime<Utc>>`. It is `None` when absent or outside the date-time range, and `Some(epoch)` for explicit zero. Their legacy `timestamp` falls back to the epoch for absence and local dispatch time for an out-of-range value. `LabelSublistUpdate` exposes the same optional action time without a fallback timestamp. Keep `from_full_sync` independent from time presence. See [label timestamp migration](/guides/rust-api-migration#preserve-optional-label-action-times).
 </Note>
 
 **Emitted:** When a chat label is created, renamed, recolored, or deleted on a linked device
@@ -2179,6 +2179,7 @@ Newer merged contract: [core #1691](https://github.com/oxidezap/whatsapp-rust/pu
 pub struct LabelEditUpdate {
     pub label_id: String,
     pub timestamp: DateTime<Utc>,
+    pub action_timestamp: Option<DateTime<Utc>>,
     pub action: Box<wa::sync_action_value::LabelEditAction>,
     pub from_full_sync: bool,
 }
@@ -2213,6 +2214,7 @@ pub struct LabelAssociationUpdate {
     pub label_id: String,
     pub chat_jid: Jid,
     pub timestamp: DateTime<Utc>,
+    pub action_timestamp: Option<DateTime<Utc>>,
     pub action: Box<wa::sync_action_value::LabelAssociationAction>,
     pub from_full_sync: bool,
 }
@@ -2251,6 +2253,7 @@ pub struct MessageLabelAssociationUpdate {
     pub chat_jid: Jid,
     pub message_id: String,
     pub timestamp: DateTime<Utc>,
+    pub action_timestamp: Option<DateTime<Utc>>,
     pub action: Box<wa::sync_action_value::LabelAssociationAction>,
     pub from_full_sync: bool,
 }
@@ -2778,7 +2781,7 @@ pub struct ClientExpirationChanged {
 <Note>
 This is **notice, not an instruction**. The client keeps connecting until the server actually refuses it — the stanza is about the *build*, not the current connection — so whether to ship a newer version or alert an operator is the consumer's call; this library never disconnects on its own because of it.
 
-The recorded deadline is never sooner than **three days** out, even when the server's own answer is more abrupt (`t` at or before now) — a server that says "now" still has to leave a window in which the build can be replaced. The raw `t` is only acted on when it's sooner than the `expires_at` already stored — a `t` at or after that is treated as a stale retransmit or a host that hasn't caught up, and is ignored rather than granted as an extension. That gate gets re-evaluated against "now" each time, though, so it does *not* mean the stored deadline can only move earlier over time: a server that keeps resending the same already-elapsed `t` keeps clearing the gate (it stays "sooner than stored") and each acceptance re-floors three days out from the new "now" — pushing the stored deadline later each time even though `t` itself never changed. A dated deadline in the future, by contrast, settles once stored: restating it no longer clears the gate, so repeats change nothing and dispatch nothing. See [`ServerClientExpiration` and its decision rule](https://github.com/oxidezap/whatsapp-rust/blob/d804acaec1439e54c43c129e2f90d45016506abe/wacore/src/store/device.rs) for the persisted record and the full decision rule.
+The recorded deadline is never sooner than **three days** out, even when the server's own answer is more abrupt (`t` at or before now) — a server that says "now" still has to leave a window in which the build can be replaced. The raw `t` is only acted on when it's sooner than the `expires_at` already stored — a `t` at or after that is treated as a stale retransmit or a host that hasn't caught up, and is ignored rather than granted as an extension. That gate gets re-evaluated against "now" each time, though, so it does *not* mean the stored deadline can only move earlier over time: a server that keeps resending the same already-elapsed `t` keeps clearing the gate (it stays "sooner than stored") and each acceptance re-floors three days out from the new "now" — pushing the stored deadline later each time even though `t` itself never changed. A dated deadline in the future, by contrast, settles once stored: restating it no longer clears the gate, so repeats change nothing and dispatch nothing. See [`ServerClientExpiration` and its decision rule](https://github.com/oxidezap/whatsapp-rust/blob/35a69a14149fa2cd2a0cc719f875f441d1c6e1dc/wacore/src/store/device.rs) for the persisted record and the full decision rule.
 </Note>
 
 **Example:**
@@ -3735,6 +3738,6 @@ Chat-action payloads exposing `action_timestamp: Option<DateTime<Utc>>` distingu
 
 ## LabelSublistUpdate
 
-On [main snapshot `3e3abeb2`](https://github.com/oxidezap/whatsapp-rust/blob/3e3abeb2e1e2b4ac720bf0236b7d14d88dea0641/wacore/src/types/events.rs), apply `Event::LabelSublistUpdate` idempotently by `(predefined_id, chat_jid)`. `LabelSublistChange::Upsert { sub_list_id }` replaces an entry and `Remove` deletes it. Keep a fallback arm because the change enum is non-exhaustive. Unknown signed numeric IDs are retained; zero is a value, not a removal.
+On [main snapshot `35a69a14`](https://github.com/oxidezap/whatsapp-rust/blob/35a69a14149fa2cd2a0cc719f875f441d1c6e1dc/wacore/src/types/events.rs), apply `Event::LabelSublistUpdate` idempotently by `(predefined_id, chat_jid)`. `LabelSublistChange::Upsert { sub_list_id }` replaces an entry and `Remove` deletes it. Keep a fallback arm because the change enum is non-exhaustive. Unknown signed numeric IDs are retained; zero is a value, not a removal.
 
 This event does not assign the parent label, reorder lists or describe computed AI handoff filters. The SDK has no sublist membership store and does not synthesize removals from a deleted parent or an omitted snapshot entry. Persist membership in your own store. Preserve `action_timestamp: Option<DateTime<Utc>>` and `from_full_sync` separately; `false` can include recovery/replay and does not certify live traffic.

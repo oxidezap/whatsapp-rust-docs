@@ -11,7 +11,7 @@ Examples use `waproto` through the main crate's re-export. Declare `whatsapp-rus
 
 ```toml
 [dependencies]
-whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "d804acaec1439e54c43c129e2f90d45016506abe" }
+whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "35a69a14149fa2cd2a0cc719f875f441d1c6e1dc" }
 ```
 
 ## Structure
@@ -662,8 +662,8 @@ Enable them in your `Cargo.toml`:
 
 ```toml
 [dependencies]
-whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "d804acaec1439e54c43c129e2f90d45016506abe" }
-waproto = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "d804acaec1439e54c43c129e2f90d45016506abe", features = ["serde-snake-case"] }
+whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "35a69a14149fa2cd2a0cc719f875f441d1c6e1dc" }
+waproto = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "35a69a14149fa2cd2a0cc719f875f441d1c6e1dc", features = ["serde-snake-case"] }
 ```
 
 ### Default behavior (no feature flags)
@@ -831,7 +831,7 @@ use whatsapp_rust::wacore::download::{Downloadable, MediaType};
 
 if let Some(img) = message.image_message.as_option() {
     // Use the Downloadable trait to download and decrypt
-    let data = client.download(img).await?;
+    let data = client.download(img, whatsapp_rust::download::DownloadLimits::default()).await?;
 }
 ```
 
@@ -886,7 +886,7 @@ Nested `protocolMessage.key` values retain the sender’s wire perspective. Do n
 
 ## Source evolution
 
-The merged [source snapshot `3e3abeb2`](https://github.com/oxidezap/whatsapp-rust/blob/3e3abeb2e1e2b4ac720bf0236b7d14d88dea0641/waproto/src/lib.rs) marks public generated messages, borrowed views, enums and oneofs non-exhaustive. This section uses that revision; the older dependency above does not provide this contract. Pin the SDK and explicitly declared sibling crates to the same revision.
+The merged [source snapshot `35a69a14`](https://github.com/oxidezap/whatsapp-rust/blob/35a69a14149fa2cd2a0cc719f875f441d1c6e1dc/waproto/src/lib.rs) marks public generated messages, borrowed views, enums and oneofs non-exhaustive. The dependency above uses that same revision. Pin the SDK and explicitly declared sibling crates to the same revision.
 
 Construct messages through `Default` and field assignment, or use owned-message `with_*` setters. External literals fail even with `..Default::default()`. Destructure with `..` and match enums and oneofs with a fallback.
 
