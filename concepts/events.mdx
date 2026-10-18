@@ -1035,11 +1035,14 @@ pub struct MessageSource {
 Breaking change: `MessageInfo::r#type` changed from `String` to `Option<StanzaMessageType>`, and `MessageInfo::media_type` changed from `String` to `Option<EncMediaType>`. Migrate a comparison like `info.r#type == "text"` to `info.r#type == Some(StanzaMessageType::Text)`, or keep comparing strings with `info.r#type.as_ref().map(StanzaMessageType::as_str) == Some("text")` — same shape for `media_type` with `EncMediaType`. Code that previously treated `""` as "absent" now matches `None` instead.
 </Warning>
 
+Both open envelope enums below are non-exhaustive. Keep a wildcard arm even when matching `Unknown` explicitly, because a later revision can name a previously unknown value.
+
 **StanzaMessageType:**
 
 The `<message type="…">` envelope attribute, parsed before any `<enc>` is decrypted. `None` when the stanza carried no `type` attribute at all; an unrecognized value is preserved as `Unknown` rather than dropped.
 
 ```rust
+#[non_exhaustive]
 pub enum StanzaMessageType {
     Text,             // "text"
     Media,            // "media"
@@ -1061,6 +1064,7 @@ pub enum StanzaMessageType {
 The `mediatype` attribute of an `<enc>` node — a hint about the payload the ciphertext carries, available before the decryption that would reveal it. `MessageInfo::media_type` aggregates this across the stanza's `<enc>` nodes: the first one that declares a value wins (direct children first, then this device's own `<enc>` under `<participants>`); a later disagreeing value is dropped. `None` when no `<enc>` carried the attribute.
 
 ```rust
+#[non_exhaustive]
 pub enum EncMediaType {
     Image, Video, Ptv, Audio, Ptt, Location, Vcard, Document, Url, Call,
     Gif, Future, ContactArray, LiveLocation, ProfilePic, Sticker,
