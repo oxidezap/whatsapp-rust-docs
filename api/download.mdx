@@ -224,10 +224,13 @@ let bytes = downloader.download(&params, whatsapp_rust::download::DownloadLimits
 ```rust
 #[non_exhaustive]
 pub enum MediaDownloadError {
+    ResourcePolicy(DownloadPolicyError),
     ReferenceRejected(anyhow::Error),
     HostsUnreachable(anyhow::Error),
+    WriterIo(anyhow::Error),
     NoHosts,
     Other(anyhow::Error),
+    WriterCleanup { failure: Box<MediaDownloadError>, cleanup: std::io::Error },
 }
 ```
 
@@ -236,7 +239,9 @@ pub enum MediaDownloadError {
 | `ResourcePolicy` | Application byte or memory policy refused the operation; no host retry |
 | `ReferenceRejected` | The CDN rejected the reference with 401/403/404/410. The standalone downloader returns this error without refreshing a session or trying another host. |
 | `HostsUnreachable` | Every host in the route failed for a reason other than the reference (transport failure, unexpected status, a body that failed to decrypt/verify). |
+| `WriterIo` | Local destination I/O failed; no host retry. |
 | `NoHosts` | The `MediaRoute` named no hosts, so nothing was ever contacted. |
+| `WriterCleanup` | Cleanup also failed; inspect the original failure and cleanup error. |
 | `Other` | The `Downloadable` didn't have the fields needed to build a request at all (e.g. no `direct_path` and no `static_url`), so — unlike `NoHosts` — no host was ever *going* to be contacted. Fix the metadata, not the network. |
 
 `MediaDownloadError` is `#[non_exhaustive]`; match it with a wildcard (`_ => `) arm so a future variant doesn't break your build.
