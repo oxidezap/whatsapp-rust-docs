@@ -522,7 +522,7 @@ impl HttpClient for UreqHttpClient {
             let status_code = response.status().as_u16();
             let body = read_body(response, max_body_bytes)?;
 
-            Ok(HttpResponse { status_code, body })
+            Ok(HttpResponse::new(status_code, body))
         })
         .await?
     }
@@ -577,10 +577,7 @@ fn execute_streaming(&self, request: HttpRequest) -> Result<StreamingHttpRespons
     let status_code = response.status().as_u16();
     let reader = std::io::Read::take(response.into_body().into_reader(), self.max_body_bytes);
 
-    Ok(StreamingHttpResponse {
-        status_code,
-        body: Box::new(reader),
-    })
+    Ok(StreamingHttpResponse::new(status_code, Box::new(reader)))
 }
 ```
 
@@ -636,12 +633,11 @@ impl HttpClient for ReqwestHttpClient {
         let status_code = response.status().as_u16();
         let body = response.bytes().await?.to_vec();
         
-        Ok(HttpResponse { status_code, body })
+        Ok(HttpResponse::new(status_code, body))
     }
     
-    // supports_streaming() defaults to false, so download_to_writer
-    // will use a buffered fallback automatically — no need to implement
-    // execute_streaming.
+    // With default DownloadLimits, downloads can use the buffered fallback.
+    // Bounded downloads require a streaming adapter.
 }
 ```
 
@@ -684,10 +680,7 @@ impl HttpClient for MockHttpClient {
 let client = MockHttpClient::new()
     .with_response(
         "https://api.example.com/test",
-        HttpResponse {
-            status_code: 200,
-            body: b"test data".to_vec(),
-        },
+        HttpResponse::new(200, b"test data".to_vec()),
     );
 ```
 

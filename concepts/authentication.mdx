@@ -697,6 +697,7 @@ pub trait PasskeyAuthenticator: MaybeSendSync {
 ```
 
 ```rust
+#[non_exhaustive]
 pub struct AssertionRequest {
     pub challenge: Vec<u8>,               // already base64url-decoded
     pub rp_id: Option<String>,
@@ -706,6 +707,7 @@ pub struct AssertionRequest {
     pub raw_options_json: String,         // verbatim server JSON, e.g. for Android Credential Manager
 }
 
+#[non_exhaustive]
 pub struct Assertion {
     pub assertion_json: Vec<u8>,   // WA's `<webauthn_assertion>` JSON shape
     pub credential_id: Vec<u8>,
@@ -739,10 +741,10 @@ let authenticator = CallbackAuthenticator::new(|request: AssertionRequest| {
     Box::pin(async move {
         // e.g. hand `request.raw_options_json` to Android Credential Manager's
         // GetPublicKeyCredentialOption(requestJson = ...) and map the result:
-        Ok(Assertion {
-            assertion_json: get_webauthn_assertion_json(&request).await?,
-            credential_id: get_credential_id(&request).await?,
-        })
+        Ok(Assertion::new(
+            get_webauthn_assertion_json(&request).await?,
+            get_credential_id(&request).await?,
+        ))
     })
 });
 

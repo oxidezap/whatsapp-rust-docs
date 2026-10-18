@@ -447,10 +447,7 @@ impl HttpClient for MyCustomHttpClient {
         // Execute HTTP request
         let response = self.send_request(&request).await?;
         
-        Ok(HttpResponse {
-            status_code: response.status_code,
-            body: response.body,
-        })
+        Ok(HttpResponse::new(response.status_code, response.body))
     }
 
     // Override supports_streaming if you implement execute_streaming.
@@ -461,10 +458,7 @@ impl HttpClient for MyCustomHttpClient {
     
     fn execute_streaming(&self, request: HttpRequest) -> Result<StreamingHttpResponse, anyhow::Error> {
         // Return a streaming response with a reader
-        Ok(StreamingHttpResponse {
-            status_code: response.status_code,
-            body: Box::new(response.body_reader),
-        })
+        Ok(StreamingHttpResponse::new(response.status_code, Box::new(response.body_reader)))
     }
 }
 ```
@@ -646,14 +640,11 @@ let bot = Bot::builder()
     .with_transport_factory(transport)
     .with_http_client(http_client)
     .with_runtime(TokioRuntime)
-    .with_cache_config(CacheConfig {
-        cache_stores: CacheStores {
-            group_cache: Some(redis.clone()),
-            device_registry_cache: Some(redis.clone()),
-            ..Default::default()
-        },
-        ..Default::default()
-    })
+    .with_cache_config(CacheConfig::default().with_cache_stores(
+        CacheStores::default()
+            .with_group_cache(redis.clone())
+            .with_device_registry_cache(redis.clone()),
+    ))
     .build()
     .await?;
 ```
@@ -661,10 +652,7 @@ let bot = Bot::builder()
 Or route all pluggable caches to the same backend:
 
 ```rust
-let config = CacheConfig {
-    cache_stores: CacheStores::all(redis.clone()),
-    ..Default::default()
-};
+let config = CacheConfig::default().with_cache_stores(CacheStores::all(redis.clone()));
 ```
 
 ### Available namespaces
