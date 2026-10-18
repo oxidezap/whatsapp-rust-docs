@@ -165,7 +165,10 @@ pub mod net;      // Transport, TransportFactory, HttpClient, TransportEvent
 
 The `runtime` module defines the `Runtime` trait that all async operations go through:
 
+Native signatures retain `Send` futures and closures:
+
 ```rust
+#[cfg(not(target_arch = "wasm32"))]
 pub trait Runtime: MaybeSendSync + 'static {
     fn spawn(&self, future: Pin<Box<dyn Future<Output = ()> + Send + 'static>>) -> AbortHandle;
 
@@ -176,6 +179,26 @@ pub trait Runtime: MaybeSendSync + 'static {
     fn sleep(&self, duration: Duration) -> Pin<Box<dyn Future<Output = ()> + Send>>;
     fn spawn_blocking(&self, f: Box<dyn FnOnce() + Send + 'static>) -> Pin<Box<dyn Future<Output = ()> + Send>>;
     fn yield_now(&self) -> Option<Pin<Box<dyn Future<Output = ()> + Send>>>;
+
+    /// How often to yield in tight loops (every N items). Defaults to 10.
+    fn yield_frequency(&self) -> u32 { 10 }
+}
+```
+
+On `wasm32`, the local-executor signatures permit non-`Send` futures and closures:
+
+```rust
+#[cfg(target_arch = "wasm32")]
+pub trait Runtime: MaybeSendSync + 'static {
+    fn spawn(&self, future: Pin<Box<dyn Future<Output = ()> + 'static>>) -> AbortHandle;
+
+    /// Spawn a task nobody will cancel. Defaults to `self.spawn(future).detach()`.
+    fn spawn_detached(&self, future: Pin<Box<dyn Future<Output = ()> + 'static>>) {
+        self.spawn(future).detach();
+    }
+    fn sleep(&self, duration: Duration) -> Pin<Box<dyn Future<Output = ()>>>;
+    fn spawn_blocking(&self, f: Box<dyn FnOnce() + 'static>) -> Pin<Box<dyn Future<Output = ()>>>;
+    fn yield_now(&self) -> Option<Pin<Box<dyn Future<Output = ()>>>>;
 
     /// How often to yield in tight loops (every N items). Defaults to 10.
     fn yield_frequency(&self) -> u32 { 10 }

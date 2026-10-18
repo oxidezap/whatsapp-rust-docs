@@ -111,26 +111,7 @@ The library is fully runtime-agnostic. All async operations go through four plug
 | HTTP client | `HttpClient` | `UreqHttpClient` | `whatsapp-rust-ureq-http-client` |
 | Storage | `Backend` | `SqliteStore` | `whatsapp-rust-sqlite-storage` |
 
-The `Runtime` trait requires four methods plus two optional methods with defaults:
-
-```rust
-pub trait Runtime: MaybeSendSync + 'static {
-    fn spawn(&self, future: Pin<Box<dyn Future<Output = ()> + Send + 'static>>) -> AbortHandle;
-
-    /// Fire-and-forget spawn. Defaults to `self.spawn(future).detach()`.
-    fn spawn_detached(&self, future: Pin<Box<dyn Future<Output = ()> + Send + 'static>>) {
-        self.spawn(future).detach();
-    }
-    fn sleep(&self, duration: Duration) -> Pin<Box<dyn Future<Output = ()> + Send>>;
-    fn spawn_blocking(&self, f: Box<dyn FnOnce() + Send + 'static>) -> Pin<Box<dyn Future<Output = ()> + Send>>;
-    fn yield_now(&self) -> Option<Pin<Box<dyn Future<Output = ()> + Send>>>;
-
-    /// How often to yield in tight loops (every N items). Defaults to 10.
-    fn yield_frequency(&self) -> u32 { 10 }
-}
-```
-
-The signatures above show native future bounds. On `wasm32`, runtime objects, futures and cancellation closures may hold local state. See [runtime cancellation](/api/wacore#local-runtimes-and-cancellation).
+`Runtime` requires task spawning, sleep, blocking work and cooperative yield methods. It supplies defaults for detached spawning and yield frequency. See the [native and WASM signatures](/api/wacore#runtime--networking) in the runtime reference. Native futures and runtime objects retain thread-safety bounds; local WASM implementations may hold local JS or `Rc` state.
 
 `AbortHandle` is `#[must_use]`. Dropping it requests cancellation without joining task destruction. Call `.detach()` on the handle for fire-and-forget tasks that should run to completion independently. See [custom backends — AbortHandle](/guides/custom-backends#aborthandle) for implementation details.
 
