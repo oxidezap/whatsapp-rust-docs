@@ -673,3 +673,19 @@ pub enum SignalError {
 - [Signal Protocol implementation](/advanced/signal-protocol) - Deep dive into the protocol internals
 - [Client](/api/client) - Core client API
 - [Send](/api/send) - High-level message sending (handles encryption automatically)
+
+## Numeric security codes
+
+```rust
+pub async fn security_code(
+    &self,
+    peer: &Jid,
+    version: SecurityCodeVersion,
+) -> Result<String, SignalError>
+```
+
+Call `client.signal().security_code(&peer, SecurityCodeVersion::V3).await?` for a PN-based 60-digit code. Use `V4` for LID-based codes and compare the same version on both devices. This refreshes device lists and may establish missing E2E sessions. It never marks a contact verified.
+
+Missing keys, incomplete device lists, hosted accounts and concurrent identity or device changes fail instead of producing a partial code. Treat the result as a point-in-time snapshot and refresh it after changes.
+
+`Event::IdentityChange` carries optional `previous_identity_key` and `current_identity_key`, each a raw 32-byte public key without the Signal type byte. A server identity notification has no replacement key; custom stores or read failures may leave the prior key absent. Absence is not proof that an identity stayed unchanged. Keep verification decisions in your application.

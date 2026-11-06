@@ -11,7 +11,7 @@ Examples use `waproto` through the main crate's re-export. Declare `whatsapp-rus
 
 ```toml
 [dependencies]
-whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "35a69a14149fa2cd2a0cc719f875f441d1c6e1dc" }
+whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "7e5c198e1a25ea405faa7a69a47bc727ea15484c" }
 ```
 
 ## Structure
@@ -697,8 +697,8 @@ Enable them in your `Cargo.toml`:
 
 ```toml
 [dependencies]
-whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "35a69a14149fa2cd2a0cc719f875f441d1c6e1dc" }
-waproto = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "35a69a14149fa2cd2a0cc719f875f441d1c6e1dc", features = ["serde-snake-case"] }
+whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "7e5c198e1a25ea405faa7a69a47bc727ea15484c" }
+waproto = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "7e5c198e1a25ea405faa7a69a47bc727ea15484c", features = ["serde-snake-case"] }
 ```
 
 ### Default behavior (no feature flags)
@@ -874,7 +874,7 @@ if let Some(img) = message.image_message.as_option() {
 
 ## Schema source
 
-Read the WhatsApp snapshot version in the [pinned protobuf source](https://github.com/oxidezap/whatsapp-rust/blob/35a69a14149fa2cd2a0cc719f875f441d1c6e1dc/waproto/src/whatsapp.proto). The source version identifies that schema snapshot; it does not certify compatibility with every current server or client.
+Read the WhatsApp snapshot version in the [pinned protobuf source](https://github.com/oxidezap/whatsapp-rust/blob/7e5c198e1a25ea405faa7a69a47bc727ea15484c/waproto/src/whatsapp.proto). The source version identifies that schema snapshot; it does not certify compatibility with every current server or client.
 
 ## Relationship with wacore
 
@@ -916,7 +916,7 @@ Nested `protocolMessage.key` values retain the sender’s wire perspective. Do n
 
 ## Source evolution
 
-The merged [source snapshot `35a69a14`](https://github.com/oxidezap/whatsapp-rust/blob/35a69a14149fa2cd2a0cc719f875f441d1c6e1dc/waproto/src/lib.rs) marks public generated messages, borrowed views, enums and oneofs non-exhaustive. The dependency above uses that same revision. Pin the SDK and explicitly declared sibling crates to the same revision.
+The merged [source snapshot `7e5c198e`](https://github.com/oxidezap/whatsapp-rust/blob/7e5c198e1a25ea405faa7a69a47bc727ea15484c/waproto/src/lib.rs) marks public generated messages, borrowed views, enums and oneofs non-exhaustive. The dependency above uses that same revision. Pin the SDK and explicitly declared sibling crates to the same revision.
 
 Construct messages through `Default` and field assignment, or use owned-message `with_*` setters. External literals fail even with `..Default::default()`. Destructure with `..` and match enums and oneofs with a fallback.
 
@@ -942,3 +942,9 @@ fn text_view(text: &str) -> wa::MessageView<'_> {
 ```
 
 Additive source evolution does not freeze ABI, layout or serialized JSON shape. Unknown wire fields are not generally preserved by the generated decoder. Cloning a decoded value preserves its modeled fields, not arbitrary original wire occurrences. Keep original bytes when a receiving API requires them; decoding and re-encoding is not an evidence archive. Open enum fields retain their separate `EnumValue::Unknown` behavior.
+
+## Generated source and codec boundaries
+
+The audited SDK pins whatspec `ae3880925bacd23863cc30ec480c9f82bfd869f1`, WhatsApp Web snapshot `2.3000.1052559453`. Generated output is compacted while retaining supported wallpaper fields, local storage extensions and existing non-exhaustive construction rules. A snapshot version is source provenance, not evidence of current server behavior.
+
+`waproto::codec` supplies non-inlined encode/decode boundaries for history notifications, app-state debug data, ADV identities, pairing properties and flat mobile Noise certificates. Ordinary generated decoding still discards unknown fields. Durable history notification capture separately retains the original wire; do not infer that property for every codec helper. Build freshness fixes affect rebuild work, not wire semantics.
