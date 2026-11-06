@@ -1673,7 +1673,7 @@ The `action` field on `GroupUpdate` is a `GroupNotificationAction` enum with the
 | `Unlink { unlink_type, unlink_reason, raw }` | `<unlink>` | Subgroup unlinked (community) |
 | `Unknown { tag }` | varies | Unknown notification tag (forward compatibility) |
 
-Participant-related variants include a `participants` field of type `Vec<GroupParticipantInfo>`. Construct fixtures with `GroupParticipantInfo::builder().jid(jid).build()`, and use the action constructors such as `GroupNotificationAction::add(participants, reason)`. Payload-carrying action variants are non-exhaustive, so external patterns require `..` as well as the outer enum fallback:
+Participant-related variants include a `participants` field of type `Vec<GroupParticipantInfo>`. Construct fixtures with `GroupParticipantInfo::builder().jid(jid).build()`, and use the action constructors such as `GroupNotificationAction::add().participants(participants).build()`. Payload-carrying action variants are non-exhaustive, so external patterns require `..` as well as the outer enum fallback:
 
 ```rust
 #[non_exhaustive]
