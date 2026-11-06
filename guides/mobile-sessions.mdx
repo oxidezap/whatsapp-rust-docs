@@ -1,0 +1,75 @@
+---
+title: Primary-mobile sessions
+description: Configure opt-in registration, primary login and companion hosting with explicit host services
+---
+
+## Select a mobile profile
+
+`mobile-core` enables the registration workflow, primary-device session configuration and companion-hosting APIs. It includes `instance-clock` and enables SQLite mobile provisioning when that backend is selected. `mobile-transport-native` separately adds the Tokio TCP adapter. Neither feature belongs to the default Web-companion profile.
+
+```toml Cargo.toml
+[dependencies]
+whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "7e5c198e1a25ea405faa7a69a47bc727ea15484c", default-features = false, features = ["mobile-core"] }
+```
+
+Supply runtime, HTTP, transport and persistence adapters. For native TCP, add `mobile-transport-native` and select its factory explicitly. Browser and embedded hosts supply a bridge or another transport. Changing `ClientProfile` on a Web client does not perform registration or change the persisted account role.
+
+These APIs implement host-driven workflows. Compilation and synthetic fixtures do not establish production server acceptance, real SMS delivery or complete official-app parity. APK oracle tooling lives outside runtime dependencies; its presence does not qualify your configured profile.
+
+## Bind environment, clock and identity
+
+Build one `MobileEnvironment` with explicit registration and connection endpoints and trust roots. Keep registration HTTP, media HTTP and the connection transport separate. There is no automatic Web or production-endpoint fallback.
+
+Use `ClockedRuntime` and pass the same `Arc<dyn Clock>` to persistence. Construction checks clock alignment, the persisted role and the selected session binding. Mobile login rejects missing, invalid or negative time before handshake bytes are sent. A runtime/storage clock mismatch returns `ClientBuilderError::InstanceClockMismatch`. The optional `instance-clock` feature is also available independently of mobile.
+
+`RegisteredMobileSession` retains the host's login profile, application version, Noise prologue and ephemeral-key provider. Select `with_primary_identity_policy` explicitly. The strict self-identity profile requires the device signature; an explicit account-signature-only profile still verifies the trusted account signature and rejects an invalid present device signature. Certificate expiry remains strict by default. The explicit legacy `IfPresent` profile permits absent expiry, while checking a present expiry and preserving trust-root, signature and static-key checks.
+
+A fresh primary requires host-generated `PrimaryAppStateKeyInput` or a validated existing app-state key before connecting. Protect key material and registration checkpoints. Keep Web and mobile storage namespaces separate. Mobile-marked storage cannot load through a Web builder, even with mobile support disabled.
+
+## Register or import an account
+
+Use `mobile_registration::MobileRegistrationClient` with stable `RegistrationMaterial`. Preserve platform fields and installation IDs across attempts and restoration. Only `request_code` requests an OTP. `await_external_code` accepts a code requested elsewhere without HTTP. Account checks, retry hints and transport failures do not authorize an implicit code request.
+
+After durable registration, obtain `registered_account()` and build the session with `RegisteredMobileSession::from_registered_account`. The host still supplies login-only metadata, a prologue, key provider and `RegistrationLoginPhoneIdMapping`. The factory validates shared platform, version, OS and locale fields, plus Android manufacturer when supplied. Map registration model IDs to login marketing names explicitly. Choose FDID-uppercase or a separately retained host phone ID; do not equate unrelated identifiers.
+
+For existing credentials, use the typed key-import and persistence APIs, then `RegisteredMobileSession::new` with the matching profile and binding. Select that session through `ClientBuilder::with_mobile_session` with an explicit transport factory.
+
+### Recover interrupted registration
+
+Cancellation or timeout can leave delivery or persistence uncertain. Check `recovery_required()` and call `resume_pending()` to settle the retained operation. Do not issue a replacement while its outcome is unknown. After process restart, a lost HTTP response cannot be recovered or resent automatically. Expose the registered account only after identity and workflow state are durable.
+
+`MobileEphemeralKeyProvider` supplies a fresh cryptographic key per XX attempt. An optional `MobileLoginOptionsProvider` receives the validated device snapshot and an attempt counter reserved immediately before XX. Failed handshakes count; failed pre-dial attempts do not. Static options add no session ID, login counter or reconnect counter. Use the option setters to replace selected fields while preserving other metadata. Connections call `encode_attempt_payload`; `encode_payload` inspects static options.
+
+## Media and app state
+
+Select `with_media_http_profile(MobileMediaHttpProfile::...)` before media operations. Supply the exact User-Agent, routes and any intended Origin. Login itself needs no media profile. The SDK does not inherit Web headers or discover a current mobile application version. Voice-note and animated-video routing can differ from their Audio/Video crypto contexts.
+
+Select `with_app_state_policy(MobileAppStatePolicy::...)` explicitly. `SnapshotCompatible` uses the shared snapshot/bootstrap exchange. `AuthoritativeZapo` selects namespace `3`, incremental sync and mutation upload from a missing local collection. It ignores server snapshots and rejects destructive snapshot rebuilds while preserving the primary's local baseline. These are explicit implementation profiles supported by pinned reference evidence; neither is inferred from Android/iOS or advertised as official APK qualification. They do not strengthen server-ACK or local-commit semantics. A primary does not ask device zero to recover its own state through a companion-only peer request.
+
+## Host linked companions
+
+Use `client.mobile_primary()` on a bound primary session. Initialize its hosting journal once with the account raw ID and explicit ADV encoding, then restore that state on subsequent runs. The primary APIs support QR approval and phone-code exchanges, signed device-index publication, proof confirmation, revocation and topology reconciliation.
+
+QR approval parses `CompanionQr`, prepares and uploads an approval, then confirms the signed companion proof. Phone-code approval retains a `PrimaryCodeExchange` and routes only its matching authenticated finish. An upload result assigns a JID; it does not prove the companion identity. Confirmation also requires the original reference, trusted signatures and a fresh authenticated device/index observation.
+
+Device-index allocation is durable and monotonic. Cancelled indexes stay spent. `current_index` and `valid_indexes` have different meanings. PN/LID aliases can represent the same slot; reconcile them against authenticated mappings and key indexes. There is no server-side compare-and-swap guarantee.
+
+### Approval and maintenance recovery
+
+Inspect `pending_stage()` after interruption. `cancel_prepared` only cancels an unsent preparation. After attempted upload, `settle_unsuccessful_approval` releases the active slot while retaining a bounded public recovery tombstone. `abandoned_approvals` and `recover_abandoned_approval` handle late results with original identity/proof bindings. No observation proves a delayed result can never arrive.
+
+`revoke`, `revoke_all` and `reconcile` preserve the allocation high-water mark. Revocation can include authenticated owned devices that were not locally proof-confirmed. Retained maintenance intent resumes through `resume_maintenance`; topology drift may require `refresh_maintenance_indexes`. Do not discard recovery records to bypass journal capacity.
+
+### Bootstrap and history dispatch
+
+`bootstrap` takes explicit initial-bootstrap history with chunk order zero and progress 100. External history uses `prepare_external_bootstrap_history`, protected retention of `PreparedBootstrapHistory`, then `bootstrap_with_uploaded_history`. Restore with `PreparedBootstrapHistory::from_uploaded` to validate the compressed payload's hash and length. Larger exports can combine `upload_stream` with `send_uploaded_history_chunk` and a host-owned cursor.
+
+Retain upload descriptors, IDs, hashes and exact payload bindings before dispatch. Ambiguous retries reuse those bindings and never silently re-upload under an old ID. `bootstrap_dispatch_complete()` means local send paths returned and their progress was checkpointed. It does not confirm companion application or full-account-history completion.
+
+`cancel_unsent_bootstrap` only releases an intent before peer payload binding. Use `abandon_dispatch` for partial dispatch, then `resume_abandoned_dispatch` before retrying the original operation. Stable IDs do not promise remote deduplication. The shared send pipeline rechecks the proof-confirmed peer identity under its session lock immediately before encryption.
+
+## Validate your host
+
+Use the exact-source consumer fixtures as integration references: [mobile API](https://github.com/oxidezap/whatsapp-rust/blob/7e5c198e1a25ea405faa7a69a47bc727ea15484c/tests/api-consumer/src/mobile.rs), [runtime and storage](https://github.com/oxidezap/whatsapp-rust/blob/7e5c198e1a25ea405faa7a69a47bc727ea15484c/tests/api-consumer/src/mobile_runtime_fixture.rs), and [workflow tests](https://github.com/oxidezap/whatsapp-rust/blob/7e5c198e1a25ea405faa7a69a47bc727ea15484c/tests/api-consumer/tests/mobile_workflow.rs). These are synthetic integration evidence, not instructions to register a real account during validation.
+
+Direct SQLite consumers enable its `mobile` feature for initialization/import. Role-binding reads and writes remain available without it so feature-off builds still recognize mobile namespaces. Browser consumers additionally select `js`, disable native defaults and provide their own services. WASM linking alone does not qualify browser execution or an ESP32 build.

@@ -11,7 +11,7 @@ These pages describe the current source API. Use the audited Git revision below 
 
 Before installing whatsapp-rust, ensure you have:
 
-- **Rust 1.94 or newer** — the workspace MSRV, and all default features build on **stable Rust**. See [Using stable Rust](#using-stable-rust).
+- **Rust 1.95 or newer** — the workspace MSRV, and all default features build on **stable Rust**. See [Using stable Rust](#using-stable-rust).
 - **Cargo** package manager
 
 <Note>
@@ -24,7 +24,7 @@ Before installing whatsapp-rust, ensure you have:
 
 ```toml Cargo.toml
 [dependencies]
-whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "35a69a14149fa2cd2a0cc719f875f441d1c6e1dc" }
+whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "7e5c198e1a25ea405faa7a69a47bc727ea15484c" }
 tokio = { version = "1.53", features = ["macros", "rt-multi-thread"] }
 ```
 
@@ -52,7 +52,7 @@ The same holds for git consumers — no need to pin every sibling crate:
 
 ```toml Cargo.toml
 [dependencies]
-whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "35a69a14149fa2cd2a0cc719f875f441d1c6e1dc" }
+whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "7e5c198e1a25ea405faa7a69a47bc727ea15484c" }
 tokio = { version = "1.53", features = ["macros", "rt-multi-thread"] }
 ```
 
@@ -60,7 +60,7 @@ If you need to declare a sibling crate explicitly (for example to enable a crate
 
 ```toml Cargo.toml
 [dependencies]
-whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "35a69a14149fa2cd2a0cc719f875f441d1c6e1dc" }
+whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "7e5c198e1a25ea405faa7a69a47bc727ea15484c" }
 # Only needed for crate-specific features not exposed through whatsapp-rust:
 # whatsapp-rust-sqlite-storage is re-exported by whatsapp-rust; add a direct Git dependency only if needed.
 # whatsapp-rust-tokio-transport is re-exported by whatsapp-rust; add a direct Git dependency only if needed.
@@ -97,6 +97,11 @@ whatsapp-rust supports several optional features:
 | `voip-encoded` | Narrower `voip` profile: `voip-runtime` plus the encoded-audio boundary, no bundled codec and, as of [PR #1364](https://github.com/oxidezap/whatsapp-rust/pull/1364), no relay transport either — supply raw Opus/MLOW packets from your own encoder/decoder, and either `voip-relay-native` or your own `RelayTransportProvider` | ❌ No |
 | `voip-mlow` | `voip-runtime` plus the bundled pure-Rust MLOW codec — no relay transport included; builds on `wasm32` | ❌ No |
 | `voip-libopus` | `voip-encoded` plus the optional libopus FFI codec adapter — no relay transport included | ❌ No |
+| `js` | Browser randomness and SQLite wasm-bindgen hooks when SQLite is selected; disable native defaults | ❌ No |
+| `instance-clock` | Caller-owned clock shared by runtime and persistence | ❌ No |
+| `mobile-core` | Explicit primary-mobile registration/session/hosting workflows; includes `instance-clock` | ❌ No |
+| `mobile-transport-native` | Optional mobile Tokio TCP adapter; includes `mobile-core` | ❌ No |
+| `generated-group-notifications` | Contextual group parsing with explicit effective account facts | ❌ No |
 | `legacy-session-interop` | Typed interop with the decoded legacy libsignal `SessionRecord` v1 model, for migrating externally produced auth state. See [Signal Protocol](/advanced/signal-protocol) | ❌ No |
 | `danger-skip-tls-verify` | Skip TLS verification (unsafe) | ❌ No |
 | `danger-skip-cert-chain-verify` | Skip the Noise handshake certificate-chain check (unsafe) | ❌ No |
@@ -120,11 +125,11 @@ The `wacore` crate has an additional feature for WASM browser targets:
 |---------|-------------|-----------------|
 | `js` | Enables browser-compatible random number generation via `getrandom/wasm_js` for `wasm32` targets | ❌ No |
 
-To use whatsapp-rust in a WASM browser environment, enable the `js` feature on `wacore`:
+For the SDK browser profile, disable default features and enable `whatsapp-rust/js`. It forwards browser randomness and, when selected, SQLite host hooks. Direct core consumers enable `wacore/js`:
 
 ```toml Cargo.toml
 [dependencies]
-wacore = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "35a69a14149fa2cd2a0cc719f875f441d1c6e1dc", default-features = false, features = ["js"] }
+wacore = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "7e5c198e1a25ea405faa7a69a47bc727ea15484c", default-features = false, features = ["js"] }
 ```
 
 <Note>
@@ -134,8 +139,8 @@ wacore = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "35a69a14149
 
   ```toml Cargo.toml
   [dependencies]
-  whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "35a69a14149fa2cd2a0cc719f875f441d1c6e1dc", default-features = false, features = ["voip-mlow"] }
-  wacore = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "35a69a14149fa2cd2a0cc719f875f441d1c6e1dc", default-features = false, features = ["js"] }
+  whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "7e5c198e1a25ea405faa7a69a47bc727ea15484c", default-features = false, features = ["voip-mlow"] }
+  wacore = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "7e5c198e1a25ea405faa7a69a47bc727ea15484c", default-features = false, features = ["js"] }
   ```
 </Note>
 
@@ -151,7 +156,7 @@ The `waproto` crate has its own feature flags:
 
 ```toml Cargo.toml
 [dependencies]
-waproto = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "35a69a14149fa2cd2a0cc719f875f441d1c6e1dc", features = ["serde-snake-case"] }
+waproto = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "7e5c198e1a25ea405faa7a69a47bc727ea15484c", features = ["serde-snake-case"] }
 ```
 
 The `whatsapp-rust-sqlite-storage` crate has its own feature flags:
@@ -168,7 +173,7 @@ To keep the `SqliteStore` while linking against your own SQLite, disable default
 
 ```toml Cargo.toml
 [dependencies]
-whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "35a69a14149fa2cd2a0cc719f875f441d1c6e1dc", default-features = false, features = [
+whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "7e5c198e1a25ea405faa7a69a47bc727ea15484c", default-features = false, features = [
     "sqlite-storage",
     "tokio-transport",
     "tokio-runtime",
@@ -184,7 +189,7 @@ If you depend on `whatsapp-rust-sqlite-storage` directly, the same rule applies 
 
 ```toml Cargo.toml
 [dependencies]
-whatsapp-rust-sqlite-storage = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "35a69a14149fa2cd2a0cc719f875f441d1c6e1dc", default-features = false }
+whatsapp-rust-sqlite-storage = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "7e5c198e1a25ea405faa7a69a47bc727ea15484c", default-features = false }
 ```
 
 <Note>
@@ -197,7 +202,7 @@ whatsapp-rust-sqlite-storage = { git = "https://github.com/oxidezap/whatsapp-rus
 
 ## Using stable Rust
 
-whatsapp-rust uses Rust **edition 2024** and declares an MSRV of **1.94**, both of which stable Rust supports, and the default feature set has no nightly-only dependency — `cargo build`/`cargo add whatsapp-rust` works with **stable Rust** out of the box, no feature flags to disable.
+whatsapp-rust uses Rust **edition 2024** and declares an MSRV of **1.95**, both of which stable Rust supports, and the default feature set has no nightly-only dependency — `cargo build`/`cargo add whatsapp-rust` works with **stable Rust** out of the box, no feature flags to disable.
 
 <Note>
   The project's own `rust-toolchain.toml` still pins a nightly compiler (`nightly-2026-06-16`), but only for internal, binary-size-focused build flags — `-Zshare-generics` and lld/ICF linking, set workspace-wide in `.cargo/config.toml`, plus `-Zbuild-std` for the Docker image build only (see [Docker deployment](#docker-deployment) below) — not for any language feature the published crates need. That pin governs building the whatsapp-rust workspace itself; it has no effect on your project when you depend on whatsapp-rust from crates.io or git.
@@ -247,7 +252,7 @@ If you want to use only specific features:
 
 ```toml Cargo.toml
 [dependencies]
-whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "35a69a14149fa2cd2a0cc719f875f441d1c6e1dc", default-features = false, features = ["sqlite-storage", "tokio-transport"] }
+whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "7e5c198e1a25ea405faa7a69a47bc727ea15484c", default-features = false, features = ["sqlite-storage", "tokio-transport"] }
 ```
 
 ## Verify installation
@@ -326,7 +331,7 @@ docker run --rm -v whatsapp-data:/data alpine chown -R 65532:65532 /data
 
 ### Graceful shutdown
 
-The container supports graceful shutdown out of the box. When the `signal` feature is enabled (it is by default), the bot listens for `SIGTERM` and `Ctrl+C`, disconnects cleanly from WhatsApp, and exits. Docker sends `SIGTERM` on `docker stop`, so the bot will shut down gracefully without losing session state.
+The container supports graceful shutdown out of the box. When the `signal` feature is enabled (it is by default), the bot listens for `SIGTERM` and `Ctrl+C`, disconnects cleanly from WhatsApp, and exits. Docker sends `SIGTERM` on `docker stop`, so the bot can attempt graceful cleanup. Inspect the shutdown report for persistence failures.
 
 Since the image is built from `scratch`, PID 1 is the binary itself. It handles signals directly — no init system like `tini` is needed. This matters more than usual for PID 1: the kernel silently drops any signal a PID-1 process has no handler installed for, so an unhandled `SIGTERM` doesn't just fall back to the default disposition — it's dropped entirely, and the process only stops once `docker stop`'s grace period expires and it's `SIGKILL`ed.
 
