@@ -1173,11 +1173,9 @@ pub enum SessionMessageKeyMaterial {
 }
 ```
 
-As of [#1210](https://github.com/oxidezap/whatsapp-rust/pull/1210), the seed is persisted alongside the keys it derives, not just accepted on import. Previously `Seed` was only a compact import form, expanded through the same canonical derivation used elsewhere through `MessageKeyGenerator`. Now a skipped key's seed round-trips back out on export too. `session_structure::chain::MessageKey` carries an additive `seed` field (local field 100) alongside the pre-existing `cipher_key`/`mac_key`/`iv`. `from_structure` prefers the seed when present: it re-derives from the seed and rejects the record if the result disagrees with the stored triple, since the seed supersedes the triple on export and a mismatch means a corrupt record. `Derived` now comes back only for a key persisted *before* this change — one that never wrote a seed. Both variants use fixed-width arrays.
+Seeded skipped keys retain their 32-byte seed through canonical storage and component export. Derived keys retain the explicit cipher/MAC/IV arrays. Both component variants use fixed-width arrays; match both forms instead of assuming every export contains derived material. Conversion validates the accepted shape and normalizes record state, rather than providing a byte-for-byte copy.
 
-<Note>
-**Breaking for direct consumers of these types.** `SessionMessageKeyMaterial::Seed` and `Derived` switched from `Vec<u8>` fields to fixed-width arrays. Match both variants — don't assume `Derived` is the only exported form. `MessageKeyGenerator::Keys(MessageKeys)` was also removed; nothing in the workspace constructed it. Build a seeded key with `MessageKeyGenerator::new_from_seed` instead. If you downgrade to a build predating #1210 and write a record back out, the seed drops silently — decrypt is unaffected, but the key becomes unexportable again.
-</Note>
+`MessageKeyGenerator` is a struct in the current engine adapter. The inherited `Keys` enum variant and `new_from_seed` constructor are absent. Low-level callers obtain a generator through `ChainKey::message_keys()` and call `generate_keys()`; component import uses `SessionMessageKeyMaterial` directly.
 
 Conversions:
 
