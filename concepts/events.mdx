@@ -1684,7 +1684,8 @@ pub struct GroupParticipantInfo {
     pub r#type: Option<GroupParticipantType>,
     pub lid: Option<Jid>,
     pub username: Option<String>,
-    pub join_time: Option<i64>,
+    pub join_time: Option<u64>,
+    pub group_history_sent_state: Option<GroupHistorySentState>,
 }
 ```
 
