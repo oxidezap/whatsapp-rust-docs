@@ -4,7 +4,7 @@ description: Choose group projections, construct inputs and manage group state
 ---
 
 <Note>
-Examples on this page target [source snapshot `35a69a14`](https://github.com/oxidezap/whatsapp-rust/tree/35a69a14149fa2cd2a0cc719f875f441d1c6e1dc), not a crates.io release. Use the [current API guide](/guides/current-api) to select the matching dependency.
+Examples on this page target [source snapshot `7e5c198e`](https://github.com/oxidezap/whatsapp-rust/tree/7e5c198e1a25ea405faa7a69a47bc727ea15484c), not a crates.io release. Use the [current API guide](/guides/current-api) to select the matching dependency.
 </Note>
 
 ## Choose a projection
@@ -116,15 +116,15 @@ Use typed modes and the source reference for exact arguments:
 Use the [pictures facade](/api/pictures) for a single normal group or community parent. Group picture mutations remain `set_profile_picture` and `remove_profile_picture`.
 
 ## Source reference
-[Facade, projections, history outcomes and DTO constructors](https://github.com/oxidezap/whatsapp-rust/blob/35a69a14149fa2cd2a0cc719f875f441d1c6e1dc/src/features/groups.rs) · [Core group inputs, typed modes and IQ contracts](https://github.com/oxidezap/whatsapp-rust/blob/35a69a14149fa2cd2a0cc719f875f441d1c6e1dc/wacore/src/iq/groups.rs)
+[Facade, projections, history outcomes and DTO constructors](https://github.com/oxidezap/whatsapp-rust/blob/7e5c198e1a25ea405faa7a69a47bc727ea15484c/src/features/groups.rs) · [Core group inputs, typed modes and IQ contracts](https://github.com/oxidezap/whatsapp-rust/blob/7e5c198e1a25ea405faa7a69a47bc727ea15484c/wacore/src/iq/groups.rs)
 
 ## GroupError
 
-Group operations return their typed `GroupError`, preserving IQ, storage and validation causes. Description conflicts require reconciling current state before another update. Keep a fallback arm when matching this extensible enum. See [the pinned error definition](https://github.com/oxidezap/whatsapp-rust/blob/35a69a14149fa2cd2a0cc719f875f441d1c6e1dc/src/features/groups.rs) and [error-chain recovery](/api/errors#error-chain-recovery).
+Group operations return their typed `GroupError`, preserving IQ, storage and validation causes. Description conflicts require reconciling current state before another update. Keep a fallback arm when matching this extensible enum. See [the pinned error definition](https://github.com/oxidezap/whatsapp-rust/blob/7e5c198e1a25ea405faa7a69a47bc727ea15484c/src/features/groups.rs) and [error-chain recovery](/api/errors#error-chain-recovery).
 
 ## Durable notification capture
 
-This API requires [main snapshot `35a69a14`](https://github.com/oxidezap/whatsapp-rust/blob/35a69a14149fa2cd2a0cc719f875f441d1c6e1dc/src/types/group_notification_durability.rs). Register `GroupNotificationDurabilityHook` on `ClientBuilder` or `BotBuilder` using `with_group_notification_durability_hook` or its `_arc` variant. The last registration wins.
+This API requires [main snapshot `7e5c198e`](https://github.com/oxidezap/whatsapp-rust/blob/7e5c198e1a25ea405faa7a69a47bc727ea15484c/src/types/group_notification_durability.rs). Register `GroupNotificationDurabilityHook` on `ClientBuilder` or `BotBuilder` using `with_group_notification_durability_hook` or its `_arc` variant. The last registration wins.
 
 ```rust
 use std::sync::Arc;
@@ -147,3 +147,11 @@ Scope an optional stanza ID by authenticated account/session and source group. A
 Withholding ACK permits possible redelivery but does not guarantee it. A successful callback does not guarantee local effects or ACK if the connection retired meanwhile. Reconnect/shutdown can cancel capture; reconcile an indeterminate commit from persisted evidence before retrying. A metadata change already started can finish storage/cache publication and required sender-key rotation before later actions and ACK stop. A sender-key storage error needs reconciliation too.
 
 The SDK does not replay local effects or make event delivery durable. Drive downstream work from your outbox and deduplicate consumers. RawNode diagnostic observers can run before the gate. Captures for the same group share its inbound message lane; do not wait inside the callback for a later message or notification on that lane.
+
+## Effective facts for contextual notifications
+
+The opt-in `generated-group-notifications` feature exposes `GroupNotificationFactsProvider`. Register it with `set_group_notification_facts_provider` before receiving notifications. Registration is once-only and returns `GroupNotificationFactsAlreadySet` on replacement.
+
+Its synchronous `snapshot()` returns coherent effective `username_displayed`, `history_after_join` and `opus_enabled` account values. Construct `GroupNotificationFacts` with its builder. `normalize_country_code` must be a pure lookup against the intended registry, returning `None` for unknown codes. Neither method may perform I/O or mutate protocol state.
+
+Without a provider, the legacy parser remains active. Leave it absent when account facts are unavailable. Protocol flag defaults are not evidence of effective account settings. The feature does not alter the separate durability capture registration.

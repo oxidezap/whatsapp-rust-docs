@@ -858,7 +858,7 @@ Access profile operations.
 **Methods:**
 - `set_push_name(name: &str)` - Set display name and return `PushNameOutcome`; inspect pending app-state synchronization
 - `sync_push_name(name: &str)` - Retry only app-state synchronization for the still-desired name
-- `set_status_text(text: &str)` - Set profile "About" text
+- `set_text_status(text, emoji, expiry)` and `clear_text_status()` - Update or clear About through MEX; `set_status_text` keeps the legacy IQ path
 - `set_profile_picture(image_data: Vec<u8>)` - Set profile picture (JPEG, 640x640 recommended)
 - `remove_profile_picture()` - Remove profile picture
 
@@ -2005,7 +2005,7 @@ pub fn add_stanza_interceptor(
 
 Register an interceptor that sees eligible decoded stanzas before built-in handling, and may take them. This is the seam for acting on a stanza this client does not model — `StanzaRouter::register` panics on a duplicate tag, so even an existing tag can't be handled differently any other way — instead of watching it get nacked.
 
-On [main snapshot `35a69a14`](https://github.com/oxidezap/whatsapp-rust/blob/35a69a14149fa2cd2a0cc719f875f441d1c6e1dc/src/types/group_notification_durability.rs), an optional `GroupNotificationDurabilityHook` runs before interceptors for `notification type="w:gp2"` with a valid `from` JID. Failed or canceled capture prevents that stanza from reaching an interceptor and withholds its effects and ACK. A successful capture admits interception only while the connection remains active. RawNode diagnostic observers can run before capture. See [group notification capture](/api/groups#durable-notification-capture).
+On [main snapshot `7e5c198e`](https://github.com/oxidezap/whatsapp-rust/blob/7e5c198e1a25ea405faa7a69a47bc727ea15484c/src/types/group_notification_durability.rs), an optional `GroupNotificationDurabilityHook` runs before interceptors for `notification type="w:gp2"` with a valid `from` JID. Failed or canceled capture prevents that stanza from reaching an interceptor and withholds its effects and ACK. A successful capture admits interception only while the connection remains active. RawNode diagnostic observers can run before capture. See [group notification capture](/api/groups#durable-notification-capture).
 
 <ParamField path="interceptor" type="Arc<dyn StanzaInterceptor>" required>
   The interceptor to register. A plain closure of type `Fn(&OwnedNodeRef) -> Interception` implements `StanzaInterceptor` too, so `client.add_stanza_interceptor(Arc::new(|node: &OwnedNodeRef| { .. }))` works without a named type.
@@ -2450,8 +2450,8 @@ Entry counts plus estimated retained heap bytes for the client's internal collec
 | `resend_rate_limiter_chats` | `u64` | Chats tracked by the per-chat resend rate limiter (count only) |
 | `session_recreate_history` | `u64` | Peers whose Signal session was recently recreated, keyed to rate-limit the next recreate (count only) ([#1235](https://github.com/oxidezap/whatsapp-rust/pull/1235)) |
 | `skdm_warm_memo` | `u64` | Groups whose sender-key distribution is memoised as already warm (count only) ([#1235](https://github.com/oxidezap/whatsapp-rust/pull/1235)) |
-| `transport_ack_queue` | `usize` | Deferred transport acks queued for the ack worker. Each entry retains the full inbound node plus a flush guard, so a stalled transport shows up here as a growing backlog ([#1116](https://github.com/oxidezap/whatsapp-rust/pull/1116)) |
-| `delivery_receipt_queue` | `usize` | Delivery receipts queued for their worker, same shape as `transport_ack_queue` ([#1116](https://github.com/oxidezap/whatsapp-rust/pull/1116)) |
+| `transport_ack_queue` | `usize` | Deferred encoded ACKs, bounded by 256 items and a 256 KiB retained-byte budget. Payload nodes are not retained. |
+| `delivery_receipt_queue` | `usize` | Delivery receipts pending for their worker, controlled by drain/lifecycle admission. |
 | `response_waiters` | `usize` | Active IQ response waiters |
 | `node_waiters` | `usize` | Active node waiters |
 | `media_reuploads` | `usize` | Distinct in-flight media-reupload operations. Coalesced subscribers share one entry; this is not a subscriber count. |
@@ -2666,3 +2666,25 @@ Use [`client.pictures().lookup(ProfilePictureRequest)`](/api/pictures) for conta
 ## Retry policies
 
 Configure `with_retry_admission` or `with_retry_admission_arc` to gate inbound group/status retry repair. Configure `with_decrypt_failure_admission` or `with_decrypt_failure_admission_arc` to gate automatic outbound decrypt-failure retry receipts. Both builders accept owned or shared implementations; the last registration for each policy wins before assembly. Keep runtime tuning inside the policy. See [retry admission](/advanced/retry-admission) for contexts, decisions and refusal consequences.
+
+## History recovery and request correlation
+
+Register [durable history recovery](/advanced/history-sync-admission#durable-notification-recovery) before building, then replay protected host records through `replay_history_sync_notification(&HistorySyncKey, &[u8])`.
+
+`fetch_message_history_with_id(chat, oldest_msg_id, oldest_msg_from_me, oldest_msg_timestamp_ms, count, &request_id)` lets you persist the `MessageId` returned by `generate_message_id()` before dispatch. Incoming history can arrive before the send future completes. Correlate its peer-data request session ID with that durable ID. `fetch_message_history` still generates and returns an ID for simpler callers.
+
+## Desktop Web profiles
+
+Use `ClientProfile::web_with_sub_platform(WebSubPlatform::WIN_HYBRID)` or `WebSubPlatform::DARWIN` for desktop Web shells. These retain the Web user-agent platform and select the shell through `web_info.web_sub_platform`. The `windows` and `macos` constructors select different user-agent platforms. A user-agent profile alone does not implement primary-mobile registration or login; use the explicit [mobile session](/guides/mobile-sessions) configuration.
+
+## Shutdown observations
+
+Treat `ShutdownReport`, `LogoutReport` and `BotShutdownReport` as required observations. Inspect `inbound`, `outbound`, `signal_settle`, `device` and `message_secrets`; the types are non-exhaustive and are not cloneable snapshots. A completed inbound drain may retain failed consumer work durably. An outbound drain is not delivery confirmation.
+
+Reports cover that cleanup invocation, not concurrent producers, callbacks, detached work or another teardown. Device and message-secret flushes have no total shutdown deadline. Timing out the future does not prove backend I/O stopped. `StoreRelease::wait()` separately observes release of crate-owned storage handles, including saver work; it does not certify durability or close host-owned handles.
+
+`ProtocolTerminalReason::Conflict` distinguishes `Replaced`, `DeviceRemoved` and `Unknown`. Unknown conflicts do not prove device removal. Use a fallback arm and keep credential-deletion policy in your host. An invalid primary identity is a local validation failure, `InvalidPrimaryIdentity`, rather than a fabricated server error code.
+
+### Receive queue memory charges
+
+`memory_report()` also exposes `inbound_chat_budgets: CollectionStats`, `inbound_chat_charged_bytes: u64` and `inbound_ack_charged_bytes: u64`. Charges include in-flight ownership and backing slices retained beyond lane eviction. They conservatively charge at least 1 KiB per incoming owner and exclude decoded trees. Idle capacity reclamation reduces reserved queue memory without changing admission bounds. See [lane admission](/concepts/architecture#per-chat-lanes).

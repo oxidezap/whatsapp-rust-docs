@@ -304,40 +304,33 @@ This operation is not reversible. The chat and optionally its media will be remo
 
 ## Clear chat
 
-### clear_chat
+### clear_chat_with_options
 
-Clear a chat's messages while **keeping the chat** itself (WhatsApp Web's "Clear chat"). Unlike [`delete_chat`](#delete_chat), the chat stays in the list — only its messages are removed. Syncs across all linked devices.
+Clear messages while keeping the chat in the list. Build `ClearChatOptions` from `Default`, which keeps starred messages and downloaded media. The message range remains a separate conflict-resolution argument.
 
 ```rust
-pub async fn clear_chat(
+pub async fn clear_chat_with_options(
     &self,
     jid: &Jid,
-    delete_starred: bool,
-    delete_media: bool,
+    options: ClearChatOptions,
     message_range: Option<SyncActionMessageRange>,
 ) -> Result<(), AppStateError>
 ```
 
-**Parameters:**
-- `jid` - The chat JID to clear
-- `delete_starred` - Also remove starred messages
-- `delete_media` - Also remove downloaded media files
-- `message_range` - Optional message range for multi-device conflict resolution. Pass `None` in most cases
-
-Both flags are encoded in the mutation index (not the proto body), matching WhatsApp Web's `clearChat` action.
-
-**Example:**
 ```rust
-let jid: Jid = "15551234567@s.whatsapp.net".parse()?;
+use whatsapp_rust::{ClearChatOptions, MediaDeletion, StarredMessages};
 
-// Clear all messages, including starred ones and downloaded media
-client.chat_actions().clear_chat(&jid, true, true, None).await?;
-
-// Clear messages but keep starred messages and media
-client.chat_actions().clear_chat(&jid, false, false, None).await?;
+let options = ClearChatOptions::default()
+    .with_starred_messages(StarredMessages::Delete)
+    .with_media(MediaDeletion::Delete);
+client.chat_actions().clear_chat_with_options(&jid, options, None).await?;
 ```
 
-A clear performed on another linked device arrives as an [`Event::ClearChatUpdate`](/concepts/events#clearchatupdate).
+The two policies are encoded in the mutation index. A clear on another linked device arrives as [`Event::ClearChatUpdate`](/concepts/events#clearchatupdate). This operation synchronizes a chat action; it does not delete files from your application's own media store.
+
+### clear_chat
+
+The positional `clear_chat(jid, delete_starred, delete_media, message_range)` method remains available but is deprecated. Use `clear_chat_with_options` for new code.
 
 ## Save and remove contacts
 
@@ -713,3 +706,7 @@ async fn organize_chats(
 - [Client](/api/client) - Core client API
 - [Labels](/api/labels) - Chat and message label operations built on the same app-state send path
 - [Quick Replies](/api/quick-replies) - Saved reply shortcuts built on the same app-state send path
+
+## Incomplete lock updates
+
+An incoming lock mutation without its `locked` field does not publish `Event::LockChatUpdate`. Do not interpret a missing value as an unlock.

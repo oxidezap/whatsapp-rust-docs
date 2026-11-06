@@ -179,3 +179,49 @@ The `require_full_sync` and `history_sync_config` fields set at pairing time are
 - [Retry Admission Hook](/advanced/retry-admission) — the sibling opt-in policy for gating inbound group/status retry receipts.
 - [Inbound Durability Hook](/advanced/inbound-durability) — the opt-in hook idiom this trait follows.
 - [`Bot.skip_history_sync`](/api/bot#skip_history_sync) — the all-or-nothing toggle that takes precedence over any admission policy.
+
+## Durable notification recovery
+
+`HistorySyncDurabilityHook` is a separate opt-in from admission, live-message commits and `HistorySyncCaptureHook`. Register it before building with `with_history_sync_durability_hook` or `with_history_sync_durability_hook_arc` on `ClientBuilder` or `BotBuilder`. The last registration wins.
+
+```rust
+use std::sync::Arc;
+use whatsapp_rust::{ClientBuilder, HistorySyncDurabilityHook};
+
+fn configure_recovery(
+    builder: ClientBuilder,
+    hook: Arc<dyn HistorySyncDurabilityHook>,
+) -> ClientBuilder {
+    builder.with_history_sync_durability_hook_arc(hook)
+}
+```
+
+Implement both callbacks:
+
+```rust
+async fn on_notification(
+    &self,
+    key: &HistorySyncKey,
+    metadata: &HistorySyncMetadata<'_>,
+    notification: &[u8],
+) -> anyhow::Result<()>;
+
+async fn on_compressed_chunk(
+    &self,
+    key: &HistorySyncKey,
+    metadata: &HistorySyncMetadata<'_>,
+    compressed: &[u8],
+) -> anyhow::Result<()>;
+```
+
+Only self-sent primary-device notifications enter this capture path. The SDK journals the decrypted carrier in bounded pending-inbound storage, awaits `on_notification` and admits work to the bounded history queue before carrier ACK. Queue saturation or capture failure retains the journal for a redelivery attempt without repeating Signal decryption. Construction probes the required backend operations even when no live-message durability hook is installed.
+
+Commit the exact encoded notification before returning `Ok`. The SDK retains the original notification wire, including unknown fields and inline data. `on_compressed_chunk` receives decrypted, zlib-compressed bytes before parsing. With this hook, the `hist_sync` receipt also waits for successful parsing. Skip or admission rejection intentionally acknowledges without either callback.
+
+Deduplicate by every field of `HistorySyncKey`, `chat`, `sender` and `id`, within a separate account namespace. Preserve device components and reject the same key with different bytes. Metadata contains sender claims, not validated file properties. Protect notifications as account data because they contain media keys and may contain inline history.
+
+### Replay retained notifications
+
+After carrier ACK, the host owns recovery if processing fails or the process exits. Retain notifications and retry `client.replay_history_sync_notification(&key, &bytes).await?` until your chunk record is durable. Register the same idempotent hook first. Replay requires the loaded account identity and verifies the key belongs to that account. Downloaded chunks also need a connected socket; inline replay can run without one. `Ok` does not confirm receipt delivery or remote acknowledgement, and replay does not remove the host record.
+
+Replay and worker processing share a two-task limit. Notification callbacks backpressure receive commits; chunk callbacks run on the worker or replay. Keep callbacks nonblocking and avoid waiting on client operations that depend on that pipeline. Events and callbacks may repeat. Backend durability and your own retry scheduler determine recovery strength.

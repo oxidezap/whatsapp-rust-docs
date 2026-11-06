@@ -324,3 +324,7 @@ client.presence().set_unavailable().await?;
 ## Receiving presence updates
 
 After subscribing to a contact's presence, you'll receive presence events through the event handler. See the [Events](/concepts/events) documentation for details on handling incoming presence updates.
+
+## Maintain presence manually
+
+`PresencePolicy::Manual` leaves availability maintenance to your host. The source example [`manual_presence.rs`](https://github.com/oxidezap/whatsapp-rust/blob/7e5c198e1a25ea405faa7a69a47bc727ea15484c/examples/manual_presence.rs) demonstrates a bounded scheduler with coalesced demand, reconnect awareness and shutdown. It does not require a new SDK API. Avoid spawning an unbounded task for every activity event; retain the desired state and bound retries.
