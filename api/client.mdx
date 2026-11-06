@@ -1193,15 +1193,9 @@ History sync transfers chat history from the phone to the linked device. The cli
 
 ### Processing pipeline
 
-When a history sync notification arrives, the client:
+For admitted history, the worker obtains inline bytes or downloads the external blob, processes decompression and parsing through the injected runtime, and dispatches a `LazyHistorySync` event when observed. Internal push-name, token and message-secret processing can still run without an event subscriber.
 
-1. Sends a `HistorySync` receipt immediately (so the phone knows delivery succeeded)
-2. Retrieves the data — either from an inline payload (moved via `.take()`, not cloned) or by stream-decrypting an external blob in 8KB chunks
-3. Extracts a `compressed_size_hint` from the notification's `file_length` field, which the decompressor uses with a 4x multiplier for better buffer pre-allocation (avoids repeated `Vec` reallocation)
-4. Runs decompression and protobuf parsing on a blocking thread (`tokio::task::spawn_blocking`) to avoid stalling the async runtime
-5. Wraps the decompressed blob in a [`LazyHistorySync`](/concepts/events#lazyhistorysync) with cheap metadata (sync type, chunk order, progress) and dispatches it as `Event::HistorySync(Box<LazyHistorySync>)`. Full protobuf decoding is deferred until the event handler calls `.get()`
-
-If no event handlers are registered, the blob is not retained — only internal data (pushname, NCT salt, TC tokens) is extracted.
+Receipt timing depends on registration. Without a capture or recovery hook, the worker attempts `hist_sync` before payload acquisition. Capture-only registration waits for compressed-byte capture. `HistorySyncDurabilityHook` first retains the notification before carrier ACK and additionally waits for durable compressed bytes and successful parsing before `hist_sync`. See [history recovery](/advanced/history-sync-admission#durable-notification-recovery). Neither a local send result nor the event proves remote application or full-history completion.
 
 ### process_sync_task
 

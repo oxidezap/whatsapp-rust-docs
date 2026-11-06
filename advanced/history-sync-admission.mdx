@@ -41,7 +41,7 @@ A `RejectAndAcknowledge` decision:
 - Does **not** enqueue the notification onto the major-sync worker.
 - Does **not** emit `Event::HistorySync`.
 
-The receipt is permanent from the phone's perspective. `RejectAndAcknowledge` is not a way to shed load and get the chunk back later — the phone will not offer it again. If you need transient load shedding, do it inside `Accept` by throttling downstream work, not by rejecting.
+`RejectAndAcknowledge` intentionally sends a positive receipt and retains no recovery record. Do not rely on the phone offering that chunk again. If you need transient load shedding, do it inside `Accept` by throttling downstream work, not by rejecting.
 
 ## Types
 

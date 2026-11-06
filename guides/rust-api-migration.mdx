@@ -96,14 +96,15 @@ fn configure_capture(
 
 | Configuration or result | History receipt behavior |
 |---|---|
-| No capture hook, including message-only durability | Attempts `hist_sync` before downloading. |
-| Capture hook | Obtains bytes, awaits capture and then attempts `hist_sync`. |
-| Download failure, capture error or cancellation before completion | Withholds `hist_sync` for that attempt. |
+| Neither history capture nor recovery hook, including message-only durability | Attempts `hist_sync` before downloading. |
+| Capture hook without history recovery | Obtains bytes, awaits capture and then attempts `hist_sync`. |
+| Failure before the selected hook/parse receipt point | Withholds `hist_sync` for that attempt. |
+| History durability hook | Journals carrier, commits notification and queue admission before carrier ACK; retains chunk and parses before `hist_sync`. |
 | Skipped or admission-rejected chunk | Acknowledges without capture. |
 
 Capture receives decrypted but still compressed bytes before decompression and protobuf validation. Make it idempotent by message ID within the account and safe for concurrent calls. Persist the bytes before returning success if your application needs them durably.
 
-The SDK does not automatically retry capture or keep a durable history replay buffer. Withholding a receipt does not guarantee phone redelivery or complete history. Shutdown neither joins nor cancels an already-entered callback. Coordinate its lifetime in your host and use `Client::shutdown_signal` when it needs to observe shutdown.
+Capture-only registration does not retain notifications for replay or schedule automatic capture retries. Use the separate [durability hook](/advanced/history-sync-admission#durable-notification-recovery) for host-owned recovery. Withholding a receipt does not guarantee phone redelivery or complete history. Shutdown neither joins nor cancels an already-entered callback. Coordinate its lifetime in your host and use `Client::shutdown_signal` when it needs to observe shutdown.
 
 ## Implement atomic storage operations
 
