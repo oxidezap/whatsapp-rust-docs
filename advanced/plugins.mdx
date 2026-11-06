@@ -105,6 +105,8 @@ A plugin's manifest requests capabilities, and `PluginContext` only exposes the 
 | `PluginCapability::CoreEvents` | `PluginCoreEvents` | Selective, non-blocking observation of sealed core events |
 | `PluginCapability::Tasks` | `PluginTasks` / `PluginConnectionTasks` | Runtime-agnostic, cancellation-tracked background work |
 | `PluginCapability::Messaging` | `PluginMessaging` | High-level message sends |
+| `PluginCapability::ClientInfo` | `PluginClientInfo` | Coherent client-profile and application-version snapshots |
+| `PluginCapability::IqReply` | `PluginIqReply` | One correlated extension-IQ reply, requiring `StanzaInterception` |
 | `PluginCapability::Iq` | `PluginIq` | Typed `IqSpec` execution |
 | `PluginCapability::PluginEvents` | `PluginEvents` | Publishing custom events, scoped to the plugin's own namespace |
 | `PluginCapability::StanzaInterception` | `PluginStanzaInterception` | Claiming a decoded stanza before the built-in pipeline sees it |

@@ -239,6 +239,8 @@ encoded source/sink ─────────┘
 
 The encoded boundary does not transcode — `AudioFormat` fixes the codec profile, RTP payload type, RTP clock, and 60 ms packet cadence for the whole call.
 
+For PCM endpoints, `.audio_opus(source, sink)` selects standard Opus negotiation instead of `.audio(source, sink)`'s MLOW path. Supply a backend/profile with native Opus support, such as `voip-libopus` plus the intended relay transport. The builder selector alone does not install a decoder. Incoming and outgoing media builders share this selector; complete pre-encoded packets still use `encoded_audio`.
+
 ### Profiles
 
 | Format | Codec | PCM | RTP clock / step | PT |
