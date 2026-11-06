@@ -350,7 +350,7 @@ pub async fn install_prekey_bundle(
 - `bundle` - A `PreKeyBundle` obtained out of band — e.g. from a manual/custom prekey fetch — rather than through [`assert_sessions`](#assert_sessions)'s normal usync + fetch flow
 
 **Returns:**
-- `IdentityChange` - `IdentityChange::NewOrUnchanged` if the peer had no identity key or it matched, or `IdentityChange::ReplacedExisting` if this bundle's identity key replaced a previously trusted one
+- `IdentityChange` - `IdentityChange::NewOrUnchanged` if the peer had no identity key or it matched, or a replacement classification if the bundle replaced a trusted key. `ReplacedExistingWithKeys` includes both keys; `ReplacedExisting` reports a replacement without them.
 
 The session is durably persisted before this method returns.
 
@@ -359,7 +359,7 @@ The session is durably persisted before this method returns.
 let bundle: PreKeyBundle = /* fetched via a custom IQ */;
 let identity_change = client.signal().install_prekey_bundle(&jid, &bundle).await?;
 
-if identity_change == IdentityChange::ReplacedExisting {
+if identity_change.is_changed() {
     println!("warning: {jid}'s identity key changed");
 }
 ```

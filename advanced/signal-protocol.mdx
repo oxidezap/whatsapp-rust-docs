@@ -1208,20 +1208,17 @@ impl SenderKeyRecord {
 - A sender chain too stale to fast-forward past its reservation is dropped from the exported chain rather than aborting the whole export — the rest of the record (receiver chains, other archived sessions) still exports normally.
 - `SessionRecordComponents.previous_sessions` is truncated to `ARCHIVED_STATES_MAX_LENGTH` (40) and `SenderKeyRecordComponents.states` is truncated to `MAX_SENDER_KEY_STATES` (5) — the same bounds the records themselves already enforce. See [Protocol safety limits](#protocol-safety-limits).
 
-### `has_usable_sender_chain`
+### Inspect the current sender chain
+
+The inherited `has_usable_sender_chain` methods are absent. `SessionState::has_sender_chain()` reports presence on a validated loaded state. Inspect it through `record.session_state()`; absence of a current state is distinct from a usable session. This presence check does not certify peer acceptance, durability or successful encryption.
 
 ```rust
-impl SessionState {
-    pub fn has_usable_sender_chain(&self) -> Result<bool, InvalidSessionError>;
-}
-impl SessionRecord {
-    pub fn has_usable_sender_chain(&self) -> Result<bool, SignalProtocolError>;
+use whatsapp_rust::wacore::libsignal::protocol::SessionRecord;
+
+fn has_sender_chain(record: &SessionRecord) -> bool {
+    record.session_state().is_some_and(|state| state.has_sender_chain())
 }
 ```
-
-Checks whether a session has a sender chain it could actually encrypt with, rather than assuming one exists. Previously this was effectively best-effort/always-true; the current implementation returns `Ok(false)` (not an error) when no sender chain is set at all, and otherwise structurally validates the ratchet public key, the ratchet private key, and the chain key are all present before returning `Ok(true)` — the same completeness check `from_components` applies on import. `SessionRecord::has_usable_sender_chain` delegates to the current session's check, returning `Ok(false)` when there is no current session.
-
-Location: `wacore/libsignal/src/protocol/records.rs`
 
 ### Debug output redacts secrets
 
@@ -1238,7 +1235,7 @@ This protects the named Debug representation. Exported fields remain sensitive.
 
 ```rust
 // `record: SessionRecord` loaded from your store
-if record.has_usable_sender_chain()? {
+if record.session_state().is_some_and(|state| state.has_sender_chain()) {
     let components = record.into_components()?;
     println!("{:?}", components.current_session); // secrets redacted
 }
@@ -1417,16 +1414,7 @@ pub trait SessionStore {
 
 All four protocol-layer call sites (`message_encrypt`, `message_decrypt_signal`, `message_decrypt_prekey`, `process_prekey_bundle`) — plus PreKey setup and group preflight mutations — take ownership of the record and drop it immediately after storing. Taking ownership eliminates the `.clone()` in the adapter and the compiler enforces no use-after-store. As of [#1044](https://github.com/oxidezap/whatsapp-rust/pull/1044), these call sites obtain the record through the `SessionCheckout` guard (below) rather than a bare `load_session`/`store_session` pair, so the zero-cost move still applies but the checkout is now cancellation-safe.
 
-**Per-message hot path impact:**
-
-| Operation | Before | After |
-|-----------|--------|-------|
-| `store_session` | clone all fields + protobuf encode | move (zero-cost) |
-| `load_session` | protobuf decode + construct | clone current session only (`previous_sessions` O(1) via Arc) |
-| `peek_session` | deep-clone record (1–2 KB) | `Arc` refcount bump; returns `Option<Arc<SessionRecord>>` |
-| `store_sender_key` | serialize to bytes + store bytes | store `SenderKeyRecord` object directly |
-| `load_sender_key` (`&self`) | load bytes + deserialize | return cached `SenderKeyRecord` object (read lock only) |
-| `flush` (batched) | write bytes to DB | serialize sessions + sender keys + write bytes to DB |
+Keep object-cache reuse separate from the storage codec. `peek_session` can borrow a cached record through `Arc`; a flush serializes dirty session and sender-key records. The current engine's record layout and clone costs differ from the inherited protobuf implementation, so old allocation comparisons are not a current performance guarantee.
 
 ### Cancellation-safe session checkouts
 
@@ -1794,28 +1782,13 @@ type AdvSigBuffer = SmallVec<[u8; 256]>;
 
 The device message is `prefix(2) || details || identity(32) || accountKey(32)`, so this buffer spills once `details.len() + 66` exceeds 256 bytes — comfortably above the couple dozen bytes a real `ADVDeviceIdentity` encodes to.
 
-**`PreKeyBundle`**: the signed pre-key signature is a fixed-length XEdDSA signature, so it is now stored inline as `[u8; 64]` instead of behind a `Vec<u8>`:
+Pre-key and session-record allocation behavior belongs to the current `protocol/records.rs` and engine codec. The inherited `PreKeyRecord::from_storage`, `GenericSignedPreKey::from_stored_structure` and separate `store/record_helpers.rs` implementation paths are absent. Historical benchmark results for those paths do not describe this engine.
 
-```rust
-// wacore/libsignal/src/protocol/state/bundle.rs
-pub const SIGNED_PRE_KEY_SIGNATURE_LEN: usize = 64;
+### Retain prepared sender-key crypto
 
-pub fn new(
-    // ...
-    signed_pre_key_signature: impl TryInto<[u8; SIGNED_PRE_KEY_SIGNATURE_LEN]>,
-    // ...
-) -> Result<Self>
-```
+`SenderKeyRecord::prepare_crypto_context()` prepares the current signing/verifying roles without advancing protocol state. Keep its `SenderKeyCryptoContext` with one logical cache entry when a component-backed store rebuilds records. Restore it with `restore_crypto_context(&context)` after reconstruction. Only matching prepared keys are reused; unrelated keys are discarded. This restores no counters, message keys, wire gate or reservation state.
 
-`signed_pre_key_signature` accepts anything that converts into `[u8; 64]`: a `[u8; 64]` fresh off `calculate_signature` passes through with no allocation, while a `Vec<u8>` from a store row is checked and rejected with `InvalidArgument` if it is not exactly 64 bytes. Existing call sites passing `Vec<u8>` keep compiling unchanged, since `TryFrom<Vec<T>> for [T; N]` covers the conversion.
-
-**Stored record bridges**: `prekey_structure_to_record` and `signed_prekey_structure_to_record` (`wacore/libsignal/src/store/record_helpers.rs`) used to parse a stored structure's keys just to validate them. They then rebuilt the structure from those same parsed keys. That reallocated both key fields — plus the signature, for the signed variant — on every prekey read. They now validate the caller's structure and adopt it directly, via the new `PreKeyRecord::from_storage` and `GenericSignedPreKey::from_stored_structure`. Both normalize the stored public key exactly as `deserialize` always did, so a pre-0.7 33-byte row still heals on its next write.
-
-**`SessionRecord::serialize_into`**: the scratch `Vec<usize>` carrying archived states' encoded lengths between the sizing pass and the writing pass is now an 8-slot stack array, with a heap fallback for an archive deeper than that (`previous_sessions` holds 0–3 states in the common case).
-
-The source PR measured these with `divan::AllocProfiler`: `PreKeyBundle::new`/`clone` and `SessionRecord::serialize_into` dropped to 0 allocations each (from 1), and the addon/ADV paths lost 1–8 allocations per call depending on the message type and prefix family. That measurement used temporary benches for the addon and ADV paths, since neither had bench coverage before; those benches were removed before merging and are not part of the repository. `SessionRecord::serialize_into` and `PreKeyBundle` are covered by the existing `wacore/libsignal/benches/libsignal_benchmark.rs`, which shows wall time flat within noise — expected, since AES-GCM, HKDF, and XEdDSA verification already dominate each call.
-
-Location: `wacore/src/secret_enc_addon.rs`, `wacore/src/adv.rs`, `wacore/libsignal/src/protocol/state/bundle.rs`, `wacore/libsignal/src/store/record_helpers.rs`, `wacore/libsignal/src/protocol/records.rs`
+The context can retain private signing material, is bounded to sender history and has no serialization or diagnostic formatter. Drop it when the cache entry is evicted. `crypto_context()` reads an existing context without preparing roles.
 
 ## Public API
 
