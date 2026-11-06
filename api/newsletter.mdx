@@ -957,6 +957,6 @@ match client.newsletter().join(&newsletter_jid).await {
 
 ## Publish a text poll
 
-Use `client.newsletter().send_poll(&channel, name, &options, selectable_count).await?` for plaintext channel polls. Supply 2 to 12 distinct options and `selectable_count` 1 for one answer or 0 for multiple answers. Validation failures return `NewsletterError::InvalidRequest`; sending failures retain `NewsletterError::Send`.
+Use `client.newsletter().send_poll(&channel, name, &options, selectable_count).await?` for plaintext channel polls. Supply 2 to 12 distinct options and `selectable_count` 1 for one answer or 0 for multiple answers. A non-channel target returns `NewsletterError::InvalidRequest`. Poll-definition validation returns `NewsletterError::Poll`; sending failures retain `NewsletterError::Send`.
 
 The returned `SendResult` identifies the sent stanza and does not confirm server acceptance. Obtain its `newsletter_ref()` and later attach the server ID observed in channel history or a live update before [voting](#send_poll_vote). Channel polls carry no E2E creation secret. Do not publish a `Polls::create` result as channel content.
