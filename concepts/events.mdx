@@ -1673,13 +1673,18 @@ The `action` field on `GroupUpdate` is a `GroupNotificationAction` enum with the
 | `Unlink { unlink_type, unlink_reason, raw }` | `<unlink>` | Subgroup unlinked (community) |
 | `Unknown { tag }` | varies | Unknown notification tag (forward compatibility) |
 
-Participant-related variants include a `participants` field of type `Vec<GroupParticipantInfo>`:
+Participant-related variants include a `participants` field of type `Vec<GroupParticipantInfo>`. Construct fixtures with `GroupParticipantInfo::builder().jid(jid).build()`, and use the action constructors such as `GroupNotificationAction::add(participants, reason)`. Payload-carrying action variants are non-exhaustive, so external patterns require `..` as well as the outer enum fallback:
 
 ```rust
+#[non_exhaustive]
 pub struct GroupParticipantInfo {
     pub jid: Jid,
     pub phone_number: Option<Jid>,
     pub display_name: Option<String>,
+    pub r#type: Option<GroupParticipantType>,
+    pub lid: Option<Jid>,
+    pub username: Option<String>,
+    pub join_time: Option<i64>,
 }
 ```
 
@@ -1724,7 +1729,7 @@ Event::GroupUpdate(update) => {
                 println!("Disappearing messages set to {}s in {}", expiration, update.group_jid);
             }
         }
-        GroupNotificationAction::MembershipApprovalRequest { request_method, parent_group_jid } => {
+        GroupNotificationAction::MembershipApprovalRequest { request_method, parent_group_jid, .. } => {
             println!("Join request in {} via {:?}", update.group_jid, request_method);
             if let Some(parent) = parent_group_jid {
                 println!("From community: {}", parent);
@@ -1734,7 +1739,7 @@ Event::GroupUpdate(update) => {
             println!("{} new join requests in {} via {:?}",
                 requests.len(), update.group_jid, request_method);
         }
-        GroupNotificationAction::RevokedMembershipRequests { participants } => {
+        GroupNotificationAction::RevokedMembershipRequests { participants, .. } => {
             println!("{} membership requests revoked in {}",
                 participants.len(), update.group_jid);
         }
