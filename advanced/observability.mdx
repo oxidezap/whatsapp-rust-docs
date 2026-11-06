@@ -189,4 +189,4 @@ Because spans are mostly `debug`/`trace`/`info`, a release build with `release_m
 
 ## Sensitive diagnostics
 
-Default diagnostics redact pairing codes, QR/linking secrets, key material and raw rejection payloads. `tracing-pii` changes phone-number rendering in both logs and tracing and remains a local debugging opt-in. Redacted `Debug` output does not make exported key bytes or payloads safe to log. Typed errors preserve their source chain; inspect that chain without dumping raw protocol objects.
+Some diagnostic types redact sensitive fields. `PairingCode` and `PairingQrCode` include their `code` fields in `Debug` output; do not log those payloads. Do not log raw rejection payloads. `tracing-pii` changes phone-number rendering in both logs and tracing and remains a local debugging opt-in. Redacted `Debug` output does not make exported key bytes or payloads safe to log. Typed errors preserve their source chain; inspect that chain without dumping raw protocol objects.

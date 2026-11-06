@@ -930,11 +930,19 @@ All newsletter methods return `Result<T, NewsletterError>`:
 #[non_exhaustive]
 pub enum NewsletterError {
     #[error("{0}")]
+    Poll(#[from] PollError),
+    #[error("{0}")]
+    Send(#[from] SendError),
+    #[error("{0}")]
+    MessageRef(#[from] MessageRefError),
+    #[error("{0}")]
     Mex(#[from] MexError),
     #[error("{0}")]
     Iq(#[from] IqError),
     #[error("{0}")]
     Client(#[from] ClientError),
+    #[error("picture data cannot be empty; use remove_picture instead")]
+    EmptyPicture,
     #[error("invalid newsletter request: {0}")]
     InvalidRequest(String),
     #[error("newsletter not found: {0}")]

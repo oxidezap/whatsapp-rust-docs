@@ -940,7 +940,9 @@ Direct answer handling authenticates the answering device and call identity befo
 
 ## Video timing and loss diagnostics
 
-Use `TimedVideoFrame` for capture timing. Its `timestamp` is a 90 kHz RTP timestamp and optional `captured_at` is the monotonic capture instant. Untimed byte receivers keep the default 15 fps stride. Without FEC, the transmission offset is measured at departure. With FEC, it is fixed at packetization because repair packets cover the built header. Without `captured_at`, the offset is zero. External backends construct owned `VideoFrame` values with `VideoFrame::builder()` and set the fields needed by their receiver, including generation and RTP timestamp.
+Use `TimedVideoFrame` for capture timing. Implement `VideoSource::timed_frames()` to return `Some` with the timed receiver, and still provide the required `frames()` method. A bare `Receiver<TimedVideoFrame>` does not implement `VideoSource`. The default `timed_frames()` returns `None`, selecting untimed input.
+
+Each `TimedVideoFrame` supplies a 90 kHz RTP `timestamp` and an optional monotonic `captured_at` instant. Untimed byte receivers keep the default 15 fps stride. Without FEC, the transmission offset is measured at departure. With FEC, it is fixed at packetization because repair packets cover the built header. Without `captured_at`, the offset is zero. External backends construct owned `VideoFrame` values with `VideoFrame::builder()` and set the fields needed by their receiver, including generation and RTP timestamp.
 
 The resident engine discards video queued before relay allocation. It sends each access unit as a burst with balanced fragments and retains capture-derived timestamp relationships. Video FEC is available for direct calls through `VideoFecConfig`; `CallHandle::set_video_fec` selects its configuration. Interleaving protects against burst loss but is not a delivery guarantee. Retired packets and FEC groups do not remain queued for later transmission.
 

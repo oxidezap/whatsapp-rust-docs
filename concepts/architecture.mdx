@@ -611,7 +611,7 @@ For bots that don't need chat history, `skip_history_sync()` sends a receipt so 
 
 ### Per-Chat Lanes
 
-Each chat has an enqueue lock, worker-liveness lock and bounded channel. The current lane limit is 512 messages and 16 MiB of charged backing bytes, with a 32 MiB aggregate chat budget. This fits two pulled offline batches while bounding a stalled worker. The lane cache's default 5,000-entry capacity is a separate soft cap; active lanes remain protected from eviction.
+Each chat has an enqueue lock, worker-liveness lock and bounded channel. The current lane limit is 512 messages and 16 MiB of charged backing bytes, with a 32 MiB aggregate chat budget. The item limit accommodates two pulled offline batches of 200 stanzas, but per-lane and shared byte budgets can restrict admission sooner. The lane cache's default 5,000-entry capacity is a separate soft cap; active lanes remain protected from eviction.
 
 Transport ACK admission has a separate 256-item, 256 KiB budget. Entries retain encoded ACKs, not full incoming payload nodes. Charged bytes follow backing owners, including slices retained after a worker returns. These accounting bounds exclude decoded trees and are not a total process-memory limit.
 

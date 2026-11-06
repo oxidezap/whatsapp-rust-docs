@@ -599,6 +599,7 @@ You can implement custom HTTP clients for different runtimes or requirements.
 ### Example: Reqwest client (async)
 
 ```rust
+use anyhow::Result;
 use async_trait::async_trait;
 use whatsapp_rust::wacore::net::{HttpClient, HttpRequest, HttpResponse};
 
@@ -608,10 +609,12 @@ pub struct ReqwestHttpClient {
 }
 
 impl ReqwestHttpClient {
-    pub fn new() -> Self {
-        Self {
-            client: reqwest::Client::new(),
-        }
+    pub fn new() -> Result<Self, reqwest::Error> {
+        Ok(Self {
+            client: reqwest::Client::builder()
+                .redirect(reqwest::redirect::Policy::none())
+                .build()?,
+        })
     }
 }
 
@@ -814,4 +817,4 @@ Downloads await admission before occupying a blocking worker and retain the perm
 
 `UreqHttpClient::new()` allows 10 seconds for connection establishment and address fallback. This does not impose a whole-transfer media deadline. `with_agent` preserves the supplied agent's connection policy.
 
-SDK media requests disable redirects. An injected HTTP client must honor that request setting and return the original 3xx status rather than following it. Keep certificate verification enabled in your adapter; adding a media authority does not configure TLS trust.
+Injected HTTP clients must not follow redirects. `HttpRequest` has no per-request redirect setting; enforce this policy in the adapter. Return the original 3xx status instead of following it. Keep certificate verification enabled in your adapter; adding a media authority does not configure TLS trust.

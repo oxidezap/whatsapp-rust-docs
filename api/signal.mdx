@@ -684,6 +684,8 @@ pub async fn security_code(
 ) -> Result<String, SignalError>
 ```
 
+Import `SecurityCodeVersion` from `whatsapp_rust::SecurityCodeVersion`.
+
 Call `client.signal().security_code(&peer, SecurityCodeVersion::V3).await?` for a PN-based 60-digit code. Use `V4` for LID-based codes and compare the same version on both devices. This refreshes device lists and may establish missing E2E sessions. It never marks a contact verified.
 
 Missing keys, incomplete device lists, hosted accounts and concurrent identity or device changes fail instead of producing a partial code. Treat the result as a point-in-time snapshot and refresh it after changes.

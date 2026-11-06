@@ -89,4 +89,4 @@ For a community parent picture use the [pictures facade](/api/pictures) with an 
 
 ## Community creation defaults
 
-`CreateCommunityOptions` defaults `closed` to `true`. The generated Create IQ includes that parent approval setting and uses the named subject branch. Preserve explicit `false` when opting out; an optional boolean's presence is distinct from its value. Existing partial-configuration results remain authoritative if creation succeeds before a follow-up operation fails.
+`CreateCommunityOptions` defaults the `closed: bool` field to `true`. By default, the Create IQ includes the parent approval attribute and uses the supplied name as its subject. To opt out, set the public `closed` field to `false` after construction. The Create IQ then omits the parent approval attribute. Existing partial-configuration results remain authoritative if creation succeeds before a follow-up operation fails.

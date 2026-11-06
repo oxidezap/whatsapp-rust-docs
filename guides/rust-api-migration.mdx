@@ -99,7 +99,7 @@ fn configure_capture(
 | Neither history capture nor recovery hook, including message-only durability | Attempts `hist_sync` before downloading. |
 | Capture hook without history recovery | Obtains bytes, awaits capture and then attempts `hist_sync`. |
 | Failure before the selected hook/parse receipt point | Withholds `hist_sync` for that attempt. |
-| History durability hook | Journals carrier, commits notification and queue admission before carrier ACK; retains chunk and parses before `hist_sync`. |
+| History durability hook | Journals carrier, commits notification and queue admission before carrier ACK; retains chunk, awaits capture if separately registered, and parses before `hist_sync`. |
 | Skipped or admission-rejected chunk | Acknowledges without capture. |
 
 Capture receives decrypted but still compressed bytes before decompression and protobuf validation. Make it idempotent by message ID within the account and safe for concurrent calls. Persist the bytes before returning success if your application needs them durably.

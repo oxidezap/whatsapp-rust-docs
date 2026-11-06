@@ -2867,6 +2867,8 @@ pub struct IdentityChange {
     /// `saveIdentity` -> `handleNewIdentity`), `false` when triggered by the
     /// server's `<identity/>` notification.
     pub implicit: bool,
+    pub previous_identity_key: Option<[u8; 32]>,
+    pub current_identity_key: Option<[u8; 32]>,
 }
 ```
 
@@ -2874,6 +2876,10 @@ pub struct IdentityChange {
 - `user` — The phone number JID of the user whose identity changed
 - `lid_user` — The user's LID JID, if provided in the notification
 - `implicit` — `false` for server-pushed `<identity/>` notifications (full cleanup performed); `true` for locally-detected changes during decrypt (lighter cleanup, see below)
+- `previous_identity_key` - Optional previous raw public identity key.
+- `current_identity_key` - Optional replacement raw public identity key.
+
+The keys contain 32 bytes without the Signal type byte. A server notification has no replacement key. A custom store or read failure can omit the prior key. Neither absence means the identity stayed unchanged. See [security codes and verification](/api/signal#numeric-security-codes).
 
 This event corresponds to WhatsApp Web's `WAWebHandleIdentityChange` flow. When the server sends an `<identity/>` notification inside a `type="encrypt"` stanza, the client:
 
@@ -3751,7 +3757,3 @@ Chat-action payloads exposing `action_timestamp: Option<DateTime<Utc>>` distingu
 On [main snapshot `7e5c198e`](https://github.com/oxidezap/whatsapp-rust/blob/7e5c198e1a25ea405faa7a69a47bc727ea15484c/wacore/src/types/events.rs), apply `Event::LabelSublistUpdate` idempotently by `(predefined_id, chat_jid)`. `LabelSublistChange::Upsert { sub_list_id }` replaces an entry and `Remove` deletes it. Keep a fallback arm because the change enum is non-exhaustive. Unknown signed numeric IDs are retained; zero is a value, not a removal.
 
 This event does not assign the parent label, reorder lists or describe computed AI handoff filters. The SDK has no sublist membership store and does not synthesize removals from a deleted parent or an omitted snapshot entry. Persist membership in your own store. Preserve `action_timestamp: Option<DateTime<Utc>>` and `from_full_sync` separately; `false` can include recovery/replay and does not certify live traffic.
-
-## IdentityChange
-
-`Event::IdentityChange` reports a peer identity change after device-record cleanup. Read `user`, optional `lid_user` and `implicit`, which distinguishes local detection while saving identity from a server identity notification. Optional `previous_identity_key` and `current_identity_key` are raw 32-byte public keys without the Signal type byte. A server notification has no replacement key, and a custom store or read failure can omit the prior key. Neither absence means the identity stayed unchanged. See [security codes and verification](/api/signal#numeric-security-codes).
