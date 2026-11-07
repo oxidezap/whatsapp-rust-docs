@@ -4,7 +4,7 @@ description: Implement validated backend reads and separate SQLite database oper
 ---
 
 <Note>
-Examples on this page target [source snapshot `35a69a14`](https://github.com/oxidezap/whatsapp-rust/tree/35a69a14149fa2cd2a0cc719f875f441d1c6e1dc), not a crates.io release. Use the [current API guide](/guides/current-api) to select the matching dependency.
+Examples on this page target [source snapshot `7e5c198e`](https://github.com/oxidezap/whatsapp-rust/tree/7e5c198e1a25ea405faa7a69a47bc727ea15484c), not a crates.io release. Use the [current API guide](/guides/current-api) to select the matching dependency.
 
 Custom backends must explicitly implement atomic patch commits and token merges, plus the bounded pending-message operations below. A merge into main does not identify a published release.
 </Note>
@@ -35,7 +35,7 @@ Follow the [custom-backend implementation guidance](/guides/custom-backends#impl
 
 ## Pending-inbound durability operations
 
-At [main `35a69a14`](https://github.com/oxidezap/whatsapp-rust/blob/35a69a14149fa2cd2a0cc719f875f441d1c6e1dc/wacore/src/store/traits.rs), message durability requires `ProtocolStore::read_pending_inbound_bounded`, `read_pending_inbound_group_bounded`, `replace_pending_inbound_if` and `delete_pending_inbound_if`. Their unsupported defaults do not make an adapter durability-capable. The builder probes these operations and rejects unsupported adapters with `UnsupportedDurabilityBackend`.
+At [main `7e5c198e`](https://github.com/oxidezap/whatsapp-rust/blob/7e5c198e1a25ea405faa7a69a47bc727ea15484c/wacore/src/store/traits.rs), message durability requires `ProtocolStore::read_pending_inbound_bounded`, `read_pending_inbound_group_bounded`, `replace_pending_inbound_if` and `delete_pending_inbound_if`. Their unsupported defaults do not make an adapter durability-capable. The builder probes these operations and rejects unsupported adapters with `UnsupportedDurabilityBackend`.
 
 Exact and unique group-alias reads must enforce the supplied bound before allocating payloads and share a row snapshot. Conditional replacement/deletion must atomically compare the observed revision and preserve conflicting successors. Keep leases and exclusive ownership alive through detached workers and cancellation. Implement the [complete bounded storage semantics](/guides/custom-backends#bounded-pending-message-storage), not an unbounded-read fallback or an unconditional delete. Passing the probe does not certify crash durability or batch atomicity.
 
@@ -60,7 +60,7 @@ Malformed persisted bytes return `StoreError::InvalidMessageSecret`. Reads must 
 
 A custom backend must implement the named read explicitly; it does not inherit a default that discards timestamp metadata. See [current contracts](/guides/current-api#hooks-and-backend-reads) and the source trait for exact method signatures and backend obligations.
 
-[MsgSecretStore, StoredMessageSecret and merge rules](https://github.com/oxidezap/whatsapp-rust/blob/35a69a14149fa2cd2a0cc719f875f441d1c6e1dc/wacore/src/store/traits.rs)
+[MsgSecretStore, StoredMessageSecret and merge rules](https://github.com/oxidezap/whatsapp-rust/blob/7e5c198e1a25ea405faa7a69a47bc727ea15484c/wacore/src/store/traits.rs)
 
 ## SqliteStore implementation
 
@@ -147,8 +147,16 @@ The adapter applies its checked-in schema migrations at opening. Back up persist
 Inspect typed `StoreError` causes. Malformed message secrets use `InvalidMessageSecret`, and missing account operations can return `DeviceNotFound`. Preserve errors and timestamps instead of substituting empty values. See [error handling](/api/errors).
 
 ## Source reference
-[Storage traits](https://github.com/oxidezap/whatsapp-rust/blob/35a69a14149fa2cd2a0cc719f875f441d1c6e1dc/wacore/src/store/traits.rs) · [Database facade](https://github.com/oxidezap/whatsapp-rust/blob/35a69a14149fa2cd2a0cc719f875f441d1c6e1dc/storages/sqlite-storage/src/database.rs) · [Account store and configuration](https://github.com/oxidezap/whatsapp-rust/blob/35a69a14149fa2cd2a0cc719f875f441d1c6e1dc/storages/sqlite-storage/src/sqlite_store.rs) · [Shared adapter](https://github.com/oxidezap/whatsapp-rust/blob/35a69a14149fa2cd2a0cc719f875f441d1c6e1dc/storages/sqlite-storage/src/shared.rs)
+[Storage traits](https://github.com/oxidezap/whatsapp-rust/blob/7e5c198e1a25ea405faa7a69a47bc727ea15484c/wacore/src/store/traits.rs) · [Database facade](https://github.com/oxidezap/whatsapp-rust/blob/7e5c198e1a25ea405faa7a69a47bc727ea15484c/storages/sqlite-storage/src/database.rs) · [Account store and configuration](https://github.com/oxidezap/whatsapp-rust/blob/7e5c198e1a25ea405faa7a69a47bc727ea15484c/storages/sqlite-storage/src/sqlite_store.rs) · [Shared adapter](https://github.com/oxidezap/whatsapp-rust/blob/7e5c198e1a25ea405faa7a69a47bc727ea15484c/storages/sqlite-storage/src/shared.rs)
 
 ## TCToken storage
 
-`ProtocolStore::store_received_tc_token` and `get_tc_tokens` support privacy-token persistence and batched reads. Received-token writes must preserve newer-wins semantics atomically; a byte-less placeholder can accept the first real token. The built-in SQLite adapter performs its check and write in an immediate transaction, while the in-memory backend holds its state lock. In the merged #1681 contract, custom adapters must explicitly implement the atomic merge so concurrent notification and identity-migration writes preserve the other fields. See the [privacy token reference](/api/tctoken). Use the [trait contract](https://github.com/oxidezap/whatsapp-rust/blob/35a69a14149fa2cd2a0cc719f875f441d1c6e1dc/wacore/src/store/traits.rs).
+`ProtocolStore::store_received_tc_token` and `get_tc_tokens` support privacy-token persistence and batched reads. Received-token writes must preserve newer-wins semantics atomically; a byte-less placeholder can accept the first real token. The built-in SQLite adapter performs its check and write in an immediate transaction, while the in-memory backend holds its state lock. In the merged #1681 contract, custom adapters must explicitly implement the atomic merge so concurrent notification and identity-migration writes preserve the other fields. See the [privacy token reference](/api/tctoken). Use the [trait contract](https://github.com/oxidezap/whatsapp-rust/blob/7e5c198e1a25ea405faa7a69a47bc727ea15484c/wacore/src/store/traits.rs).
+
+## Optional instance clocks and mobile namespaces
+
+A backend used with `instance-clock` must expose the same `Arc<dyn Clock>` selected by its runtime. Decorators must forward clock and crypto ports. Clock mismatch is rejected during client construction; a custom clock must keep valid calendar readings throughout its lifetime.
+
+`mobile-core` enables SQLite's mobile provisioning support when SQLite is selected. Direct storage consumers use its `mobile` feature. `PersistenceManager::initialize_mobile` and `initialize_registered_mobile` provision a dedicated namespace with supplied identity material. Cancelled initialization can already be durable; resume with `new` rather than generating another identity. Registration and primary-state updates require one manager/writer per namespace and do not provide cross-process CAS. See [mobile setup and recovery](/guides/mobile-sessions).
+
+`try_process_command` and the clocked `try_process_command_at` expose validation errors for mobile binding/identity publication. Use commands rather than mutating device snapshots directly. Existing mobile role bindings remain readable without the mobile feature.

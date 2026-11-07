@@ -4,7 +4,7 @@ description: Newsletter (channel) operations — create, manage, administer, sub
 ---
 
 <Note>
-Examples on this page target [source snapshot `35a69a14`](https://github.com/oxidezap/whatsapp-rust/tree/35a69a14149fa2cd2a0cc719f875f441d1c6e1dc), not a crates.io release. Use the [current API guide](/guides/current-api) to select the matching dependency.
+Examples on this page target [source snapshot `7e5c198e`](https://github.com/oxidezap/whatsapp-rust/tree/7e5c198e1a25ea405faa7a69a47bc727ea15484c), not a crates.io release. Use the [current API guide](/guides/current-api) to select the matching dependency.
 </Note>
 
 The `Newsletter` feature provides methods for managing WhatsApp newsletter channels, including creation, subscription management, admin operations, reactions, and live updates. Newsletter operations use MEX (GraphQL) for metadata/management and IQ stanzas for message operations.
@@ -464,7 +464,7 @@ async fn vote(client: &Client, poll: &NewsletterMessageRef<'_>) -> whatsapp_rust
 
 Consult the pinned source for exact signatures and ownership checks. A reference's optional ownership declaration does not grant server permission.
 
-[Channel actions and history message references](https://github.com/oxidezap/whatsapp-rust/blob/35a69a14149fa2cd2a0cc719f875f441d1c6e1dc/src/features/newsletter.rs)
+[Channel actions and history message references](https://github.com/oxidezap/whatsapp-rust/blob/7e5c198e1a25ea405faa7a69a47bc727ea15484c/src/features/newsletter.rs)
 
 ### get_messages
 
@@ -930,11 +930,19 @@ All newsletter methods return `Result<T, NewsletterError>`:
 #[non_exhaustive]
 pub enum NewsletterError {
     #[error("{0}")]
+    Poll(#[from] PollError),
+    #[error("{0}")]
+    Send(#[from] SendError),
+    #[error("{0}")]
+    MessageRef(#[from] MessageRefError),
+    #[error("{0}")]
     Mex(#[from] MexError),
     #[error("{0}")]
     Iq(#[from] IqError),
     #[error("{0}")]
     Client(#[from] ClientError),
+    #[error("picture data cannot be empty; use remove_picture instead")]
+    EmptyPicture,
     #[error("invalid newsletter request: {0}")]
     InvalidRequest(String),
     #[error("newsletter not found: {0}")]
@@ -954,3 +962,9 @@ match client.newsletter().join(&newsletter_jid).await {
     Err(e) => eprintln!("Error: {}", e),
 }
 ```
+
+## Publish a text poll
+
+Use `client.newsletter().send_poll(&channel, name, &options, selectable_count).await?` for plaintext channel polls. Supply 2 to 12 distinct options and `selectable_count` 1 for one answer or 0 for multiple answers. A non-channel target returns `NewsletterError::InvalidRequest`. Poll-definition validation returns `NewsletterError::Poll`; sending failures retain `NewsletterError::Send`.
+
+The returned `SendResult` identifies the sent stanza and does not confirm server acceptance. Obtain its `newsletter_ref()` and later attach the server ID observed in channel history or a live update before [voting](#send_poll_vote). Channel polls carry no E2E creation secret. Do not publish a `Polls::create` result as channel content.

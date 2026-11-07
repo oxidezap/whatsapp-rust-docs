@@ -31,8 +31,8 @@ The practical consequence is that a default build — and a build with `plugins`
 
 ```toml Cargo.toml
 [dependencies]
-whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "35a69a14149fa2cd2a0cc719f875f441d1c6e1dc", features = ["plugins"] }
-whatsapp-rust-plugin-wam = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "35a69a14149fa2cd2a0cc719f875f441d1c6e1dc" }
+whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "7e5c198e1a25ea405faa7a69a47bc727ea15484c", features = ["plugins"] }
+whatsapp-rust-plugin-wam = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "7e5c198e1a25ea405faa7a69a47bc727ea15484c" }
 ```
 
 ```rust
@@ -150,3 +150,7 @@ Installing the plugin also has a per-message cost that recurs rather than being 
 - [Native plugins](/advanced/plugins) — the capability model and lifecycle this plugin is built on.
 - [Metrics with the metrics facade](/advanced/metrics) — `wa_*` operational metrics for dashboards and alerts; a different thing from WAM, which is WhatsApp's own client-health telemetry format.
 - [Observability](/advanced/observability) — the PII and snapshot conventions this page's diagnostics follow.
+
+## Identity snapshots
+
+The catalog plugin refreshes buffer identity from the current client snapshot before emission. A plugin installed before pairing must not keep an installation-time empty identity for later buffers. The native `ClientInfo` capability supplies read-only snapshots without exposing a full client. This refresh does not grant additional telemetry permissions or imply official sampling qualification.

@@ -599,6 +599,7 @@ You can implement custom HTTP clients for different runtimes or requirements.
 ### Example: Reqwest client (async)
 
 ```rust
+use anyhow::Result;
 use async_trait::async_trait;
 use whatsapp_rust::wacore::net::{HttpClient, HttpRequest, HttpResponse};
 
@@ -608,10 +609,12 @@ pub struct ReqwestHttpClient {
 }
 
 impl ReqwestHttpClient {
-    pub fn new() -> Self {
-        Self {
-            client: reqwest::Client::new(),
-        }
+    pub fn new() -> Result<Self, reqwest::Error> {
+        Ok(Self {
+            client: reqwest::Client::builder()
+                .redirect(reqwest::redirect::Policy::none())
+                .build()?,
+        })
     }
 }
 
@@ -809,3 +812,9 @@ mod tests {
 Custom adapters can implement `HttpClient::streaming_admission() -> Option<BoxFuture<'_, Result<StreamingRequestPermit>>>`. `BoxFuture` comes from `wacore::runtime`; `StreamingRequestPermit` comes from `wacore::net` and is an adapter-owned `Box<dyn MaybeSend>`. The default returns `None` without allocating a future.
 
 Downloads await admission before occupying a blocking worker and retain the permit through response-body and connection release, including cancellation. Use this hook to reserve adapter capacity without parking blocking workers while they wait. It does not make synchronous `Read + Send` streaming into browser Fetch streaming or impose a cap on buffered HTTP responses. See [download limits](/api/download#download-byte-limits).
+
+## Default connection budget and media requests
+
+`UreqHttpClient::new()` allows 10 seconds for connection establishment and address fallback. This does not impose a whole-transfer media deadline. `with_agent` preserves the supplied agent's connection policy.
+
+Injected HTTP clients must not follow redirects. `HttpRequest` has no per-request redirect setting; enforce this policy in the adapter. Return the original 3xx status instead of following it. Keep certificate verification enabled in your adapter; adding a media authority does not configure TLS trust.

@@ -646,3 +646,11 @@ fn configured_client() -> ClientBuilder {
     Client::builder().with_cache_config(cache)
 }
 ```
+
+## Recovery publication boundaries
+
+Late or unsolicited app-state snapshot recovery from the primary can advance the matching collection even when the original request is no longer pending. A duplicate already being answered is distinct from an unsolicited response. Successful recovery settles an unanswered request for that collection without taking another response's active claim.
+
+Wire validation precedes state mutation. Required app-state protobuf presence is checked even when cryptographic MAC checking is disabled for a synthetic test. Snapshot mutations publish only after their version/MAC storage commit succeeds. A backend error must not publish a successful application event; post-commit errors still require host reconciliation.
+
+Receive queues and transport ACK work are bounded. The per-chat lane has enough item slots for two pulled offline batches of 200 stanzas, but per-lane and shared byte budgets can restrict admission sooner. After bounded scheduling retries, persistent saturation freezes admissions and drains accepted work before retiring the connection while continuing to serve IQ replies. Do not interpret an allocated queue slot or a transport ACK as consumer durability.

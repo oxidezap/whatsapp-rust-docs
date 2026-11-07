@@ -11,7 +11,7 @@ Estas páginas descrevem a API atual do código-fonte. Use a revisão Git indica
 
 Antes de instalar whatsapp-rust, certifique-se de ter:
 
-- **Rust 1.94 ou mais novo** — o MSRV do workspace, e todas as features padrão compilam com **Rust stable**. Veja [Usando Rust stable](#usando-rust-stable).
+- **Rust 1.95 ou mais novo** — o MSRV do workspace, e todas as features padrão compilam com **Rust stable**. Veja [Usando Rust stable](#usando-rust-stable).
 - Gerenciador de pacotes **Cargo**
 
 <Note>
@@ -24,7 +24,7 @@ Antes de instalar whatsapp-rust, certifique-se de ter:
 
 ```toml Cargo.toml
 [dependencies]
-whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "35a69a14149fa2cd2a0cc719f875f441d1c6e1dc" }
+whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "7e5c198e1a25ea405faa7a69a47bc727ea15484c" }
 # Só é preciso declarar um crate irmão para features específicas dele:
 # whatsapp-rust-sqlite-storage is re-exported by whatsapp-rust; add a direct Git dependency only if needed.
 # whatsapp-rust-tokio-transport is re-exported by whatsapp-rust; add a direct Git dependency only if needed.
@@ -81,7 +81,7 @@ Para usar whatsapp-rust em um ambiente de navegador WASM, habilite a feature `js
 
 ```toml Cargo.toml
 [dependencies]
-wacore = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "35a69a14149fa2cd2a0cc719f875f441d1c6e1dc", default-features = false, features = ["js"] }
+wacore = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "7e5c198e1a25ea405faa7a69a47bc727ea15484c", default-features = false, features = ["js"] }
 ```
 
 O crate `waproto` tem suas próprias feature flags:
@@ -96,7 +96,7 @@ O `build.rs` sempre executa e gera `whatsapp.rs` no `OUT_DIR` — nenhuma featur
 
 ```toml Cargo.toml
 [dependencies]
-waproto = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "35a69a14149fa2cd2a0cc719f875f441d1c6e1dc", features = ["serde-snake-case"] }
+waproto = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "7e5c198e1a25ea405faa7a69a47bc727ea15484c", features = ["serde-snake-case"] }
 ```
 
 O crate `whatsapp-rust-sqlite-storage` tem suas próprias feature flags:
@@ -113,7 +113,7 @@ Para manter o `SqliteStore` e vincular ao seu próprio SQLite, desabilite as fea
 
 ```toml Cargo.toml
 [dependencies]
-whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "35a69a14149fa2cd2a0cc719f875f441d1c6e1dc", default-features = false, features = [
+whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "7e5c198e1a25ea405faa7a69a47bc727ea15484c", default-features = false, features = [
     "sqlite-storage",
     "tokio-transport",
     "tokio-runtime",
@@ -129,7 +129,7 @@ Se você depende de `whatsapp-rust-sqlite-storage` diretamente, a mesma regra se
 
 ```toml Cargo.toml
 [dependencies]
-whatsapp-rust-sqlite-storage = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "35a69a14149fa2cd2a0cc719f875f441d1c6e1dc", default-features = false }
+whatsapp-rust-sqlite-storage = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "7e5c198e1a25ea405faa7a69a47bc727ea15484c", default-features = false }
 ```
 
 <Note>
@@ -142,7 +142,7 @@ whatsapp-rust-sqlite-storage = { git = "https://github.com/oxidezap/whatsapp-rus
 
 ## Usando Rust stable
 
-whatsapp-rust usa a **edição Rust 2024** e declara um MSRV de **1.94**, ambos suportados pelo Rust stable, e o conjunto de features padrão não tem nenhuma dependência exclusiva do nightly — `cargo build`/`cargo add whatsapp-rust` funciona com **Rust stable** de fábrica, sem precisar desabilitar nenhuma feature.
+whatsapp-rust usa a **edição Rust 2024** e declara um MSRV de **1.95**, ambos suportados pelo Rust stable, e o conjunto de features padrão não tem nenhuma dependência exclusiva do nightly — `cargo build`/`cargo add whatsapp-rust` funciona com **Rust stable** de fábrica, sem precisar desabilitar nenhuma feature.
 
 <Note>
   O `rust-toolchain.toml` do próprio projeto ainda fixa um compilador nightly (`nightly-2026-06-16`), mas apenas para flags de build internas focadas em tamanho de binário — `-Zshare-generics` e linking lld/ICF, definidas para todo o workspace em `.cargo/config.toml`, mais `-Zbuild-std` somente para o build da imagem Docker (veja a seção de implantação com Docker abaixo) — não para nenhuma feature de linguagem que os crates publicados precisem. Essa fixação rege a compilação do workspace whatsapp-rust em si; ela não afeta seu projeto quando você depende de whatsapp-rust via crates.io ou git.
@@ -164,7 +164,7 @@ Se você quiser usar apenas features específicas:
 
 ```toml Cargo.toml
 [dependencies]
-whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "35a69a14149fa2cd2a0cc719f875f441d1c6e1dc", default-features = false, features = ["sqlite-storage", "tokio-transport"] }
+whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "7e5c198e1a25ea405faa7a69a47bc727ea15484c", default-features = false, features = ["sqlite-storage", "tokio-transport"] }
 ```
 
 ## Verifique a instalação
@@ -232,3 +232,9 @@ Como a imagem é construída a partir de `scratch`, o PID 1 é o próprio binár
 <Card title="Início rápido" icon="rocket" href="/pt/quickstart">
   Crie seu primeiro bot do WhatsApp em minutos
 </Card>
+
+## Perfis de navegador e mobile
+
+No SDK para navegador, desabilite as features padrão e habilite `js`. A feature encaminha a aleatoriedade do navegador e os hooks wasm-bindgen do SQLite quando esse backend está selecionado. Consumidores diretos do armazenamento habilitam `whatsapp-rust-sqlite-storage/js`; consumidores apenas do core usam `wacore/js`. Habilitar apenas `sqlite-storage` não seleciona os hooks do navegador.
+
+`mobile-core` habilita os fluxos explícitos de registro, sessão primária e vinculação de companheiros, além de `instance-clock`. `mobile-transport-native` acrescenta o adaptador TCP opcional. Forneça ambiente, chaves, relógio compartilhado, HTTP, transporte e persistência. Uma mudança de `ClientProfile` não registra uma conta mobile. Os testes sintéticos e a compilação não comprovam aceitação pelo servidor ou entrega de SMS. Veja [sessões mobile](/guides/mobile-sessions).

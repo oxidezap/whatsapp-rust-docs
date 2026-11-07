@@ -4,7 +4,7 @@ description: Learn how to implement custom storage, transport, and HTTP backends
 ---
 
 <Note>
-Examples on this page target [source snapshot `35a69a14`](https://github.com/oxidezap/whatsapp-rust/tree/35a69a14149fa2cd2a0cc719f875f441d1c6e1dc), not a crates.io release. Use the [current API guide](/guides/current-api) to select the matching dependency.
+Examples on this page target [source snapshot `7e5c198e`](https://github.com/oxidezap/whatsapp-rust/tree/7e5c198e1a25ea405faa7a69a47bc727ea15484c), not a crates.io release. Use the [current API guide](/guides/current-api) to select the matching dependency.
 
 Custom backends must explicitly implement atomic patch commits and token merges. The sections below describe their required semantics.
 </Note>
@@ -64,7 +64,7 @@ For crash replay, implement the pending-inbound methods on `ProtocolStore`. Stor
 
 Device-scoped operations must isolate one account from another. The scope of `DeviceStore::resource_report` depends on the adapter. SQLite reports the shared database pool through this legacy trait method; count it once per database. Use `SqliteStore::scoped_resource_report()` for an account and `SqliteDatabase::resource_report()` for the database-wide report. Register an owned adapter with `with_backend` or an `Arc<dyn Backend>` with `with_backend_arc`.
 
-[Storage trait reference](https://github.com/oxidezap/whatsapp-rust/blob/35a69a14149fa2cd2a0cc719f875f441d1c6e1dc/wacore/src/store/traits.rs) · [SQLite reference implementation](https://github.com/oxidezap/whatsapp-rust/blob/35a69a14149fa2cd2a0cc719f875f441d1c6e1dc/storages/sqlite-storage/src/lib.rs)
+[Storage trait reference](https://github.com/oxidezap/whatsapp-rust/blob/7e5c198e1a25ea405faa7a69a47bc727ea15484c/wacore/src/store/traits.rs) · [SQLite reference implementation](https://github.com/oxidezap/whatsapp-rust/blob/7e5c198e1a25ea405faa7a69a47bc727ea15484c/storages/sqlite-storage/src/lib.rs)
 
 ## Custom Runtime
 
@@ -745,7 +745,7 @@ CREATE TABLE IF NOT EXISTS sessions (
 
 ## Bounded pending-message storage
 
-Message durability on [main snapshot `35a69a14`](https://github.com/oxidezap/whatsapp-rust/blob/35a69a14149fa2cd2a0cc719f875f441d1c6e1dc/wacore/src/store/traits.rs) requires more than the legacy pending-row getters and batch writes shown above. Implement these `ProtocolStore` operations explicitly:
+Message durability on [main snapshot `7e5c198e`](https://github.com/oxidezap/whatsapp-rust/blob/7e5c198e1a25ea405faa7a69a47bc727ea15484c/wacore/src/store/traits.rs) requires more than the legacy pending-row getters and batch writes shown above. Implement these `ProtocolStore` operations explicitly:
 
 | Operation | Required behavior |
 |---|---|
@@ -765,3 +765,9 @@ Custom `SendContextResolver` implementations must implement `lock_device_session
 The `Device` adapter returns an `io::ErrorKind::Unsupported` cause for signed-prekey enumeration, insertion and removal, sub-device session enumeration and bulk session deletion. These operations no longer report empty results or successful no-ops. `SignalProtocolStoreAdapter` likewise rejects `save_signed_pre_key`; `PersistenceManager` owns rotation. Successful session, identity and sender-key writes admit state to cache. Flush and propagate errors before relying on durability.
 
 Default `SignalStore` batch methods run individual writes in order and stop at the first error. Earlier writes can already have committed. Backends used by `SignalStoreCache` must accept replay of the same snapshot after a failed flush. This does not authorize replay of an externally visible send.
+
+## Forward runtime-owned services
+
+Runtime decorators must forward `crypto_provider()` and the optional instance clock. `CryptoRuntime` selects a runtime-owned symmetric provider; `ClockedRuntime` selects a clock. When using `instance-clock`, runtime and backend must share the same clock object, and clock readings must remain valid. Wrapping a runtime while dropping its clock port can fail construction or change timer semantics.
+
+Custom send resolvers retain the default companion identity role. Primary-mobile hosts select an explicit `SenderIdentityRole` and matching policy instead of bypassing companion checks. `on_local_identity_change_with_keys` can convey exact keys when available and defaults to the earlier identity-change callback for existing resolvers.

@@ -51,23 +51,34 @@ async fn retry_name_sync(client: &Client, pending_name: &str) -> Result<(), AppS
 }
 ```
 
+### set_text_status
+
+Set your About text, with an optional emoji and an explicit expiry. This uses the text-status MEX mutation.
+
+```rust
+pub async fn set_text_status(
+    &self,
+    text: &str,
+    emoji: Option<&str>,
+    expiry: TextStatusExpiry,
+) -> Result<(), ProfileError>
+```
+
+```rust
+use whatsapp_rust::TextStatusExpiry;
+
+client.profile().set_text_status("Available", None, TextStatusExpiry::Never).await?;
+```
+
+Use `TextStatusExpiry::After(std::time::Duration::from_secs(3600))` for an expiring About. Durations must be at least one second. `ProfileError::Mex` preserves a failed mutation.
+
+### clear_text_status
+
+`client.profile().clear_text_status().await?` sends null text with zero duration to remove the About.
+
 ### set_status_text
 
-Set your status text (about).
-
-```rust
-pub async fn set_status_text(&self, text: &str) -> Result<(), ProfileError>
-```
-
-**Parameters:**
-- `text` - The new status text
-
-Sets the profile "About" text. This is different from ephemeral text status updates.
-
-**Example:**
-```rust
-client.profile().set_status_text("Available 24/7").await?;
-```
+`set_status_text(&str)` remains available for the legacy status IQ. A successful IQ does not establish that phone clients display the new About. Prefer `set_text_status`. These operations are separate from audience-selected [status posts](/api/status).
 
 ### set_profile_picture
 

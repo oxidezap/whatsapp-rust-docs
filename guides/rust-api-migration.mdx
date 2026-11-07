@@ -4,7 +4,7 @@ description: Adapt a Rust integration to merged contracts and distinguish experi
 ---
 
 <Warning>
-Merged contracts below were audited at [main snapshot `35a69a14`](https://github.com/oxidezap/whatsapp-rust/tree/35a69a14149fa2cd2a0cc719f875f441d1c6e1dc). That snapshot is not a published release or an approved release candidate. Installation and reference examples use [the same dependency pin](/installation). Unmerged proposals are excluded from the contracts below. Compile your integration against the exact revision you select; this source audit does not qualify a release candidate.
+Merged contracts below were audited at [main snapshot `7e5c198e`](https://github.com/oxidezap/whatsapp-rust/tree/7e5c198e1a25ea405faa7a69a47bc727ea15484c). That snapshot is not a published release or an approved release candidate. Installation and reference examples use [the same dependency pin](/installation). Unmerged proposals are excluded from the contracts below. Compile your integration against the exact revision you select; this source audit does not qualify a release candidate.
 </Warning>
 
 ## Select the source and profile
@@ -13,12 +13,12 @@ For the contracts on this page, use the audited revision explicitly:
 
 ```toml Cargo.toml
 [dependencies]
-whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "35a69a14149fa2cd2a0cc719f875f441d1c6e1dc" }
+whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "7e5c198e1a25ea405faa7a69a47bc727ea15484c" }
 ```
 
 Pin the same revision for the SDK and any explicitly declared sibling crates. Check your application's actual features and target, including custom storage, HTTP, transport and runtime implementations. A default native build does not validate a browser or VoIP profile.
 
-The merged compatibility registry remains in `preparing` phase with no baseline and MSRV 1.94. It does not establish a general 1.x stability promise or approve every available feature combination for production. Keep optional test and benchmark features out of the production compatibility assumptions.
+The merged compatibility registry remains in `preparing` phase with no baseline and MSRV 1.95. It does not establish a general 1.x stability promise or approve every available feature combination for production. Keep optional test and benchmark features out of the production compatibility assumptions.
 
 | Area | Migration boundary |
 |---|---|
@@ -96,14 +96,15 @@ fn configure_capture(
 
 | Configuration or result | History receipt behavior |
 |---|---|
-| No capture hook, including message-only durability | Attempts `hist_sync` before downloading. |
-| Capture hook | Obtains bytes, awaits capture and then attempts `hist_sync`. |
-| Download failure, capture error or cancellation before completion | Withholds `hist_sync` for that attempt. |
+| Neither history capture nor recovery hook, including message-only durability | Attempts `hist_sync` before downloading. |
+| Capture hook without history recovery | Obtains bytes, awaits capture and then attempts `hist_sync`. |
+| Failure before the selected hook/parse receipt point | Withholds `hist_sync` for that attempt. |
+| History durability hook | Journals carrier, commits notification and queue admission before carrier ACK; retains chunk, awaits capture if separately registered, and parses before `hist_sync`. |
 | Skipped or admission-rejected chunk | Acknowledges without capture. |
 
 Capture receives decrypted but still compressed bytes before decompression and protobuf validation. Make it idempotent by message ID within the account and safe for concurrent calls. Persist the bytes before returning success if your application needs them durably.
 
-The SDK does not automatically retry capture or keep a durable history replay buffer. Withholding a receipt does not guarantee phone redelivery or complete history. Shutdown neither joins nor cancels an already-entered callback. Coordinate its lifetime in your host and use `Client::shutdown_signal` when it needs to observe shutdown.
+Capture-only registration does not retain notifications for replay or schedule automatic capture retries. Use the separate [durability hook](/advanced/history-sync-admission#durable-notification-recovery) for host-owned recovery. Withholding a receipt does not guarantee phone redelivery or complete history. Shutdown neither joins nor cancels an already-entered callback. Coordinate its lifetime in your host and use `Client::shutdown_signal` when it needs to observe shutdown.
 
 ## Implement atomic storage operations
 
@@ -152,3 +153,11 @@ Construct generated MEX variables, nested input and response shapes with `Defaul
 Implement explicit pairwise session locking and handle unsupported Signal adapter operations. Preserve retry-exhaustion attempts and sources. Local WASM runtimes may hold local state; cancellation requests do not join tasks or roll back effects. See [custom backends](/guides/custom-backends#session-locking-and-signal-adapter-failures), [storage errors](/api/errors#storage-retry-exhaustion) and [runtime cancellation](/api/wacore#local-runtimes-and-cancellation).
 
 Use the generation-scoped `CallHandle::phase` for signaling snapshots, independently of media diagnostics. Custom encrypted handlers remain detached application work. See [calls](/guides/voip-calls#signaling-phase-and-media-limits) and [extension lifetime](/advanced/plugins#custom-encrypted-payload-lifetime).
+
+## Update current host integrations
+
+The minimum compiler is Rust 1.95. Browser SQLite host hooks now require explicit `js` opt-in. Primary-mobile configuration is a separate optional workflow with aligned runtime/storage clocks, explicit environment trust and persisted role binding. Follow [mobile sessions](/guides/mobile-sessions).
+
+Replace positional chat-clear flags with `ClearChatOptions`; prefer `set_text_status` for About updates. Use `Newsletter::send_poll` for plaintext channel polls. Replace removed process-global Signal crypto hooks with the [runtime-owned provider](/advanced/signal-protocol#cryptographic-primitives). Historical Signal storage remains supported through bounded codecs and record components; this does not preserve removed implementation module paths.
+
+For recoverable history, install `HistorySyncDurabilityHook` and retain notification records for host-scheduled replay. The capture-only contract above remains separate. Audit your custom backend's pending-inbound operations even if you use history durability without a live-message hook. Inspect must-use shutdown reports and wait separately for crate-owned store release.

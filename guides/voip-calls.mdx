@@ -23,7 +23,7 @@ These examples target the same source snapshot as [installation](/installation).
 
 ```toml
 [dependencies]
-whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "35a69a14149fa2cd2a0cc719f875f441d1c6e1dc", features = ["voip"] }
+whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "7e5c198e1a25ea405faa7a69a47bc727ea15484c", features = ["voip"] }
 tokio = { version = "1.53", features = ["macros", "rt-multi-thread"] }
 ```
 
@@ -42,7 +42,7 @@ tokio = { version = "1.53", features = ["macros", "rt-multi-thread"] }
 </Warning>
 
 <Note>
-  [PR #1385](https://github.com/oxidezap/whatsapp-rust/pull/1385) added `CallHandle::request_peer_keyframe(urgency)`, so a 1:1 call can ask the peer to recover a dropped inbound access unit instead of waiting on its next scheduled keyframe — see [H.264 video plane](#h-264-video-plane) below.
+  [PR #1385](https://github.com/oxidezap/whatsapp-rust/pull/1385) added `CallHandle::request_peer_keyframe(urgency)`, so a 1:1 call can ask the peer to recover a dropped inbound access unit instead of waiting on its next scheduled keyframe — see [H.264 video plane](#h264-video-plane) below.
 </Note>
 
 <Note>
@@ -238,6 +238,8 @@ encoded source/sink ─────────┘
 ```
 
 The encoded boundary does not transcode — `AudioFormat` fixes the codec profile, RTP payload type, RTP clock, and 60 ms packet cadence for the whole call.
+
+For PCM endpoints, `.audio_opus(source, sink)` selects standard Opus negotiation instead of `.audio(source, sink)`'s MLOW path. Supply a backend/profile with native Opus support, such as `voip-libopus` plus the intended relay transport. The builder selector alone does not install a decoder. Incoming and outgoing media builders share this selector; complete pre-encoded packets still use `encoded_audio`.
 
 ### Profiles
 
@@ -491,7 +493,7 @@ handle.resume_video(camera_source, video_sink).await?;
 | `handle.stop_video().await` | Stop our own outbound video; idempotent. The peer's video plane is unaffected if they keep sending — see Video I/O above |
 | `handle.resume_video(source, sink).await` | Re-add our video direction inside an already-video call: re-attaches endpoints, ungates the plane, and announces a bare `Enabled`. No handshake, no timeout. Refuses unless our direction is stopped with no upgrade outstanding either way — see Video I/O above |
 | `handle.video_states()` | Read back this call's `(self, peer)` `VideoState` pair, or `None` when the call is gone. Diagnostics for clients driving upgrades from outside |
-| `handle.request_peer_keyframe(urgency)` | Ask the peer to send a video keyframe, by RTCP PLI — call it when your decoder loses or discards an access unit. `urgency` is a `KeyframeUrgency`: `Coalesced` for an ordinary gap, `Immediate` for a decoder that has already failed and reset. Fire-and-forget, throttled in the engine, does nothing in a group call — see [H.264 video plane](#h-264-video-plane) below |
+| `handle.request_peer_keyframe(urgency)` | Ask the peer to send a video keyframe, by RTCP PLI — call it when your decoder loses or discards an access unit. `urgency` is a `KeyframeUrgency`: `Coalesced` for an ordinary gap, `Immediate` for a decoder that has already failed and reset. Fire-and-forget, throttled in the engine, does nothing in a group call — see [H.264 video plane](#h264-video-plane) below |
 | `handle.take_events()` | Acquire the owned, single-reader `CallEvents` once |
 | `handle.media_stats()` | Snapshot of per-call audio- and video-path counters (`MediaStats`) — see [Media stats and silence detection](#media-stats-and-silence-detection) |
 | `handle.group_state()` | Roster/relay/waiting-room snapshot for a group or call-link call, `None` on a plain 1:1 call — see [Group calls](#group-calls) |
@@ -727,7 +729,7 @@ The core `CallEngine` lives in `wacore` and is **sans-IO** — it owns no socket
 | Embedded (esp32) | `wacore` with `voip` (+ `voip-mlow` for the bundled codec), sans-IO only, or `whatsapp-rust` with the same feature split as WebAssembly above |
 
 <Note>
-  Building `whatsapp-rust` itself (not just `wacore`) for `wasm32` also needs `default-features = false`: the crate's defaults (`tokio-native`, `sqlite-storage`, `tokio-transport`, `ureq-client`, `signal`) assume a native multi-threaded runtime, SQLite storage, and a native HTTP client, none of which build on `wasm32-unknown-unknown`. `cargo check -p whatsapp-rust --lib --target wasm32-unknown-unknown --no-default-features --features voip-mlow` is exactly the check this PR added to CI — mirror both flags in your own `Cargo.toml`, e.g. `whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "35a69a14149fa2cd2a0cc719f875f441d1c6e1dc", default-features = false, features = ["voip-mlow"] }`, and supply your own storage/transport/HTTP implementations in their place.
+  Building `whatsapp-rust` itself (not just `wacore`) for `wasm32` also needs `default-features = false`: the crate's defaults (`tokio-native`, `sqlite-storage`, `tokio-transport`, `ureq-client`, `signal`) assume a native multi-threaded runtime, SQLite storage, and a native HTTP client, none of which build on `wasm32-unknown-unknown`. `cargo check -p whatsapp-rust --lib --target wasm32-unknown-unknown --no-default-features --features voip-mlow` is exactly the check this PR added to CI — mirror both flags in your own `Cargo.toml`, e.g. `whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "7e5c198e1a25ea405faa7a69a47bc727ea15484c", default-features = false, features = ["voip-mlow"] }`, and supply your own storage/transport/HTTP implementations in their place.
 </Note>
 
 ### Pluggable media backend
@@ -927,3 +929,37 @@ The MLOW encoder classifies activity per frame and can emit inactive frames duri
 The native 1:1 video path supports inbound audio in a video call, paced outbound video, bounded retransmission in response to peer NACKs and keyframe requests after inbound packet loss. These recovery paths do not guarantee packet delivery or live interoperability for every codec, device or network. Qualify the actual call profile separately from feature compilation.
 
 `MediaStats` adds `video_rtp_received`, `video_srtp_unprotect_failed`, `piggybacked_audio_received`, `auxiliary_rtp_authenticated`, `video_rtp_lost`, `video_nack_requested` and `video_retransmitted`. Lost video counts forward sequence gaps; late arrivals do not reduce it. Retransmitted packets count emitted recovery packets, not delivery confirmation. Window reports subtract these counters with saturation. `last_unexpected_payload_type` is the latest type value, initially zero, and is not a counter delta.
+
+## Accepted direct media readiness
+
+`CallHandle::media_connected()` reports accepted direct-call readiness independently of event-queue delivery. It requires constructed media, relay allocation, validated acceptance and installed receive keys for outgoing calls, or sent acceptance for incoming calls. It does not prove RTP reception or audible sound. The snapshot survives relay reconnects until the generation ends, is replaced or becomes a group call. It is false for group calls.
+
+External backends invoke `MediaOpenContext::on_media_connected` only after those conditions hold. Its `bool` result is a commit decision. If false, suppress the corresponding public `MediaConnected` event as well. Omitting the callback leaves the snapshot false.
+
+Direct answer handling authenticates the answering device and call identity before applying acceptance. Cancelled startup owns cleanup of its reserved generation and local media. A partial group-offer ACK retains its refusal rather than treating absent fields as a successful full answer. Group-bound calls can target a two-person group; participant cardinality alone does not make a group call invalid.
+
+## Video timing and loss diagnostics
+
+Use `TimedVideoFrame` for capture timing. Implement `VideoSource::timed_frames()` to return `Some` with the timed receiver, and still provide the required `frames()` method. A bare `Receiver<TimedVideoFrame>` does not implement `VideoSource`. The default `timed_frames()` returns `None`, selecting untimed input.
+
+Each `TimedVideoFrame` supplies a 90 kHz RTP `timestamp` and an optional monotonic `captured_at` instant. Untimed byte receivers keep the default 15 fps stride. Without FEC, the transmission offset is measured at departure. With FEC, it is fixed at packetization because repair packets cover the built header. Without `captured_at`, the offset is zero. External backends construct owned `VideoFrame` values with `VideoFrame::builder()` and set the fields needed by their receiver, including generation and RTP timestamp.
+
+The resident engine discards video queued before relay allocation. It sends each access unit as a burst with balanced fragments and retains capture-derived timestamp relationships. Video FEC is available for direct calls through `VideoFecConfig`; `CallHandle::set_video_fec` selects its configuration. Interleaving protects against burst loss but is not a delivery guarantee. Retired packets and FEC groups do not remain queued for later transmission.
+
+Read `media_stats()` after the call ends or sample deltas during the call. Video diagnostics distinguish packet loss, depacketization/assembly refusal and pictures that never reach output. FEC and retransmission counters account for successful writes separately from scheduled work. The receiver's wider playout ceiling tolerates relay jitter; it does not promise a fixed end-to-end latency.
+
+## Native datagram dialers
+
+With `voip-relay-native`, implement `DatagramDialer` and `DialDatagram` from `whatsapp_rust::voip::transport`. Install the dialer through `RelayMediaChannelFactory::with_dialer` inside your relay provider. The native DTLS/SCTP stack still owns framing and encryption. One poll send or receive must preserve one whole datagram and behave like a connected flow to the selected relay.
+
+Every candidate dial and reconnect goes through the installed dialer. A refusal fails that candidate, with no direct-socket fallback. Losing or timed-out candidates drop their futures and flows, so your implementation must not leak detached work. Preserve send backpressure without preventing incoming packets or shutdown. This native seam is separate from a browser `RelayTransportProvider`.
+
+## Reuse direct control with an external session host
+
+`whatsapp_rust::voip::direct` exposes `DirectCallHost`, `DirectCallState`, `DirectCallKeys`, `call_pcm`, `accept_pcm`, `ingest`, `terminate` and `disconnect`. The host owns its existing connection, live Signal ratchets, key-store transactions and response correlation. Register an ACK waiter before sending and remove it when its future drops. Share one state between outgoing control and inbound signaling.
+
+Use the same bounded media backend and generation-fenced cleanup. Synchronous `disconnect` releases local control state without sending stale signaling on another connection. This API does not create or qualify an authenticated WhatsApp session for your host.
+
+## Cancel pending call startup
+
+Call builders expose `local_only_on_cancel()` when a host's signaling authority can expire during setup. Dropping that future closes local resources synchronously and suppresses detached peer-termination signaling. The remote outcome remains unknown if an answer was already in flight. Default cancellation instead schedules best-effort peer cleanup; explicit setup failures retain normal cleanup while the future is alive. This option does not change a returned handle's lifetime policy.

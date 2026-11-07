@@ -21,7 +21,7 @@ Enable `plugins` on the same source and revision used by your host application:
 
 ```toml Cargo.toml
 [dependencies]
-whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "35a69a14149fa2cd2a0cc719f875f441d1c6e1dc", features = ["plugins"] }
+whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "7e5c198e1a25ea405faa7a69a47bc727ea15484c", features = ["plugins"] }
 ```
 
 A default build has neither plugin fields nor their runtime branches. If you're implementing a plugin directly in your application, enable `plugins` there. If you're publishing a reusable plugin crate, enable `plugins` on its own `whatsapp-rust` dependency. Cargo's [feature unification](https://doc.rust-lang.org/cargo/reference/features.html#feature-unification) activates the host only when both dependencies resolve to the same package identity: source, version, and git revision must match. A crates.io dependency and a git dependency are distinct packages even when their versions match; mixing them also produces incompatible plugin trait types.
@@ -105,6 +105,8 @@ A plugin's manifest requests capabilities, and `PluginContext` only exposes the 
 | `PluginCapability::CoreEvents` | `PluginCoreEvents` | Selective, non-blocking observation of sealed core events |
 | `PluginCapability::Tasks` | `PluginTasks` / `PluginConnectionTasks` | Runtime-agnostic, cancellation-tracked background work |
 | `PluginCapability::Messaging` | `PluginMessaging` | High-level message sends |
+| `PluginCapability::ClientInfo` | `PluginClientInfo` | Coherent client-profile and application-version snapshots |
+| `PluginCapability::IqReply` | `PluginIqReply` | One correlated extension-IQ reply, requiring `StanzaInterception` |
 | `PluginCapability::Iq` | `PluginIq` | Typed `IqSpec` execution |
 | `PluginCapability::PluginEvents` | `PluginEvents` | Publishing custom events, scoped to the plugin's own namespace |
 | `PluginCapability::StanzaInterception` | `PluginStanzaInterception` | Claiming a decoded stanza before the built-in pipeline sees it |
@@ -250,3 +252,13 @@ The current host deliberately does not support dynamic plugin loading, pre-ack d
 ## Custom encrypted payload lifetime
 
 `EncHandler` callbacks run as best-effort application work in detached runtime tasks. Shutdown neither joins nor cancels them, and plugin tracked-task drain does not include their completion. An error is logged without built-in retry, NACK or transport ACK. For a custom-only envelope, the handler owns the response; a mixed envelope may still be acknowledged by its built-in payload path. Use [inbound durability](/advanced/inbound-durability) for supported message commit boundaries.
+
+## Reply to extension IQ requests
+
+Declare both `StanzaInterception` and `IqReply`, then use `PluginStanzaInterception::register_iq` with a `PluginIqInterceptor`. Only authenticated `get`/`set` IQs with a nonempty ID, valid sender, namespace and exactly one child qualify. Pings, pairing namespace `md`, connection-critical stanzas and correlated responses remain core-owned.
+
+The inline callback receives a `PluginIqReply`. Return `Interception::Handled` to authorize it. Returning `Pass` or panicking permanently rejects the grant. Retain the registration token. For async work, move grants into a bounded queue serviced through plugin task scopes; decline ownership if the queue is full.
+
+`result(children)` fixes the request ID, destination and original connection. `error(code, text)` requires code 400 through 599 and nonempty text. Invalid arguments leave the grant unused. Clones share one send attempt. Cancellation or failure after admission consumes it because bytes may already have reached the peer. Dropping an unused grant sends nothing; retransmission creates a separate grant. Successful sending means local transport completion, not peer processing.
+
+`PluginContext::client_info()` requires `ClientInfo` and gives a coherent read-only client-profile and application-version snapshot through `PluginClientInfo`. Use that capability for account-sensitive integrations instead of retaining a full client or copying an identity at installation time.

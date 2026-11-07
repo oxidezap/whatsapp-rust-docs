@@ -838,3 +838,7 @@ let message = {
 - [Sending Messages](/guides/sending-messages) - Send media with captions and quotes
 - [Receiving Messages](/guides/receiving-messages) - Handle incoming media
 - [Custom Backends](/guides/custom-backends) - Implement custom HTTP clients for media operations
+
+## Choose a trusted download origin
+
+Use session routes for live downloads. Static URLs pass the SDK's [authority admission policy](/api/download#static-url-admission) before network access and cannot follow redirects. Add an application CDN explicitly through `ClientOptions::additional_static_media_hosts`; configure its TLS trust in the injected HTTP adapter. For a primary-mobile client, select a separate [media HTTP profile](/guides/mobile-sessions#media-and-app-state).

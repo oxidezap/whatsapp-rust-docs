@@ -885,6 +885,7 @@ pub struct ClientProfile {
     pub os_version: String,
     pub manufacturer: String,
     pub include_web_info: bool,
+    pub web_sub_platform: WebSubPlatform, // used when web_info is included
     pub passive_login: bool,       // ClientPayload.passive
     pub phone_id: Option<String>,  // UserAgent.phone_id (anti-abuse UUID)
     pub locale_language: String,   // UserAgent.locale_language_iso6391, e.g. "pt"
@@ -893,7 +894,7 @@ pub struct ClientProfile {
 ```
 
 <Note>
-Since v0.6 the locale and `phone_id` come from the active `ClientProfile` instead of being hard-coded. The locale is split into two ISO fields — `locale_language` (ISO-639-1, e.g. `"en"`) and `locale_country` (ISO-3166-1 alpha-2, e.g. `"US"`) — both written to the matching `UserAgent` proto attributes. When `phone_id` is `None` the client builds a **fresh UUID-v4 on every `ClientPayload` build**; it is not persisted on `Device`, so if you need a stable WA Web–style `WAWebClientPayload.phoneId` you must supply it yourself (e.g. generate once at install time and pass it in via your own `ClientProfile` constructor). Login counter (`ClientPayload.lc`) lives on `Device`, not here — see the [Login counter](#login-counter-clientpayload-lc) section below.
+Since v0.6 the locale and `phone_id` come from the active `ClientProfile` instead of being hard-coded. The locale is split into two ISO fields — `locale_language` (ISO-639-1, e.g. `"en"`) and `locale_country` (ISO-3166-1 alpha-2, e.g. `"US"`) — both written to the matching `UserAgent` proto attributes. When `phone_id` is `None` the client builds a **fresh UUID-v4 on every `ClientPayload` build**; it is not persisted on `Device`, so if you need a stable WA Web–style `WAWebClientPayload.phoneId` you must supply it yourself (e.g. generate once at install time and pass it in via your own `ClientProfile` constructor). Login counter (`ClientPayload.lc`) lives on `Device`, not here — see the [Login counter](#login-counter-clientpayloadlc) section below.
 
 `passive_login` mirrors WA Web's `ClientPayload.passive`: `false` (the default) tells the server to deliver queued offline messages on connect, `true` keeps the connection passive until you pull explicitly.
 </Note>
@@ -903,6 +904,7 @@ Since v0.6 the locale and `phone_id` come from the active `ClientProfile` instea
 | Constructor | Platform | Device | Manufacturer | `web_info` |
 |-------------|----------|--------|--------------|------------|
 | `ClientProfile::web()` (default) | `Web` | `Desktop` | `""` | included |
+| `ClientProfile::web_with_sub_platform(sub_platform)` | `Web` | `Desktop` | `""` | included with explicit shell |
 | `ClientProfile::android(os_version)` | `Android` | `Smartphone` | `""` | omitted |
 | `ClientProfile::smb_android(os_version)` | `SmbAndroid` | `Smartphone` | `""` | omitted |
 | `ClientProfile::ios(os_version)` | `Ios` | `iPhone` | `Apple` | omitted |
@@ -910,6 +912,8 @@ Since v0.6 the locale and `phone_id` come from the active `ClientProfile` instea
 | `ClientProfile::windows(os_version)` | `Windows` | `Desktop` | `""` | omitted |
 
 The `web()` profile reproduces the legacy desktop-web payload (`os_version` and `os_build_number` are both `"0.1.0"`). Native profiles propagate the supplied `os_version` to both fields and drop `web_info`.
+
+Use `WebSubPlatform::WIN_HYBRID` or `DARWIN` for desktop Web shells while retaining the Web user-agent platform. `WEB_BROWSER` is the `web()` default. These selectors differ from the `windows` and `macos` user-agent constructors. A profile selects handshake fields; it does not register or bind a [primary-mobile session](/guides/mobile-sessions).
 
 #### Setting a profile
 

@@ -5,7 +5,7 @@ description: Choose supported requests, message references and storage boundarie
 
 ## Select a matching source
 
-These examples use the merged source snapshot [35a69a14](https://github.com/oxidezap/whatsapp-rust/tree/35a69a14149fa2cd2a0cc719f875f441d1c6e1dc). The package's declared version does not prove that a main-branch API exists in the published crate. Use the pinned dependency from [installation](/installation) to compile these examples. For a released dependency, select its exact version in [Rustdoc](https://docs.rs/whatsapp-rust).
+These examples use the merged source snapshot [7e5c198e](https://github.com/oxidezap/whatsapp-rust/tree/7e5c198e1a25ea405faa7a69a47bc727ea15484c). The package's declared version does not prove that a main-branch API exists in the published crate. Use the pinned dependency from [installation](/installation) to compile these examples. For a released dependency, select its exact version in [Rustdoc](https://docs.rs/whatsapp-rust).
 
 ## Sends and edits
 
@@ -71,4 +71,10 @@ Selection does not create a row. Stop an account's background tasks before reset
 
 ## Migrating existing integrations
 
-The [migration guide](/guides/rust-api-migration) audits [main `35a69a14`](https://github.com/oxidezap/whatsapp-rust/tree/35a69a14149fa2cd2a0cc719f875f441d1c6e1dc). Installation and reference examples use that same revision. Before upgrading, replace generated protobuf literals and exhaustive patterns, implement bounded conditional pending storage for message durability, and register group notification capture independently when you need it. See [protobuf evolution](/api/waproto#source-evolution), [retained plaintext](/advanced/inbound-durability#retained-plaintext-on-current-main), [group capture](/api/groups#durable-notification-capture), and [identity learning](/api/contacts#learning-lid-and-phone-aliases).
+The [migration guide](/guides/rust-api-migration) audits [main `7e5c198e`](https://github.com/oxidezap/whatsapp-rust/tree/7e5c198e1a25ea405faa7a69a47bc727ea15484c). Installation and reference examples use that same revision. Before upgrading, replace generated protobuf literals and exhaustive patterns, implement bounded conditional pending storage for message durability, and register group notification capture independently when you need it. See [protobuf evolution](/api/waproto#source-evolution), [retained plaintext](/advanced/inbound-durability#retained-plaintext-on-current-main), [group capture](/api/groups#durable-notification-capture), and [identity learning](/api/contacts#learning-lid-and-phone-aliases).
+
+## Current host and workflow additions
+
+Use [typed chat clearing](/api/chat-actions#clear_chat_with_options), [text status](/api/profile#set_text_status), plaintext [channel polls](/api/newsletter#publish-a-text-poll) and [security codes](/api/signal#numeric-security-codes) for those operations. Register [durable history recovery](/advanced/history-sync-admission#durable-notification-recovery) independently of capture-only and live-message hooks.
+
+Custom hosts must honor [media URL admission and redirects](/api/download#static-url-admission), fail-closed [companion identities](/advanced/signal-protocol#adv-companion-identity-validation), [plugin IQ reply grants](/advanced/plugins#reply-to-extension-iq-requests) and [shutdown observations](/api/client#shutdown-observations). Select [desktop Web subplatforms](/api/client#desktop-web-profiles) separately from [primary-mobile sessions](/guides/mobile-sessions).

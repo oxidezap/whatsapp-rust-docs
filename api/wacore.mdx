@@ -11,7 +11,7 @@ Examples use `wacore` through the main crate's re-export. Declare `whatsapp-rust
 
 ```toml
 [dependencies]
-whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "35a69a14149fa2cd2a0cc719f875f441d1c6e1dc" }
+whatsapp-rust = { git = "https://github.com/oxidezap/whatsapp-rust", rev = "7e5c198e1a25ea405faa7a69a47bc727ea15484c" }
 ```
 
 ## Philosophy
@@ -910,3 +910,11 @@ Both benchmark types run from a single workflow, `.github/workflows/codspeed.yml
 `Runtime` uses `MaybeSendSync`: native runtime objects still require `Send + Sync`, while `wasm32` objects and cancellation closures may hold `Rc` or local JS state. `AbortHandle::new` accepts a `MaybeSend` closure. `TaskInstrument` and `VideoTeardownHook` follow the same platform-local convention. This contract covers local WASM executors, not qualification of WASI or threaded/atomics WASM.
 
 Calling `abort` or dropping an undetached handle requests cancellation without joining task destruction. `timeout` drops its supplied future on expiry, including any undetached handles that future owns. Detached tasks and already-submitted blocking work may continue. A timeout does not provide a deadline for cleanup elsewhere or prove that local/remote effects were rolled back.
+
+## Contextual IQ responses
+
+`IqSpec` has opt-in `uses_contextual_response`, `handles_iq_errors` and `parse_response_with_context(response, request)` methods. Defaults retain legacy parsing. An opted-in contract receives the immutable request actually sent after its final ID was assigned. Never reconstruct request context from response attributes. Protocol error admission is separate from transport timeout and cancellation.
+
+`DeviceListSpec` and `CompleteDeviceListSpec` implement `IqStreamSpec`. Complete queries reject incomplete or unvalidated companion lists instead of silently producing a partial security-code input. Streaming preserves the typed response contract while reducing temporary node-tree retention.
+
+Core subsystem and session/sync engines keep decisions separate from I/O. Their presence does not transfer socket, persistence or task ownership away from the injected host.
