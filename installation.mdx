@@ -33,7 +33,7 @@ Every sub-crate path is reachable through the main crate:
 
 `whatsapp-rust` re-exports the protobuf runtime and the types used by its public API:
 
-- `whatsapp_rust::protobuf` — protobuf traits and sub-message fields such as `MessageField`, which is also in the prelude. The historical `whatsapp_rust::buffa` path refers to the same module. See [waproto](/api/waproto).
+- `whatsapp_rust::protobuf` — protobuf traits and containers. The prelude also provides `wa`, `MessageField`, `ProtoMessage`, `ProtoMessageView`, and `protobuf_codec` for common encoding and decoding. The historical `whatsapp_rust::buffa` path refers to the same protobuf module. See [waproto](/api/waproto).
 - `whatsapp_rust::async_trait` — the macro required to implement those traits
 - `whatsapp_rust::bytes` — `Transport::send` payloads
 - `whatsapp_rust::Timestamp` — timestamps returned by `wacore::time` and message metadata

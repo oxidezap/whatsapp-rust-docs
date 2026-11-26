@@ -330,7 +330,7 @@ fn build_media_reply(message: &wa::Message) -> Option<wa::Message> {
         let mut image = img.clone();
         image.caption = Some("Received your image!".to_string());
         let mut reply = wa::Message::default();
-        reply.image_message = whatsapp_rust::protobuf::MessageField::some(image);
+        reply.image_message = MessageField::some(image);
         return Some(reply);
     }
     None
