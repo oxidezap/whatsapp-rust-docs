@@ -422,12 +422,12 @@ This method resolves devices, ensures Signal sessions exist, encrypts the messag
 
 **Example:**
 ```rust
-use waproto::whatsapp as wa;
+use whatsapp_rust::prelude::*;
 
-let message = wa::Message {
+let message = proto!(wa::Message {
     conversation: Some("Hello!".to_string()),
     ..Default::default()
-};
+});
 
 let (nodes, include_identity) = client.signal().create_participant_nodes(
     &[recipient_jid],

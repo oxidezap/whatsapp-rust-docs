@@ -118,12 +118,12 @@ Newsletter messages are plaintext — they bypass Signal encryption entirely. Yo
 ### Text messages
 
 ```rust
-use waproto::whatsapp as wa;
+use whatsapp_rust::prelude::*;
 
-let message = wa::Message {
+let message = proto!(wa::Message {
     conversation: Some("Hello subscribers!".to_string()),
     ..Default::default()
-};
+});
 
 let msg_id = client.send_message(newsletter_jid, message).await?;
 
@@ -159,13 +159,13 @@ See [Send API reference](/api/send#send_message) for details.
 Channels use a plaintext edit/revoke flow that's separate from DM and group messages. Call the helpers on `client.newsletter()` and pass the original message's `message_id` (the wire stanza id returned by `send_message`, **not** the `server_id` used for reactions):
 
 ```rust
-use waproto::whatsapp as wa;
+use whatsapp_rust::prelude::*;
 
 // Edit a text message
-let new_body = wa::Message {
+let new_body = proto!(wa::Message {
     conversation: Some("Updated announcement".to_string()),
     ..Default::default()
-};
+});
 
 client.newsletter()
     .edit_message(&newsletter_jid, message_id.clone(), new_body)

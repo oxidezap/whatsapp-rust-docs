@@ -305,6 +305,8 @@ You can also forward media instantly by reusing the original CDN fields — no d
 <CodeGroup>
 
 ```rust proto!
+use whatsapp_rust::prelude::*;
+
 fn build_media_reply(message: &wa::Message) -> Option<wa::Message> {
     let base = message.get_base_message();
     if let Some(img) = base.image_message.as_option() {
@@ -319,6 +321,8 @@ fn build_media_reply(message: &wa::Message) -> Option<wa::Message> {
 ```
 
 ```rust MessageField::some
+use whatsapp_rust::prelude::*;
+
 fn build_media_reply(message: &wa::Message) -> Option<wa::Message> {
     let base = message.get_base_message();
     if let Some(img) = base.image_message.as_option() {
@@ -333,6 +337,8 @@ fn build_media_reply(message: &wa::Message) -> Option<wa::Message> {
 ```
 
 ```rust Into
+use whatsapp_rust::prelude::*;
+
 /// Reuses the original CDN blob, only swaps the caption.
 /// Instant regardless of file size.
 fn build_media_reply(message: &wa::Message) -> Option<wa::Message> {

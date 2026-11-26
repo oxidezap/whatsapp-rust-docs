@@ -49,7 +49,7 @@ let msg = wa::Message::text("Hello!");
 let msg_with_quote = wa::Message::text_with_context("Replying!", ctx.build_quote_context());
 ```
 
-These are equivalent to building `wa::Message { conversation: Some(...) }` and `wa::Message { extended_text_message: buffa::MessageField::some(...) }` by hand, but less verbose.
+These are equivalent to constructing a message with `proto!` and setting `conversation` or `extended_text_message`.
 
 ---
 
@@ -60,15 +60,15 @@ These are equivalent to building `wa::Message { conversation: Some(...) }` and `
 Use the `conversation` field for plain text messages, or `wa::Message::text("...")` for shorter syntax:
 
 ```rust
-use waproto::whatsapp as wa;
+use whatsapp_rust::prelude::*;
 use wacore_binary::jid::Jid;
 
 let to: Jid = "1234567890@s.whatsapp.net".parse()?;
 
-let message = wa::Message {
+let message = proto!(wa::Message {
     conversation: Some("Hello, WhatsApp!".to_string()),
     ..Default::default()
-};
+});
 
 let result = client.send_message(&to, message).await?;
 println!("Message sent with ID: {}", result.message_id);
@@ -81,10 +81,10 @@ println!("Message sent with ID: {}", result.message_id);
 For messages with formatting, links, or context (replies/quotes):
 
 ```rust
-use waproto::whatsapp::message::ExtendedTextMessage;
+use whatsapp_rust::prelude::*;
 
-let message = wa::Message {
-    extended_text_message: buffa::MessageField::some(ExtendedTextMessage {
+let message = proto!(wa::Message {
+    extended_text_message: proto!(wa::message::ExtendedTextMessage {
         text: Some("Check out this link: https://example.com".to_string()),
         matched_text: Some("https://example.com".to_string()),
         title: Some("Example Site".to_string()),
@@ -92,7 +92,7 @@ let message = wa::Message {
         ..Default::default()
     }),
     ..Default::default()
-};
+});
 
 let result = client.send_message(to, message).await?;
 ```
@@ -104,6 +104,7 @@ let result = client.send_message(to, message).await?;
 Use `build_quote_context` to create a basic reply:
 
 ```rust
+use whatsapp_rust::prelude::*;
 use wacore::proto_helpers::{build_quote_context, MessageExt};
 
 // Assume you received the original message
@@ -119,14 +120,12 @@ let context = build_quote_context(
 );
 
 // Create reply message
-let reply = wa::Message {
-    extended_text_message: buffa::MessageField::some(ExtendedTextMessage {
-        text: Some("This is my reply".to_string()),
-        context_info: buffa::MessageField::some(context),
-        ..Default::default()
+let reply = proto!(wa::Message {
+    extended_text_message: proto!(wa::message::ExtendedTextMessage {
+        text: "This is my reply",
+        context_info: context,
     }),
-    ..Default::default()
-};
+});
 
 let result = client.send_message(to, reply).await?;
 ```
@@ -138,6 +137,7 @@ For quoted replies that display correctly on all platforms (including iOS), use 
 The function takes both the quoted message's chat (`quoted_chat_jid`) and the chat you're sending into (`target_chat_jid`). For an in-place reply these are the same JID, and `remote_jid` is omitted; for a cross-chat quote (for example, quoting a status update into a DM) they differ, and `remote_jid` is set to the quoted chat:
 
 ```rust
+use whatsapp_rust::prelude::*;
 use wacore::proto_helpers::{build_quote_context_with_info, MessageExt};
 use wacore_binary::jid::Jid;
 
@@ -155,14 +155,12 @@ let context = build_quote_context_with_info(
     &original_message,
 );
 
-let reply = wa::Message {
-    extended_text_message: buffa::MessageField::some(ExtendedTextMessage {
-        text: Some("This is my reply".to_string()),
-        context_info: buffa::MessageField::some(context),
-        ..Default::default()
+let reply = proto!(wa::Message {
+    extended_text_message: proto!(wa::message::ExtendedTextMessage {
+        text: "This is my reply",
+        context_info: context,
     }),
-    ..Default::default()
-};
+});
 
 let result = client.send_message(chat_jid, reply).await?;
 ```
@@ -180,10 +178,11 @@ Pass the same JID for both `quoted_chat_jid` and `target_chat_jid` when replying
 You can add quote context to any message type using `set_context_info`:
 
 ```rust
+use whatsapp_rust::prelude::*;
 use waproto::whatsapp::message::ImageMessage;
 
-let mut reply = wa::Message {
-    image_message: buffa::MessageField::some(ImageMessage {
+let mut reply = proto!(wa::Message {
+    image_message: proto!(ImageMessage {
         url: Some("https://mmg.whatsapp.net/...".to_string()),
         mimetype: Some("image/jpeg".to_string()),
         caption: Some("Here's an image reply".to_string()),
@@ -191,7 +190,7 @@ let mut reply = wa::Message {
         ..Default::default()
     }),
     ..Default::default()
-};
+});
 
 // Build and set context (use build_quote_context_with_info for cross-platform support)
 let context = build_quote_context_with_info(
@@ -214,15 +213,15 @@ let result = client.send_message(chat_jid, reply).await?;
 Use `client.send_reaction()` to react to a DM, group, or `status@broadcast` message. The helper builds the `ReactionMessage` payload, stamps `sender_timestamp_ms`, and routes the stanza through the standard send path.
 
 ```rust
-use waproto::whatsapp as wa;
+use whatsapp_rust::prelude::*;
 
-let target_key = wa::MessageKey {
+let target_key = proto!(wa::MessageKey {
     remote_jid: Some(chat_jid.to_string()),
     from_me: Some(false),
     id: Some(message_id_to_react_to.to_string()),
     // Required for groups and status@broadcast; leave None for DMs.
     participant: Some(sender_jid.to_string()),
-};
+});
 
 let result = client.send_reaction(&chat_jid, target_key, "👍").await?;
 ```
@@ -270,15 +269,16 @@ Newsletter (channel) reactions use a different plaintext stanza format. Use [`cl
 Channel comments are encrypted threaded replies under a Community Announcement Group (CAG) post. Use `client.comments()` to send them:
 
 ```rust
+use whatsapp_rust::prelude::*;
 use whatsapp_rust::features::Comments;
 
-let parent_key = wa::MessageKey {
+let parent_key = proto!(wa::MessageKey {
     remote_jid: Some(cag_jid.to_string()),
     from_me: Some(false),
     id: Some("3EB0POSTID".to_string()),
     // participant must be the post author.
     participant: Some(post_author_jid.to_string()),
-};
+});
 
 // Text comment:
 let result = client.comments()
@@ -290,13 +290,14 @@ println!("Comment sent: {}", result.message_id);
 For arbitrary message bodies:
 
 ```rust
-let body = wa::Message {
-    extended_text_message: buffa::MessageField::some(wa::message::ExtendedTextMessage {
+use whatsapp_rust::prelude::*;
+let body = proto!(wa::Message {
+    extended_text_message: proto!(wa::message::ExtendedTextMessage {
         text: Some("Great post!".to_string()),
         ..Default::default()
     }),
     ..Default::default()
-};
+});
 
 let result = client.comments()
     .send_message(&cag_jid, parent_key, body)
@@ -327,10 +328,11 @@ See [Community management — Channel comments](/guides/communities#channel-comm
 Use [`client.edit_message`](/api/send#edit_message) to replace the content of a message you previously sent. Pass the chat JID, the original message ID, and the new content as a plain `wa::Message` — the client builds the correct wire envelope, resolves the participant JID (LID or PN) for groups, and sends the edit with a fresh stanza ID so the server does not deduplicate it against the original.
 
 ```rust
-let new_content = wa::Message {
+use whatsapp_rust::prelude::*;
+let new_content = proto!(wa::Message {
     conversation: Some("This is the edited text".to_string()),
     ..Default::default()
-};
+});
 
 let edit_id = client.edit_message(
     chat_jid,
@@ -352,16 +354,16 @@ Do not hand-roll the edit envelope by wrapping a `ProtocolMessage` inside `Messa
 `client.edit_message` always mints a fresh outer stanza id — that's what stops the server from deduplicating the edit against the original message. If you need to control that id yourself (for example, to collide it with an existing message so clients re-render that slot), use [`client.edit_message_with_options`](/api/send#edit_message_with_options) with [`EditOptions`](/api/send#editoptions):
 
 ```rust
-use waproto::whatsapp as wa;
+use whatsapp_rust::prelude::*;
 use whatsapp_rust::send::EditOptions;
 
 let edit_id = client.edit_message_with_options(
     &chat_jid,
     &original_id,
-    wa::Message {
+    proto!(wa::Message {
         conversation: Some("This is the edited text".to_string()),
         ..Default::default()
-    },
+    }),
     EditOptions::default().with_stanza_id(existing_message_id.clone()),
 ).await?;
 ```
@@ -409,15 +411,15 @@ Admin revoke only works in group chats. The `original_sender` must match the JID
 Newsletter messages are sent through the same `client.send_message()` method. The library automatically detects newsletter JIDs and sends messages as plaintext (no Signal encryption):
 
 ```rust
-use waproto::whatsapp as wa;
+use whatsapp_rust::prelude::*;
 use wacore_binary::jid::Jid;
 
 let newsletter_jid: Jid = "120363999999999999@newsletter".parse()?;
 
-let message = wa::Message {
+let message = proto!(wa::Message {
     conversation: Some("Hello subscribers!".to_string()),
     ..Default::default()
-};
+});
 
 let result = client.send_message(newsletter_jid, message).await?;
 ```
@@ -439,20 +441,20 @@ An album consists of:
 ### Sending an album
 
 ```rust
-use waproto::whatsapp as wa;
+use whatsapp_rust::prelude::*;
 use whatsapp_rust::proto_helpers::wrap_as_album_child;
 
 let chat_jid: Jid = "1234567890@s.whatsapp.net".parse()?;
 
 // Step 1: Send the parent album message
-let album_parent = wa::Message {
-    album_message: buffa::MessageField::some(wa::message::AlbumMessage {
+let album_parent = proto!(wa::Message {
+    album_message: proto!(wa::message::AlbumMessage {
         expected_image_count: Some(3),
         expected_video_count: Some(0),
         ..Default::default()
     }),
     ..Default::default()
-};
+});
 
 let parent_result = client.send_message(&chat_jid, album_parent).await?;
 let parent_key = parent_result.message_key();
@@ -461,8 +463,8 @@ let parent_key = parent_result.message_key();
 for image_data in [image1_bytes, image2_bytes, image3_bytes] {
     let upload = client.upload(image_data, MediaType::Image, Default::default()).await?;
 
-    let image_msg = wa::Message {
-        image_message: buffa::MessageField::some(wa::message::ImageMessage {
+    let image_msg = proto!(wa::Message {
+        image_message: proto!(wa::message::ImageMessage {
             url: Some(upload.url),
             direct_path: Some(upload.direct_path),
             media_key: Some(upload.media_key_vec()),
@@ -474,7 +476,7 @@ for image_data in [image1_bytes, image2_bytes, image3_bytes] {
             ..Default::default()
         }),
         ..Default::default()
-    };
+    });
 
     // Wrap as album child and send
     let wrapped = wrap_as_album_child(image_msg, parent_key.clone());
@@ -499,14 +501,15 @@ The parent `AlbumMessage` declares the total expected counts so WhatsApp clients
 You can mix images and videos in the same album:
 
 ```rust
-let album_parent = wa::Message {
-    album_message: buffa::MessageField::some(wa::message::AlbumMessage {
+use whatsapp_rust::prelude::*;
+let album_parent = proto!(wa::Message {
+    album_message: proto!(wa::message::AlbumMessage {
         expected_image_count: Some(2),
         expected_video_count: Some(1),
         ..Default::default()
     }),
     ..Default::default()
-};
+});
 
 let parent_result = client.send_message(&chat_jid, album_parent).await?;
 let parent_key = parent_result.message_key();
@@ -653,17 +656,17 @@ Media is relayed from the same CDN blob, so forwarding an image, video, document
 If you need to customize fields (for example, change a caption) before forwarding, you can still build the `wa::Message` yourself and pass it to `send_message`. Reusing the original CDN fields keeps the send instant:
 
 ```rust
-use waproto::whatsapp as wa;
+use whatsapp_rust::prelude::*;
 
 // Clone the image message, only change the caption
 if let Some(img) = received_message.image_message.as_option() {
-    let forwarded = wa::Message {
-        image_message: buffa::MessageField::some(wa::message::ImageMessage {
+    let forwarded = proto!(wa::Message {
+        image_message: proto!(wa::message::ImageMessage {
             caption: Some("Forwarded!".to_string()),
             ..img.clone()
         }),
         ..Default::default()
-    };
+    });
 
     client.send_message(destination_jid, forwarded).await?;
 }
@@ -680,13 +683,13 @@ WhatsApp supports disappearing messages that automatically delete after a set du
 Use `send_message_with_options` with `ephemeral_expiration` set to the chat's timer value:
 
 ```rust
+use whatsapp_rust::prelude::*;
 use whatsapp_rust::send::SendOptions;
-use waproto::whatsapp as wa;
 
-let message = wa::Message {
+let message = proto!(wa::Message {
     conversation: Some("This message will disappear!".to_string()),
     ..Default::default()
-};
+});
 
 let options = SendOptions::default().with_ephemeral_expiration(604800); // 7 days, matching the chat's timer
 
@@ -857,16 +860,17 @@ See [Send API reference](/api/send#sendoptions) for full details.
 The `prepare_for_quote` method strips nested context info:
 
 ```rust
+use whatsapp_rust::prelude::*;
 use wacore::proto_helpers::MessageExt;
 
 let quoted_message = original_message.prepare_for_quote();
 
-let context = wa::ContextInfo {
+let context = proto!(wa::ContextInfo {
     stanza_id: Some(message_id.clone()),
     participant: Some(sender_jid.to_string()),
-    quoted_message: buffa::MessageField::from_box(quoted_message),
+    quoted_message: MessageField::from_box(quoted_message),
     ..Default::default()
-};
+});
 ```
 
 This ensures:
