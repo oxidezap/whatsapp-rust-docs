@@ -143,10 +143,8 @@ use whatsapp_rust::prelude::*;
 
 .on_message(|ctx| async move {
     if ctx.message.text_content() == Some("ping") {
-        let reply = wa::Message {
-            conversation: Some("pong".to_string()),
-            ..Default::default()
-        };
+        let mut reply = wa::Message::default();
+        reply.conversation = Some("pong".to_string());
         if let Err(e) = ctx.send_message(reply).await {
             eprintln!("Failed to send reply: {e}");
         }
@@ -310,13 +308,11 @@ You can also forward media instantly by reusing the original CDN fields — no d
 fn build_media_reply(message: &wa::Message) -> Option<wa::Message> {
     let base = message.get_base_message();
     if let Some(img) = base.image_message.as_option() {
-        return Some(wa::Message {
-            image_message: MessageField::some(wa::message::ImageMessage {
-                caption: Some("Received your image!".to_string()),
-                ..img.clone()
-            }),
-            ..Default::default()
-        });
+        let mut image = img.clone();
+        image.caption = Some("Received your image!".to_string());
+        let mut reply = wa::Message::default();
+        reply.image_message = MessageField::some(image);
+        return Some(reply);
     }
     None
 }
@@ -435,24 +431,20 @@ fn build_media_pong(message: &wa::Message) -> Option<wa::Message> {
     if let Some(img) = base.image_message.as_option()
         && img.caption.as_deref() == Some(PING_TRIGGER)
     {
-        return Some(wa::Message {
-            image_message: MessageField::some(wa::message::ImageMessage {
-                caption: Some(PONG_TEXT.to_string()),
-                ..img.clone()
-            }),
-            ..Default::default()
-        });
+        let mut image = img.clone();
+        image.caption = Some(PONG_TEXT.to_string());
+        let mut reply = wa::Message::default();
+        reply.image_message = MessageField::some(image);
+        return Some(reply);
     }
     if let Some(vid) = base.video_message.as_option()
         && vid.caption.as_deref() == Some(PING_TRIGGER)
     {
-        return Some(wa::Message {
-            video_message: MessageField::some(wa::message::VideoMessage {
-                caption: Some(PONG_TEXT.to_string()),
-                ..vid.clone()
-            }),
-            ..Default::default()
-        });
+        let mut video = vid.clone();
+        video.caption = Some(PONG_TEXT.to_string());
+        let mut reply = wa::Message::default();
+        reply.video_message = MessageField::some(video);
+        return Some(reply);
     }
     None
 }

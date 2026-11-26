@@ -51,7 +51,7 @@ tokio = { version = "1.53", features = ["macros", "rt-multi-thread"] }
 
 </CodeGroup>
 
-Todo caminho de sub-crate é alcançável pelo crate principal — `whatsapp_rust::waproto::whatsapp` (apelidado como `wa` no `prelude`), `whatsapp_rust::wacore`, `whatsapp_rust::wacore_binary`, `whatsapp_rust::store::SqliteStore`, `whatsapp_rust::http::UreqHttpClient` e `whatsapp_rust::transport::TokioWebSocketTransportFactory`. O mesmo vale para os crates de terceiros cujos tipos aparecem na API pública (`anyhow`, `async_trait`, `bytes`, `chrono`, `futures`, `serde`, `serde_json`, `async_channel`, `buffa`): você nunca precisa adicioná-los nem fixar suas versões.
+O crate principal reexporta `whatsapp_rust::waproto::whatsapp` como `wa` no prelude, além de `wacore`, `wacore_binary` e das implementações de armazenamento e transporte. O módulo `whatsapp_rust::protobuf` contém os tipos e traits de protobuf, incluindo `MessageField`, também disponível no prelude. O caminho histórico `whatsapp_rust::buffa` aponta para o mesmo módulo.
 
 ## Feature flags
 
@@ -106,7 +106,7 @@ O crate `waproto` tem suas próprias feature flags:
 | `serde-snake-case` | Aceita nomes de variantes de enum em snake_case durante a desserialização (implica `serde-deserialize`) | ❌ Não |
 | `serde-enum-repr` | Enums são (de)serializados pela representação numérica em vez do nome da variante — o que a ponte JS/WASM e o serializador camelCase esperam | ❌ Não |
 
-O `build.rs` sempre executa e gera `whatsapp.rs` no `OUT_DIR` — nenhuma feature flag é necessária para builds normais. Todos os tipos protobuf derivam `Serialize` por padrão. Habilite `serde-deserialize` quando precisar analisar tipos protobuf a partir de JSON (por exemplo, em uma ponte WASM). Habilite `serde-snake-case` quando sua fonte JSON usa snake_case para variantes de enum (buffa gera SCREAMING_SNAKE_CASE por padrão).
+O `build.rs` gera o modelo protobuf no `OUT_DIR` sem precisar de feature flag. Os tipos gerados implementam `Serialize` por padrão. Habilite `serde-deserialize` para analisar tipos protobuf a partir de JSON e `serde-snake-case` para aceitar variantes de enum em snake_case na desserialização.
 
 ```toml Cargo.toml
 [dependencies]

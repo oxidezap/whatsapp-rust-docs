@@ -144,10 +144,8 @@ use waproto::whatsapp as wa;
                 if let Some(text) = msg.text_content() {
                     if text == "ping" {
                         // Cria a mensagem de resposta
-                        let reply = wa::Message {
-                            conversation: Some("pong".to_string()),
-                            ..Default::default()
-                        };
+                        let mut reply = wa::Message::default();
+                        reply.conversation = Some("pong".to_string());
 
                         // Envia a resposta
                         if let Err(e) = client.send_message(info.source.chat.clone(), reply).await {
@@ -305,10 +303,8 @@ Em seguida, defina funções de tratamento focadas:
 async fn handle_message(ctx: &MessageContext) {
     if let Some(text) = ctx.message.text_content() {
         if text == "ping" {
-            let reply = wa::Message {
-                conversation: Some("pong".to_string()),
-                ..Default::default()
-            };
+            let mut reply = wa::Message::default();
+            reply.conversation = Some("pong".to_string());
             if let Err(e) = ctx.send_message(reply).await {
                 eprintln!("Failed to send: {}", e);
             }
@@ -322,7 +318,7 @@ async fn handle_message(ctx: &MessageContext) {
 Você também pode encaminhar mídia instantaneamente reusando os campos originais do CDN — sem necessidade de download ou re-upload:
 
 <Note>
-  Construir uma mensagem com um campo de sub-mensagem (como `image_message` abaixo) requer `MessageField`. O `whatsapp-rust` reexporta `buffa` como `whatsapp_rust::buffa` (e `MessageField` diretamente do `prelude`), então não é mais necessário adicionar `buffa` ao seu `Cargo.toml`.
+  Para preencher uma sub-mensagem como `image_message`, use `MessageField` do prelude ou de `whatsapp_rust::protobuf`. Não é necessário adicionar uma dependência de protobuf ao seu `Cargo.toml`.
 </Note>
 
 ```rust
@@ -331,13 +327,11 @@ Você também pode encaminhar mídia instantaneamente reusando os campos origina
 fn build_media_reply(message: &wa::Message) -> Option<wa::Message> {
     let base = message.get_base_message();
     if let Some(img) = base.image_message.as_option() {
-        return Some(wa::Message {
-            image_message: whatsapp_rust::buffa::MessageField::some(wa::message::ImageMessage {
-                caption: Some("Received your image!".to_string()),
-                ..img.clone()
-            }),
-            ..Default::default()
-        });
+        let mut image = img.clone();
+        image.caption = Some("Received your image!".to_string());
+        let mut reply = wa::Message::default();
+        reply.image_message = whatsapp_rust::protobuf::MessageField::some(image);
+        return Some(reply);
     }
     None
 }
@@ -425,14 +419,11 @@ async fn handle_message(ctx: &MessageContext) {
     // Trata o ping de texto
     if ctx.message.text_content() == Some(PING_TRIGGER) {
         let context_info = ctx.build_quote_context();
-        let reply = wa::Message {
-            extended_text_message: whatsapp_rust::buffa::MessageField::some(wa::message::ExtendedTextMessage {
-                text: Some(PONG_TEXT.to_string()),
-                context_info: whatsapp_rust::buffa::MessageField::some(context_info),
-                ..Default::default()
-            }),
-            ..Default::default()
-        };
+        let mut content = wa::message::ExtendedTextMessage::default();
+        content.text = Some(PONG_TEXT.to_string());
+        content.context_info = whatsapp_rust::protobuf::MessageField::some(context_info);
+        let mut reply = wa::Message::default();
+        reply.extended_text_message = whatsapp_rust::protobuf::MessageField::some(content);
 
         if let Err(e) = ctx.send_message(reply).await {
             error!("Failed to send pong: {}", e);
@@ -447,24 +438,20 @@ fn build_media_pong(message: &wa::Message) -> Option<wa::Message> {
     if let Some(img) = base.image_message.as_option()
         && img.caption.as_deref() == Some(PING_TRIGGER)
     {
-        return Some(wa::Message {
-            image_message: whatsapp_rust::buffa::MessageField::some(wa::message::ImageMessage {
-                caption: Some(PONG_TEXT.to_string()),
-                ..img.clone()
-            }),
-            ..Default::default()
-        });
+        let mut image = img.clone();
+        image.caption = Some(PONG_TEXT.to_string());
+        let mut reply = wa::Message::default();
+        reply.image_message = whatsapp_rust::protobuf::MessageField::some(image);
+        return Some(reply);
     }
     if let Some(vid) = base.video_message.as_option()
         && vid.caption.as_deref() == Some(PING_TRIGGER)
     {
-        return Some(wa::Message {
-            video_message: whatsapp_rust::buffa::MessageField::some(wa::message::VideoMessage {
-                caption: Some(PONG_TEXT.to_string()),
-                ..vid.clone()
-            }),
-            ..Default::default()
-        });
+        let mut video = vid.clone();
+        video.caption = Some(PONG_TEXT.to_string());
+        let mut reply = wa::Message::default();
+        reply.video_message = whatsapp_rust::protobuf::MessageField::some(video);
+        return Some(reply);
     }
     None
 }
