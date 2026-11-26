@@ -847,7 +847,7 @@ key.id = Some("example-message-id".into());
 key.from_me = Some(true);
 let mut protocol = wa::message::ProtocolMessage::default();
 protocol.key = MessageField::some(key);
-protocol.r#type = Some(wa::message::protocol_message::Type::Revoke);
+protocol.r#type = Some(wa::message::protocol_message::Type::REVOKE);
 let mut revoke = wa::Message::default();
 revoke.protocol_message = MessageField::some(protocol);
 ```
