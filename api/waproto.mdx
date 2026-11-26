@@ -57,7 +57,7 @@ if let Some(image) = img.image_message.as_option() {
 }
 ```
 
-Optional scalar and enum fields use `Option<T>`. Required fields use their value type. Generated messages and enums are non-exhaustive, so construct messages with `Default` or setters and include a fallback when matching enums.
+Optional scalar and enum fields use `Option<T>`. Required fields use their value type. Generated messages and enums are non-exhaustive, so construct messages with `Default` and field assignments, and include a fallback when matching enums.
 
 Import `Message` to encode or decode owned values. Import `MessageView` to decode a view that borrows strings and bytes from the input buffer.
 

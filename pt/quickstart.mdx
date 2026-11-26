@@ -318,12 +318,12 @@ async fn handle_message(ctx: &MessageContext) {
 Você também pode encaminhar mídia instantaneamente reusando os campos originais do CDN — sem necessidade de download ou re-upload:
 
 <Note>
-  Para preencher uma sub-mensagem como `image_message`, use `MessageField` do prelude ou de `whatsapp_rust::protobuf`. Não é necessário adicionar uma dependência de protobuf ao seu `Cargo.toml`.
+  Campos de sub-mensagem usam `MessageField`. Você pode atribuir um valor com `.into()` ou construí-lo com `MessageField::some`. As duas formas usam os tipos reexportados pelo SDK.
 </Note>
 
-```rust
-/// Reutiliza o blob original do CDN, apenas troca a legenda.
-/// Instantâneo independentemente do tamanho do arquivo.
+<CodeGroup>
+
+```rust MessageField::some
 fn build_media_reply(message: &wa::Message) -> Option<wa::Message> {
     let base = message.get_base_message();
     if let Some(img) = base.image_message.as_option() {
@@ -336,6 +336,26 @@ fn build_media_reply(message: &wa::Message) -> Option<wa::Message> {
     None
 }
 ```
+
+```rust Into
+/// Reutiliza o blob original do CDN, apenas troca a legenda.
+/// Instantâneo independentemente do tamanho do arquivo.
+fn build_media_reply(message: &wa::Message) -> Option<wa::Message> {
+    let base = message.get_base_message();
+    if let Some(img) = base.image_message.as_option() {
+        let mut image = img.clone();
+        image.caption = Some("Received your image!".to_string());
+        let mut reply = wa::Message::default();
+        reply.image_message = image.into();
+        return Some(reply);
+    }
+    None
+}
+```
+
+</CodeGroup>
+
+As mensagens geradas são não exaustivas. Fora do crate, use `Default` e atribuição de campos para construí-las.
 
 Veja o [guia de encaminhamento de mídia](/guides/media-handling#forwarding-media-via-cdn-reuse) para mais detalhes.
 

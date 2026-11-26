@@ -299,12 +299,12 @@ async fn handle_message(ctx: MessageContext) {
 You can also forward media instantly by reusing the original CDN fields — no download or re-upload needed:
 
 <Note>
-  Constructing a message with a sub-message field (like `image_message` below) requires `MessageField`. `whatsapp-rust` re-exports it directly from `prelude`, so `use whatsapp_rust::prelude::*` is enough — no extra `Cargo.toml` entry needed. See [Installation](/installation#add-to-your-project).
+  Sub-message fields use `MessageField`. You can assign one with `.into()` or construct it with `MessageField::some`. Both paths use the types in the SDK prelude. See [Installation](/installation#add-to-your-project).
 </Note>
 
-```rust
-/// Reuses the original CDN blob, only swaps the caption.
-/// Instant regardless of file size.
+<CodeGroup>
+
+```rust MessageField::some
 fn build_media_reply(message: &wa::Message) -> Option<wa::Message> {
     let base = message.get_base_message();
     if let Some(img) = base.image_message.as_option() {
@@ -317,6 +317,26 @@ fn build_media_reply(message: &wa::Message) -> Option<wa::Message> {
     None
 }
 ```
+
+```rust Into
+/// Reuses the original CDN blob, only swaps the caption.
+/// Instant regardless of file size.
+fn build_media_reply(message: &wa::Message) -> Option<wa::Message> {
+    let base = message.get_base_message();
+    if let Some(img) = base.image_message.as_option() {
+        let mut image = img.clone();
+        image.caption = Some("Received your image!".to_string());
+        let mut reply = wa::Message::default();
+        reply.image_message = image.into();
+        return Some(reply);
+    }
+    None
+}
+```
+
+</CodeGroup>
+
+Generated messages are non-exhaustive. Use `Default` with field assignments when constructing them outside the crate.
 
 See the [media forwarding guide](/guides/media-handling#forwarding-media-via-cdn-reuse) for more details.
 
