@@ -323,6 +323,20 @@ Você também pode encaminhar mídia instantaneamente reusando os campos origina
 
 <CodeGroup>
 
+```rust proto!
+fn build_media_reply(message: &wa::Message) -> Option<wa::Message> {
+    let base = message.get_base_message();
+    if let Some(img) = base.image_message.as_option() {
+        let image = proto!(wa::message::ImageMessage {
+            caption: Some("Received your image!".to_string()),
+            ..img.clone()
+        });
+        return Some(proto!(wa::Message { image_message: image }));
+    }
+    None
+}
+```
+
 ```rust MessageField::some
 fn build_media_reply(message: &wa::Message) -> Option<wa::Message> {
     let base = message.get_base_message();

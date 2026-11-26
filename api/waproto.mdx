@@ -28,10 +28,10 @@ The build writes the model and field tags to `OUT_DIR`. Consumers do not need `p
 
 ## Usage
 
-All protobuf types are under the `waproto::whatsapp` module:
+The prelude provides `wa`, the protobuf traits, and common codecs:
 
 ```rust
-use waproto::whatsapp as wa;
+use waproto::prelude::*;
 
 let mut message = wa::Message::default();
 message.conversation = Some("Hello, World!".to_string());
@@ -40,12 +40,11 @@ message.conversation = Some("Hello, World!".to_string());
 Sub-message fields use `waproto::protobuf::MessageField<T>`. Construct one with `MessageField::some(..)` and read it with `.as_option()`, `.is_set()`, or `.is_unset()`.
 
 <Note>
-  The SDK re-exports this module as `whatsapp_rust::protobuf` and exposes `MessageField` in the prelude. The historical `waproto::buffa` and `whatsapp_rust::buffa` paths refer to the same project-owned module. If your code uses traits from the external `buffa` crate, import the corresponding traits from `waproto::protobuf` for generated WhatsApp types.
+  The SDK provides the same protobuf items through `whatsapp_rust::prelude::*`. The historical `waproto::buffa` and `whatsapp_rust::buffa` paths refer to the project-owned protobuf module.
 </Note>
 
 ```rust
-use waproto::protobuf::MessageField;
-use waproto::whatsapp as wa;
+use waproto::prelude::*;
 
 let mut image = wa::message::ImageMessage::default();
 image.caption = Some("Check this out!".to_string());
@@ -59,11 +58,10 @@ if let Some(image) = img.image_message.as_option() {
 
 Optional scalar and enum fields use `Option<T>`. Required fields use their value type. Generated messages and enums are non-exhaustive, so construct messages with `Default` and field assignments, and include a fallback when matching enums.
 
-Import `Message` to encode or decode owned values. Import `MessageView` to decode a view that borrows strings and bytes from the input buffer.
+The prelude brings `ProtoMessage` and `ProtoMessageView` into scope for owned and borrowed decoding.
 
 ```rust
-use waproto::protobuf::{Message as _, MessageView as _};
-use waproto::whatsapp as wa;
+use waproto::prelude::*;
 
 fn main() -> Result<(), waproto::protobuf::DecodeError> {
     let mut message = wa::Message::default();
@@ -130,8 +128,7 @@ pub struct Message {
 **Usage in main library:**
 
 ```rust
-use waproto::protobuf::MessageField;
-use waproto::whatsapp as wa;
+use waproto::prelude::*;
 
 // Construct a text message
 let mut msg = wa::Message::default();
@@ -758,8 +755,7 @@ The `generate` feature flag was removed. Code generation is now always-on and do
 ### Constructing Messages
 
 ```rust
-use waproto::protobuf::MessageField;
-use waproto::whatsapp as wa;
+use waproto::prelude::*;
 
 // Text message
 let mut text = wa::Message::default();
@@ -812,7 +808,7 @@ match (&proto_msg.conversation, proto_msg.image_message.as_option(), proto_msg.v
 See [Media Handling](/guides/media-handling) for complete examples.
 
 ```rust
-use waproto::whatsapp as wa;
+use waproto::prelude::*;
 use wacore::download::{Downloadable, MediaType};
 
 if let Some(img) = message.image_message.as_option() {
@@ -838,8 +834,7 @@ wacore provides utilities for working with waproto messages:
 Example:
 
 ```rust
-use waproto::protobuf::MessageField;
-use waproto::whatsapp as wa;
+use waproto::prelude::*;
 
 let mut key = wa::MessageKey::default();
 key.remote_jid = Some("12345@s.whatsapp.net".into());
