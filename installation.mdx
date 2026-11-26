@@ -31,19 +31,14 @@ Every sub-crate path is reachable through the main crate:
 - `whatsapp_rust::wacore`, `whatsapp_rust::wacore_binary`
 - `whatsapp_rust::store::SqliteStore`, `whatsapp_rust::http::UreqHttpClient`, `whatsapp_rust::transport::TokioWebSocketTransportFactory`
 
-`whatsapp-rust` also re-exports every third-party crate whose types appear in its public API, so you never need to add or version-pin any of these yourself:
+`whatsapp-rust` re-exports the protobuf runtime and the types used by its public API:
 
-- `whatsapp_rust::buffa` — sub-message fields on `wa::Message` (`MessageField`; also re-exported directly from `prelude`) — see [waproto](/api/waproto)
-- `whatsapp_rust::anyhow` — the error type on the store/transport/`InboundDurabilityHook` traits
+- `whatsapp_rust::protobuf` — protobuf traits and containers. The prelude also provides `wa`, `MessageField`, `ProtoMessage`, `ProtoMessageView`, `ProtoDecodeOptions`, `OwnedView`, and `protobuf_codec` for common encoding and decoding. The same protobuf prelude is available as `waproto::prelude`. The historical `whatsapp_rust::buffa` path refers to the same protobuf module. See [waproto](/api/waproto).
 - `whatsapp_rust::async_trait` — the macro required to implement those traits
 - `whatsapp_rust::bytes` — `Transport::send` payloads
-- `whatsapp_rust::chrono` — timestamps returned by `wacore::time` and message metadata
+- `whatsapp_rust::Timestamp` — timestamps returned by `wacore::time` and message metadata
 - `whatsapp_rust::futures` — the `oneshot::Receiver` returned by response-waiting accessors
 - `whatsapp_rust::serde`, `whatsapp_rust::serde_json`, `whatsapp_rust::async_channel`
-
-<Note>
-  This is purely additive — you can still add any of these crates directly (for example to pin your own version, or to use APIs beyond what whatsapp-rust re-exports).
-</Note>
 
 The same holds for git consumers — no need to pin every sibling crate:
 
@@ -138,7 +133,7 @@ The `waproto` crate has its own feature flags:
 | `serde-snake-case` | Accepts snake_case enum variant names during deserialization (implies `serde-deserialize`) | ❌ No |
 | `serde-enum-repr` | Enums (de)serialize as their numeric repr instead of the variant name — what the JS/WASM bridge and camelCase serializer expect | ❌ No |
 
-`build.rs` always runs and generates `whatsapp.rs` into `OUT_DIR` — you do not need any feature flag for normal builds. All protobuf types derive `Serialize` by default. Enable `serde-deserialize` when you need to parse protobuf types from JSON (e.g., in a WASM bridge). Enable `serde-snake-case` when your JSON source uses snake_case for enum variants (buffa generates SCREAMING_SNAKE_CASE by default).
+`build.rs` generates the protobuf model in `OUT_DIR` without a feature flag. Generated protobuf types implement `Serialize` by default. Enable `serde-deserialize` to parse protobuf types from JSON, and `serde-snake-case` to accept snake_case enum variants during deserialization.
 
 ```toml Cargo.toml
 [dependencies]

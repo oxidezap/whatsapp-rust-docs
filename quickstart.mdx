@@ -143,10 +143,8 @@ use whatsapp_rust::prelude::*;
 
 .on_message(|ctx| async move {
     if ctx.message.text_content() == Some("ping") {
-        let reply = wa::Message {
-            conversation: Some("pong".to_string()),
-            ..Default::default()
-        };
+        let mut reply = wa::Message::default();
+        reply.conversation = Some("pong".to_string());
         if let Err(e) = ctx.send_message(reply).await {
             eprintln!("Failed to send reply: {e}");
         }
@@ -301,26 +299,64 @@ async fn handle_message(ctx: MessageContext) {
 You can also forward media instantly by reusing the original CDN fields — no download or re-upload needed:
 
 <Note>
-  Constructing a message with a sub-message field (like `image_message` below) requires `MessageField`. `whatsapp-rust` re-exports it directly from `prelude`, so `use whatsapp_rust::prelude::*` is enough — no extra `Cargo.toml` entry needed. See [Installation](/installation#add-to-your-project).
+  Sub-message fields use `MessageField`. You can assign one with `.into()` or construct it with `MessageField::some`. Both paths use the types in the SDK prelude. See [Installation](/installation#add-to-your-project).
 </Note>
 
-```rust
+<CodeGroup>
+
+```rust proto!
+use whatsapp_rust::prelude::*;
+
+fn build_media_reply(message: &wa::Message) -> Option<wa::Message> {
+    let base = message.get_base_message();
+    if let Some(img) = base.image_message.as_option() {
+        let image = proto!(wa::message::ImageMessage {
+            caption: "Received your image!",
+            ..img.clone()
+        });
+        return Some(proto!(wa::Message { image_message: image }));
+    }
+    None
+}
+```
+
+```rust MessageField::some
+use whatsapp_rust::prelude::*;
+
+fn build_media_reply(message: &wa::Message) -> Option<wa::Message> {
+    let base = message.get_base_message();
+    if let Some(img) = base.image_message.as_option() {
+        let mut image = img.clone();
+        image.caption = Some("Received your image!".to_string());
+        let mut reply = wa::Message::default();
+        reply.image_message = MessageField::some(image);
+        return Some(reply);
+    }
+    None
+}
+```
+
+```rust Into
+use whatsapp_rust::prelude::*;
+
 /// Reuses the original CDN blob, only swaps the caption.
 /// Instant regardless of file size.
 fn build_media_reply(message: &wa::Message) -> Option<wa::Message> {
     let base = message.get_base_message();
     if let Some(img) = base.image_message.as_option() {
-        return Some(wa::Message {
-            image_message: MessageField::some(wa::message::ImageMessage {
-                caption: Some("Received your image!".to_string()),
-                ..img.clone()
-            }),
-            ..Default::default()
-        });
+        let mut image = img.clone();
+        image.caption = Some("Received your image!".to_string());
+        let mut reply = wa::Message::default();
+        reply.image_message = image.into();
+        return Some(reply);
     }
     None
 }
 ```
+
+</CodeGroup>
+
+Generated messages are non-exhaustive. Use `Default` with field assignments when constructing them outside the crate.
 
 See the [media forwarding guide](/guides/media-handling#forwarding-media-via-cdn-reuse) for more details.
 
@@ -435,24 +471,20 @@ fn build_media_pong(message: &wa::Message) -> Option<wa::Message> {
     if let Some(img) = base.image_message.as_option()
         && img.caption.as_deref() == Some(PING_TRIGGER)
     {
-        return Some(wa::Message {
-            image_message: MessageField::some(wa::message::ImageMessage {
-                caption: Some(PONG_TEXT.to_string()),
-                ..img.clone()
-            }),
-            ..Default::default()
-        });
+        let mut image = img.clone();
+        image.caption = Some(PONG_TEXT.to_string());
+        let mut reply = wa::Message::default();
+        reply.image_message = MessageField::some(image);
+        return Some(reply);
     }
     if let Some(vid) = base.video_message.as_option()
         && vid.caption.as_deref() == Some(PING_TRIGGER)
     {
-        return Some(wa::Message {
-            video_message: MessageField::some(wa::message::VideoMessage {
-                caption: Some(PONG_TEXT.to_string()),
-                ..vid.clone()
-            }),
-            ..Default::default()
-        });
+        let mut video = vid.clone();
+        video.caption = Some(PONG_TEXT.to_string());
+        let mut reply = wa::Message::default();
+        reply.video_message = MessageField::some(video);
+        return Some(reply);
     }
     None
 }

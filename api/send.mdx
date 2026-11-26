@@ -82,12 +82,12 @@ pub struct ChatMessageId {
 ### Example: text message
 
 ```rust
-use waproto::whatsapp as wa;
+use whatsapp_rust::prelude::*;
 
-let message = wa::Message {
+let message = proto!(wa::Message {
     conversation: Some("Hello, world!".to_string()),
     ..Default::default()
-};
+});
 
 let result = client.send_message(
     "15551234567@s.whatsapp.net".parse()?,
@@ -100,14 +100,14 @@ println!("Message sent with ID: {}", result.message_id);
 ### Example: Newsletter message
 
 ```rust
-use waproto::whatsapp as wa;
+use whatsapp_rust::prelude::*;
 
 let newsletter_jid: Jid = "120363999999999999@newsletter".parse()?;
 
-let message = wa::Message {
+let message = proto!(wa::Message {
     conversation: Some("Hello subscribers!".to_string()),
     ..Default::default()
-};
+});
 
 // Newsletter messages are sent as plaintext automatically
 let result = client.send_message(newsletter_jid, message).await?;
@@ -120,13 +120,13 @@ Newsletter reactions use a different stanza format and are still sent through `c
 ### Example: image with caption
 
 ```rust
-use waproto::whatsapp as wa;
+use whatsapp_rust::prelude::*;
 
 // First upload the image
 let upload_result = client.upload(image_bytes, MediaType::Image, Default::default()).await?;
 
-let message = wa::Message {
-    image_message: buffa::MessageField::some(wa::message::ImageMessage {
+let message = proto!(wa::Message {
+    image_message: proto!(wa::message::ImageMessage {
         url: Some(upload_result.url),
         direct_path: Some(upload_result.direct_path),
         media_key: Some(upload_result.media_key_vec()),
@@ -139,7 +139,7 @@ let message = wa::Message {
         ..Default::default()
     }),
     ..Default::default()
-};
+});
 
 let result = client.send_message(chat_jid, message).await?;
 ```
@@ -149,25 +149,25 @@ let result = client.send_message(chat_jid, message).await?;
 Send multiple images and/or videos as a single grouped album. First send the parent `AlbumMessage` with expected counts, then send each child media wrapped with `wrap_as_album_child`:
 
 ```rust
-use waproto::whatsapp as wa;
+use whatsapp_rust::prelude::*;
 use whatsapp_rust::proto_helpers::wrap_as_album_child;
 
 // 1. Send the parent album message with expected media counts
-let album_parent = wa::Message {
-    album_message: buffa::MessageField::some(wa::message::AlbumMessage {
+let album_parent = proto!(wa::Message {
+    album_message: proto!(wa::message::AlbumMessage {
         expected_image_count: Some(2),
         expected_video_count: Some(1),
         ..Default::default()
     }),
     ..Default::default()
-};
+});
 
 let parent_result = client.send_message(&chat_jid, album_parent).await?;
 let parent_key = parent_result.message_key();
 
 // 2. Send each child media wrapped as an album child
-let image1 = wa::Message {
-    image_message: buffa::MessageField::some(wa::message::ImageMessage {
+let image1 = proto!(wa::Message {
+    image_message: proto!(wa::message::ImageMessage {
         url: Some(upload1.url),
         direct_path: Some(upload1.direct_path),
         media_key: Some(upload1.media_key_vec()),
@@ -179,7 +179,7 @@ let image1 = wa::Message {
         ..Default::default()
     }),
     ..Default::default()
-};
+});
 
 let wrapped = wrap_as_album_child(image1, parent_key.clone());
 client.send_message(&chat_jid, wrapped).await?;
@@ -399,25 +399,25 @@ pub async fn edit_message(
 ### Example: Edit a message
 
 ```rust
-use waproto::whatsapp as wa;
+use whatsapp_rust::prelude::*;
 
 // Send original message
 let result = client.send_message(
     &chat_jid,
-    wa::Message {
+    proto!(wa::Message {
         conversation: Some("Hello!".to_string()),
         ..Default::default()
-    }
+    })
 ).await?;
 
 // Edit it
 let edit_id = client.edit_message(
     &chat_jid,
     &result.message_id,
-    wa::Message {
+    proto!(wa::Message {
         conversation: Some("Hello, edited!".to_string()),
         ..Default::default()
-    }
+    })
 ).await?;
 ```
 
@@ -490,16 +490,16 @@ pub struct EditOptions {
 ### Example: edit with a pinned stanza id
 
 ```rust
-use waproto::whatsapp as wa;
+use whatsapp_rust::prelude::*;
 use whatsapp_rust::send::EditOptions;
 
 let edit_id = client.edit_message_with_options(
     &chat_jid,
     &original_id,
-    wa::Message {
+    proto!(wa::Message {
         conversation: Some("Hello, edited!".to_string()),
         ..Default::default()
-    },
+    }),
     EditOptions::default().with_stanza_id(existing_message_id.clone()),
 ).await?;
 
@@ -549,16 +549,16 @@ pub async fn edit_message_encrypted(
 ### Example: encrypted edit
 
 ```rust
-use waproto::whatsapp as wa;
+use whatsapp_rust::prelude::*;
 
 let edit_id = client.edit_message_encrypted(
     &chat_jid,
     &original_id,
     &message_secret,
-    wa::Message {
+    proto!(wa::Message {
         conversation: Some("edited (encrypted)".to_string()),
         ..Default::default()
-    },
+    }),
 ).await?;
 ```
 
@@ -719,15 +719,15 @@ pub enum PinDuration {
 ### Example: Pin a message for 7 days
 
 ```rust
-use waproto::whatsapp as wa;
+use whatsapp_rust::prelude::*;
 use whatsapp_rust::send::PinDuration;
 
-let key = wa::MessageKey {
+let key = proto!(wa::MessageKey {
     remote_jid: Some(chat_jid.to_string()),
     id: Some(message_id.clone()),
     from_me: Some(false),
     participant: None,
-};
+});
 
 client.pin_message(chat_jid, key, PinDuration::Days7).await?;
 ```
@@ -735,15 +735,15 @@ client.pin_message(chat_jid, key, PinDuration::Days7).await?;
 ### Example: Pin a group message for 30 days
 
 ```rust
-use waproto::whatsapp as wa;
+use whatsapp_rust::prelude::*;
 use whatsapp_rust::send::PinDuration;
 
-let key = wa::MessageKey {
+let key = proto!(wa::MessageKey {
     remote_jid: Some(group_jid.to_string()),
     id: Some(message_id.clone()),
     from_me: Some(false),
     participant: Some(sender_jid.to_string()),
-};
+});
 
 client.pin_message(group_jid, key, PinDuration::Days30).await?;
 ```
@@ -773,14 +773,14 @@ pub async fn unpin_message(
 ### Example: Unpin a message
 
 ```rust
-use waproto::whatsapp as wa;
+use whatsapp_rust::prelude::*;
 
-let key = wa::MessageKey {
+let key = proto!(wa::MessageKey {
     remote_jid: Some(chat_jid.to_string()),
     id: Some(message_id.clone()),
     from_me: Some(false),
     participant: None,
-};
+});
 
 client.unpin_message(chat_jid, key).await?;
 ```
@@ -817,14 +817,14 @@ The keep stanza itself is sent with a fresh message id; only the target message'
 ### Example: Keep a message for everyone
 
 ```rust
-use waproto::whatsapp as wa;
+use whatsapp_rust::prelude::*;
 
-let key = wa::MessageKey {
+let key = proto!(wa::MessageKey {
     remote_jid: Some(chat_jid.to_string()),
     id: Some(message_id.clone()),
     from_me: Some(false),
     participant: None,
-};
+});
 
 client.keep_message(chat_jid, key, true).await?;
 ```
@@ -832,14 +832,14 @@ client.keep_message(chat_jid, key, true).await?;
 ### Example: Undo a previous keep
 
 ```rust
-use waproto::whatsapp as wa;
+use whatsapp_rust::prelude::*;
 
-let key = wa::MessageKey {
+let key = proto!(wa::MessageKey {
     remote_jid: Some(group_jid.to_string()),
     id: Some(message_id.clone()),
     from_me: Some(false),
     participant: Some(sender_jid.to_string()),
-};
+});
 
 client.keep_message(group_jid, key, false).await?;
 ```
@@ -925,14 +925,14 @@ pub async fn send_reaction(
 ### Example: react to a DM
 
 ```rust
-use waproto::whatsapp as wa;
+use whatsapp_rust::prelude::*;
 
-let target_key = wa::MessageKey {
+let target_key = proto!(wa::MessageKey {
     remote_jid: Some(chat_jid.to_string()),
     from_me: Some(false),
     id: Some(target_message_id.clone()),
     participant: None, // DMs omit participant
-};
+});
 
 client.send_reaction(&chat_jid, target_key, "👍").await?;
 ```
@@ -940,15 +940,15 @@ client.send_reaction(&chat_jid, target_key, "👍").await?;
 ### Example: react to a group message
 
 ```rust
-use waproto::whatsapp as wa;
+use whatsapp_rust::prelude::*;
 
-let target_key = wa::MessageKey {
+let target_key = proto!(wa::MessageKey {
     remote_jid: Some(group_jid.to_string()),
     from_me: Some(false),
     id: Some(target_message_id.clone()),
     // The original sender — required for groups so the receipt can be attributed.
     participant: Some(sender_jid.to_string()),
-};
+});
 
 client.send_reaction(&group_jid, target_key, "🎉").await?;
 ```
@@ -1282,7 +1282,7 @@ The `wa::Message` protobuf supports various message types. Set exactly one of th
 Use `build_quote_context_with_info` to create a reply with the correct `participant` and `remote_jid` fields. It takes both the quoted message's chat (`quoted_chat_jid`) and the chat you're sending into (`target_chat_jid`):
 
 ```rust
-use waproto::whatsapp as wa;
+use whatsapp_rust::prelude::*;
 use wacore::proto_helpers::build_quote_context_with_info;
 
 let context = build_quote_context_with_info(
@@ -1293,14 +1293,14 @@ let context = build_quote_context_with_info(
     &quoted_message,
 );
 
-let message = wa::Message {
-    extended_text_message: buffa::MessageField::some(wa::message::ExtendedTextMessage {
+let message = proto!(wa::Message {
+    extended_text_message: proto!(wa::message::ExtendedTextMessage {
         text: Some("Reply to your message".to_string()),
-        context_info: buffa::MessageField::some(context),
+        context_info: MessageField::some(context),
         ..Default::default()
     }),
     ..Default::default()
-};
+});
 ```
 
 `remote_jid` is emitted only when `quoted_chat_jid` and `target_chat_jid` refer to different chats (a cross-chat quote, such as quoting a status into a DM). Same-chat replies omit it, matching WhatsApp Web. For newsletter chats, the `participant` field is automatically set to the newsletter JID instead of the sender.

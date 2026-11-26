@@ -5,7 +5,7 @@ description: "Protocol Buffers definitions for WhatsApp messages"
 
 ## Overview
 
-`waproto` contains the Protocol Buffers definitions for all WhatsApp message types. It's auto-generated from `whatsapp.proto` using [buffa](https://github.com/anthropics/buffa) and provides strongly-typed Rust structs for working with WhatsApp's binary protocol.
+`waproto` provides generated Rust types and codecs for WhatsApp's Protocol Buffers. The crate owns the public protobuf runtime and generates its models from the committed descriptor during the build.
 
 ```toml
 [dependencies]
@@ -21,48 +21,63 @@ waproto/
 │   ├── whatsapp.proto       # Source protobuf definitions
 │   ├── whatsapp.desc        # Binary FileDescriptorSet (committed)
 │   └── whatsapp.desc.sha256 # SHA-256 of descriptor and proto
-└── build.rs                 # Always-on: generates whatsapp.rs + tags.rs → OUT_DIR
+└── build.rs                 # Generates the model and tags in OUT_DIR
 ```
 
-The build writes `whatsapp.rs` and `tags.rs` to `OUT_DIR`. Do not commit these files. Consumers of the crate never need `protoc` installed — only editors of `whatsapp.proto` do, to regenerate the committed descriptor.
+The build writes the model and field tags to `OUT_DIR`. Consumers do not need `protoc`. Contributors need it to regenerate the committed descriptor.
 
 ## Usage
 
-All protobuf types are under the `waproto::whatsapp` module:
+The prelude provides `wa`, the protobuf traits, and common codecs:
 
 ```rust
-use waproto::whatsapp as wa;
+use waproto::prelude::*;
 
-let message = wa::Message {
-    conversation: Some("Hello, World!".to_string()),
-    ..Default::default()
-};
+let mut message = wa::Message::default();
+message.conversation = Some("Hello, World!".to_string());
 ```
 
-Sub-message fields (nested protobuf messages) are `buffa::MessageField<T>`, not `Option<Box<T>>` or `Option<T>`. Construct one with `buffa::MessageField::some(..)`, and read it back with `.as_option()`, `.is_set()`, or `.is_unset()`.
+Sub-message fields use `waproto::protobuf::MessageField<T>`. Construct one with `MessageField::some(..)` and read it with `.as_option()`, `.is_set()`, or `.is_unset()`.
 
 <Note>
-  `waproto` re-exports `buffa` (`waproto::buffa`), and `whatsapp-rust` in turn re-exports it as `whatsapp_rust::buffa` (with `MessageField` also available directly from `prelude`). Naming `buffa::MessageField` no longer requires a direct `buffa` dependency of your own — see [Installation](/installation#add-to-your-project). You can still add `buffa` directly if you want to pin your own version or use APIs beyond `MessageField`.
+  The SDK provides the same protobuf items through `whatsapp_rust::prelude::*`. The historical `waproto::buffa` and `whatsapp_rust::buffa` paths refer to the project-owned protobuf module.
 </Note>
 
 ```rust
-use waproto::buffa::MessageField;
-use waproto::whatsapp as wa;
+use waproto::prelude::*;
 
-let img = wa::Message {
-    image_message: MessageField::some(wa::message::ImageMessage {
-        caption: Some("Check this out!".to_string()),
-        ..Default::default()
-    }),
-    ..Default::default()
-};
+let mut image = wa::message::ImageMessage::default();
+image.caption = Some("Check this out!".to_string());
+let mut img = wa::Message::default();
+img.image_message = MessageField::some(image);
 
 if let Some(image) = img.image_message.as_option() {
     println!("caption: {:?}", image.caption);
 }
 ```
 
-Plain scalar fields (`String`, `Vec<u8>`, `bool`, integers) are still `Option<T>`, same as before. Enum fields are a typed `Option<EnumType>` rather than a raw `Option<i32>`, and enum variants are `SCREAMING_SNAKE_CASE` (e.g. `wa::message::protocol_message::Type::MESSAGE_EDIT`).
+Optional scalar and enum fields use `Option<T>`. Required fields use their value type. Generated messages and enums are non-exhaustive, so construct messages with `Default` and field assignments, and include a fallback when matching enums.
+
+The prelude brings `ProtoMessage` and `ProtoMessageView` into scope for owned and borrowed decoding.
+
+```rust
+use waproto::prelude::*;
+
+fn main() -> Result<(), waproto::protobuf::DecodeError> {
+    let mut message = wa::Message::default();
+    message.conversation = Some("Hello".into());
+    let encoded = message.encode_to_vec();
+    let view = wa::MessageView::decode_view(&encoded)?;
+    assert_eq!(view.conversation, Some("Hello"));
+    Ok(())
+}
+```
+
+Views expose `has_*` methods for required fields. For example, `ConversationView::has_id()` distinguishes an absent ID from an explicitly encoded empty ID. The default view reports required scalar fields as absent.
+
+Decoders discard unknown fields and limit how many they skip across a message tree. Use `DecodeOptions::with_unknown_field_limit` to set that limit. Preserve the original bytes when forwarding fields outside the current schema.
+
+`with_element_memory_limit` limits the summed sizes of repeated and map elements. It is not a total heap limit: payload buffers, spare container capacity, and singular messages are excluded. Set `with_max_message_size` separately for untrusted input; values above the protobuf maximum are capped. Custom `Message` and `MessageView` implementations must enforce and forward the supplied decode context; custom views implement `decode_view_with_ctx` explicitly.
 
 ## Key message types
 
@@ -115,27 +130,21 @@ pub struct Message {
 **Usage in main library:**
 
 ```rust
-use waproto::buffa::MessageField;
-use waproto::whatsapp as wa;
+use waproto::prelude::*;
 
 // Construct a text message
-let msg = wa::Message {
-    conversation: Some("Hello!".to_string()),
-    ..Default::default()
-};
+let mut msg = wa::Message::default();
+msg.conversation = Some("Hello!".to_string());
 
 // Construct an image message
-let img = wa::Message {
-    image_message: MessageField::some(wa::message::ImageMessage {
-        url: Some(media_url),
-        media_key: Some(media_key.to_vec()),
-        file_sha256: Some(file_sha256.to_vec()),
-        file_enc_sha256: Some(file_enc_sha256.to_vec()),
-        caption: Some("Check this out!".to_string()),
-        ..Default::default()
-    }),
-    ..Default::default()
-};
+let mut image = wa::message::ImageMessage::default();
+image.url = Some(media_url);
+image.media_key = Some(media_key.to_vec());
+image.file_sha256 = Some(file_sha256.to_vec());
+image.file_enc_sha256 = Some(file_enc_sha256.to_vec());
+image.caption = Some("Check this out!".to_string());
+let mut img = wa::Message::default();
+img.image_message = MessageField::some(image);
 ```
 
 #### MessageKey
@@ -481,7 +490,7 @@ pub struct ADVKeyIndexList {
 ```
 
 <Note>
-These ADV types are capitalized `ADV...` (not `Adv...`) to match buffa's acronym-preserving type naming.
+These ADV types are capitalized `ADV...` to preserve their public names.
 </Note>
 
 ### Signal protocol structures
@@ -635,9 +644,7 @@ pub mod video_message {
 ```
 
 <Note>
-buffa generates a **closed** enum by default: an unrecognized wire value decodes to `None` rather than being preserved, unlike the old prost-generated `Option<i32>` fields which round-tripped any integer. In practice WhatsApp only ever sends in-schema values, so this only matters for forward compatibility with brand-new server-side enum variants.
-
-`SyncdMutation.operation` (`SyncdOperation`) is the one deliberate exception: `build.rs` opts it into buffa's **open** enum mode, so the field type is `Option<buffa::EnumValue<SyncdOperation>>` instead of `Option<SyncdOperation>`. An unrecognized wire value decodes to `EnumValue::Unknown(n)` rather than `None`. `wacore_appstate`'s `process_patch` rejects an unknown operation with a typed `AppStateError::UnsupportedSyncdOperation` before mutating any state, instead of silently treating it as `SET` and corrupting the app-state LTHash — which is what the previous closed-enum decode did.
+Most generated enum fields are closed. An unrecognized wire value is discarded. `SyncdMutation.operation` and the status privacy distribution mode use the open `waproto::protobuf::EnumValue<T>` representation, which retains unknown integer values. App-state processing rejects an unknown sync operation before changing state.
 </Note>
 
 ## Feature flags
@@ -645,11 +652,11 @@ buffa generates a **closed** enum by default: an unrecognized wire value decodes
 | Feature | Description | Implies |
 |---|---|---|
 | `serde-deserialize` | Adds `#[derive(serde::Deserialize)]` and `#[serde(default)]` to all types. Use when you need to parse protobuf types from JSON. | — |
-| `serde-snake-case` | Adds `#[serde(rename_all(deserialize = "snake_case"))]` to all types. Allows snake_case enum variant names during deserialization (buffa generates SCREAMING_SNAKE_CASE). Serialize output is unchanged. | `serde-deserialize` |
+| `serde-snake-case` | Accepts snake_case enum variant names during deserialization. Serialize output is unchanged. | `serde-deserialize` |
 | `serde-enum-repr` | Enums (de)serialize as their numeric repr instead of the variant name — what the JS/WASM bridge and camelCase serializer expect. | — |
 
 <Note>
-The `generate` feature was removed in [#836](https://github.com/oxidezap/whatsapp-rust/pull/836). Code generation is now always-on — `buffa-build`, `buffa-descriptor`, `heck`, and `sha2` are unconditional build dependencies. Remove `--features generate` from any build scripts.
+The `generate` feature was removed in [#836](https://github.com/oxidezap/whatsapp-rust/pull/836). Normal builds generate the model automatically.
 </Note>
 
 ## Serde support
@@ -697,7 +704,7 @@ pub struct Message {
 
 ### With `serde-snake-case`
 
-All types additionally accept snake_case during deserialization. This primarily affects enum and oneof variants (buffa generates SCREAMING_SNAKE_CASE names), while struct fields are already snake_case. Serialization output remains unchanged.
+All types additionally accept snake_case during deserialization. This primarily affects enum and oneof variants, while struct fields are already snake_case. Serialization output remains unchanged.
 
 ```rust
 // Without serde-snake-case: must use SCREAMING_SNAKE_CASE
@@ -730,20 +737,13 @@ The history-sync wire walkers use these constants internally, and compile-time `
 
 ## Code generation
 
-The build generates protobuf code — `build.rs` always runs. It reads the committed binary descriptor (`src/whatsapp.desc`), verifies its SHA-256 against `src/whatsapp.desc.sha256`, and hands it to `buffa-build`, writing two files into `OUT_DIR`:
-
-- **`whatsapp.rs`** — full buffa-generated structs and enums, including zero-copy view types
-- **`tags.rs`** — `waproto::tags` field-number constants (see [waproto::tags](#waprototags) above)
-
-`whatsapp.proto` stays in its upstream camelCase form; `buffa-build`'s `idiomatic_field_names` option converts field and oneof identifiers to snake_case Rust idents at codegen time (word boundaries match `heck`/prost), so the generated API keeps the prost-style names build.rs used to produce by hand. `buffa-descriptor` and `heck` remain build dependencies — they back the `waproto::tags` generation described above, which reads the original (camelCase) descriptor directly.
-
-Neither generated file is committed. `buffa-build`, `buffa-descriptor`, `heck`, and `sha2` are unconditional build dependencies. `protoc` is only needed to regenerate the descriptor after editing `whatsapp.proto` — normal builds of `waproto` (or anything depending on it) never invoke `protoc`.
+The build script verifies the committed descriptor and generates the owned types, borrowed views and `waproto::tags` constants in `OUT_DIR`. The repository-owned generator keeps protobuf field names in the source schema and emits Rust identifiers in snake_case. Normal builds do not invoke `protoc`.
 
 **To update after modifying `whatsapp.proto`:**
 
 ```bash
-scripts/regenerate-proto-desc.sh   # writes waproto/src/whatsapp.desc + .sha256 (wraps protoc)
-cargo build -p waproto             # regenerates whatsapp.rs and tags.rs
+cargo xt proto-desc
+cargo xt proto-codecs --check
 ```
 
 The build aborts with a clear message if the descriptor SHA-256 does not match.
@@ -757,43 +757,33 @@ The `generate` feature flag was removed. Code generation is now always-on and do
 ### Constructing Messages
 
 ```rust
-use waproto::buffa::MessageField;
-use waproto::whatsapp as wa;
+use waproto::prelude::*;
 
 // Text message
-let text = wa::Message {
-    conversation: Some("Hello!".to_string()),
-    ..Default::default()
-};
+let mut text = wa::Message::default();
+text.conversation = Some("Hello!".to_string());
 
 // Image with caption
-let image = wa::Message {
-    image_message: MessageField::some(wa::message::ImageMessage {
-        url: Some(media_url),
-        media_key: Some(media_key.to_vec()),
-        file_sha256: Some(file_sha256.to_vec()),
-        file_enc_sha256: Some(file_enc_sha256.to_vec()),
-        caption: Some("Nice photo!".to_string()),
-        jpeg_thumbnail: Some(thumbnail),
-        ..Default::default()
-    }),
-    ..Default::default()
-};
+let mut image_content = wa::message::ImageMessage::default();
+image_content.url = Some(media_url);
+image_content.media_key = Some(media_key.to_vec());
+image_content.file_sha256 = Some(file_sha256.to_vec());
+image_content.file_enc_sha256 = Some(file_enc_sha256.to_vec());
+image_content.caption = Some("Nice photo!".to_string());
+image_content.jpeg_thumbnail = Some(thumbnail);
+let mut image = wa::Message::default();
+image.image_message = MessageField::some(image_content);
 
 // Quoted reply
-let reply = wa::Message {
-    extended_text_message: MessageField::some(wa::message::ExtendedTextMessage {
-        text: Some("Great question!".to_string()),
-        context_info: MessageField::some(wa::message::ContextInfo {
-            stanza_id: Some(original_message_id),
-            participant: Some(original_sender),
-            quoted_message: MessageField::some(original_message),
-            ..Default::default()
-        }),
-        ..Default::default()
-    }),
-    ..Default::default()
-};
+let mut context = wa::ContextInfo::default();
+context.stanza_id = Some(original_message_id);
+context.participant = Some(original_sender);
+context.quoted_message = MessageField::some(original_message);
+let mut content = wa::message::ExtendedTextMessage::default();
+content.text = Some("Great question!".to_string());
+content.context_info = MessageField::some(context);
+let mut reply = wa::Message::default();
+reply.extended_text_message = MessageField::some(content);
 ```
 
 ### Pattern Matching
@@ -820,7 +810,7 @@ match (&proto_msg.conversation, proto_msg.image_message.as_option(), proto_msg.v
 See [Media Handling](/guides/media-handling) for complete examples.
 
 ```rust
-use waproto::whatsapp as wa;
+use waproto::prelude::*;
 use wacore::download::{Downloadable, MediaType};
 
 if let Some(img) = message.image_message.as_option() {
@@ -831,14 +821,7 @@ if let Some(img) = message.image_message.as_option() {
 
 ## WhatsApp Version
 
-The protobuf definitions are based on:
-
-```rust
-// This file is @generated by buffa-build.
-// WhatsApp Version: 2.3000.1035617621
-```
-
-This version is automatically included in the generated file header.
+The committed descriptor is generated from the pinned WhatsApp Web schema. See the repository's code generation guide for its provenance.
 
 ## Relationship with wacore
 
@@ -853,22 +836,17 @@ wacore provides utilities for working with waproto messages:
 Example:
 
 ```rust
-use waproto::buffa::MessageField;
-use wacore::proto_helpers;
-use waproto::whatsapp as wa;
+use waproto::prelude::*;
 
-// Convert internal JID to protobuf MessageKey
-let key = proto_helpers::message_key(&jid, &message_id, from_me);
-
-// Build revoke message
-let revoke = wa::Message {
-    protocol_message: MessageField::some(wa::message::ProtocolMessage {
-        key: MessageField::some(key),
-        r#type: Some(wa::message::protocol_message::Type::REVOKE),
-        ..Default::default()
-    }),
-    ..Default::default()
-};
+let mut key = wa::MessageKey::default();
+key.remote_jid = Some("12345@s.whatsapp.net".into());
+key.id = Some("example-message-id".into());
+key.from_me = Some(true);
+let mut protocol = wa::message::ProtocolMessage::default();
+protocol.key = MessageField::some(key);
+protocol.r#type = Some(wa::message::protocol_message::Type::REVOKE);
+let mut revoke = wa::Message::default();
+revoke.protocol_message = MessageField::some(protocol);
 ```
 
 ## Next Steps

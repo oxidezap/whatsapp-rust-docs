@@ -520,12 +520,12 @@ Sends an encrypted message to a chat.
 
 **Example:**
 ```rust
-use waproto::whatsapp as wa;
+use whatsapp_rust::prelude::*;
 
-let message = wa::Message {
+let message = proto!(wa::Message {
     conversation: Some("Hello!".to_string()),
     ..Default::default()
-};
+});
 
 let result = client.send_message(jid, message).await?;
 println!("Sent message ID: {}", result.message_id);

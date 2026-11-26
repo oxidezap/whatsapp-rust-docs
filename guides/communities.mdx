@@ -283,13 +283,14 @@ The default announcement subgroup of a community — the one where `is_default_s
 `client.send_reaction()` handles this transparently. The same call works for DMs, regular groups, and CAGs with no change to your code:
 
 ```rust
-let target_key = wa::MessageKey {
+use whatsapp_rust::prelude::*;
+let target_key = proto!(wa::MessageKey {
     remote_jid: Some(cag_jid.to_string()),
     from_me: Some(false),
     id: Some("3EB0POSTID".to_string()),
     // participant must be the post author.
     participant: Some(post_author_jid.to_string()),
-};
+});
 
 // send_reaction takes target_key by value; clone it to reuse for removal.
 client.send_reaction(&cag_jid, target_key.clone(), "🔥").await?;
@@ -318,9 +319,10 @@ Event::Messages(batch) => {
 Post encrypted threaded replies under a CAG post using `client.comments()`:
 
 ```rust
+use whatsapp_rust::prelude::*;
 use whatsapp_rust::features::Comments;
 
-let parent_key = wa::MessageKey {
+let parent_key = proto!(wa::MessageKey {
     remote_jid: Some(cag_jid.to_string()),
     from_me: Some(false),
     id: Some("3EB0POSTID".to_string()),
@@ -328,7 +330,7 @@ let parent_key = wa::MessageKey {
     // decryption key from the envelope. The library resolves the author
     // automatically when from_me is true and participant is omitted.
     participant: Some(post_author_jid.to_string()),
-};
+});
 
 // Send a text comment:
 let result = client.comments()
@@ -340,13 +342,14 @@ println!("Comment sent: {}", result.message_id);
 For arbitrary message bodies, use `send_message`:
 
 ```rust
-let body = wa::Message {
-    extended_text_message: buffa::MessageField::some(wa::message::ExtendedTextMessage {
+use whatsapp_rust::prelude::*;
+let body = proto!(wa::Message {
+    extended_text_message: proto!(wa::message::ExtendedTextMessage {
         text: Some("Great post!".to_string()),
         ..Default::default()
     }),
     ..Default::default()
-};
+});
 
 let result = client.comments()
     .send_message(&cag_jid, parent_key, body)

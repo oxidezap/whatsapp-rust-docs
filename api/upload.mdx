@@ -110,8 +110,8 @@ pub async fn upload(
 ### Example: upload and send image
 
 ```rust
+use whatsapp_rust::prelude::*;
 use wacore::download::MediaType;
-use waproto::whatsapp as wa;
 use std::fs;
 
 // Read image file
@@ -121,8 +121,8 @@ let image_bytes = fs::read("photo.jpg")?;
 let upload = client.upload(image_bytes, MediaType::Image, Default::default()).await?;
 
 // Create image message with upload metadata
-let message = wa::Message {
-    image_message: buffa::MessageField::some(wa::message::ImageMessage {
+let message = proto!(wa::Message {
+    image_message: proto!(wa::message::ImageMessage {
         url: Some(upload.url),
         direct_path: Some(upload.direct_path),
         media_key: Some(upload.media_key_vec()),
@@ -135,7 +135,7 @@ let message = wa::Message {
         ..Default::default()
     }),
     ..Default::default()
-};
+});
 
 // Send the message
 let result = client.send_message(chat_jid, message).await?;
@@ -162,8 +162,8 @@ println!("  Path: {}", upload.direct_path);
 ### Example: upload document
 
 ```rust
+use whatsapp_rust::prelude::*;
 use wacore::download::MediaType;
-use waproto::whatsapp as wa;
 use std::fs;
 use std::path::Path;
 
@@ -175,8 +175,8 @@ let filename = doc_path.file_name()
 
 let upload = client.upload(doc_bytes, MediaType::Document, Default::default()).await?;
 
-let message = wa::Message {
-    document_message: buffa::MessageField::some(wa::message::DocumentMessage {
+let message = proto!(wa::Message {
+    document_message: proto!(wa::message::DocumentMessage {
         url: Some(upload.url),
         direct_path: Some(upload.direct_path),
         media_key: Some(upload.media_key_vec()),
@@ -189,7 +189,7 @@ let message = wa::Message {
         ..Default::default()
     }),
     ..Default::default()
-};
+});
 
 let result = client.send_message(chat_jid, message).await?;
 ```
@@ -197,14 +197,14 @@ let result = client.send_message(chat_jid, message).await?;
 ### Example: upload audio (voice note)
 
 ```rust
+use whatsapp_rust::prelude::*;
 use wacore::download::MediaType;
-use waproto::whatsapp as wa;
 
 let audio_bytes = fs::read("voice.ogg")?;
 let upload = client.upload(audio_bytes, MediaType::Audio, Default::default()).await?;
 
-let message = wa::Message {
-    audio_message: buffa::MessageField::some(wa::message::AudioMessage {
+let message = proto!(wa::Message {
+    audio_message: proto!(wa::message::AudioMessage {
         url: Some(upload.url),
         direct_path: Some(upload.direct_path),
         media_key: Some(upload.media_key_vec()),
@@ -217,7 +217,7 @@ let message = wa::Message {
         ..Default::default()
     }),
     ..Default::default()
-};
+});
 
 let result = client.send_message(chat_jid, message).await?;
 ```

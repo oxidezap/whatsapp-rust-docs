@@ -234,6 +234,7 @@ Note: Recording uses `<composing media="audio">` rather than a separate tag.
 ### Typing indicator lifecycle
 
 ```rust
+use whatsapp_rust::prelude::*;
 use whatsapp_rust::features::chatstate::ChatStateType;
 
 let recipient: Jid = "15551234567@s.whatsapp.net".parse()?;
@@ -248,16 +249,17 @@ std::thread::sleep(std::time::Duration::from_secs(2));
 client.chatstate().send_paused(&recipient).await?;
 
 // Send the actual message
-let message = wa::Message {
+let message = proto!(wa::Message {
     conversation: Some("Hello!".to_string()),
     ..Default::default()
-};
+});
 client.send_message(recipient.clone(), message).await?;
 ```
 
 ### Recording Audio
 
 ```rust
+use whatsapp_rust::prelude::*;
 let recipient: Jid = "15551234567@s.whatsapp.net".parse()?;
 
 // Start recording
@@ -271,8 +273,8 @@ client.chatstate().send_paused(&recipient).await?;
 
 // Upload and send audio message
 let upload = client.upload(audio_data, MediaType::Audio, Default::default()).await?;
-let message = wa::Message {
-    audio_message: buffa::MessageField::some(wa::message::AudioMessage {
+let message = proto!(wa::Message {
+    audio_message: proto!(wa::message::AudioMessage {
         url: Some(upload.url),
         direct_path: Some(upload.direct_path),
         media_key: Some(upload.media_key_vec()),
@@ -284,7 +286,7 @@ let message = wa::Message {
         ..Default::default()
     }),
     ..Default::default()
-};
+});
 client.send_message(recipient.clone(), message).await?;
 ```
 
@@ -334,16 +336,17 @@ if throttler.should_send() {
 Chat state indicators work in group chats as well:
 
 ```rust
+use whatsapp_rust::prelude::*;
 let group_jid: Jid = "123456789@g.us".parse()?;
 
 // Show typing in group
 client.chatstate().send_composing(&group_jid).await?;
 
 // Send message
-let message = wa::Message {
+let message = proto!(wa::Message {
     conversation: Some("Hello everyone!".to_string()),
     ..Default::default()
-};
+});
 client.send_message(group_jid.clone(), message).await?;
 ```
 
@@ -380,6 +383,7 @@ match client.chatstate().send_composing(&recipient).await {
 ## Complete Example
 
 ```rust
+use whatsapp_rust::prelude::*;
 use whatsapp_rust::features::chatstate::ChatStateType;
 use std::time::Duration;
 
@@ -397,10 +401,10 @@ println!("Still typing...");
 
 // User finishes and sends message
 client.chatstate().send_paused(&recipient).await?;
-let message = wa::Message {
+let message = proto!(wa::Message {
     conversation: Some("Hello there!".to_string()),
     ..Default::default()
-};
+});
 client.send_message(recipient.clone(), message).await?;
 println!("Message sent");
 

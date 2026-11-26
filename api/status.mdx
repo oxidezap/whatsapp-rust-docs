@@ -166,15 +166,15 @@ pub async fn send_raw(
 
 **Example:**
 ```rust
-use waproto::whatsapp as wa;
+use whatsapp_rust::prelude::*;
 
-let message = wa::Message {
-    extended_text_message: buffa::MessageField::some(wa::message::ExtendedTextMessage {
+let message = proto!(wa::Message {
+    extended_text_message: proto!(wa::message::ExtendedTextMessage {
         text: Some("Custom message".to_string()),
         ..Default::default()
     }),
     ..Default::default()
-};
+});
 
 let result = client.status()
     .send_raw(message, recipients, StatusSendOptions::default())
@@ -234,16 +234,16 @@ pub async fn send_reaction(
 
 **Example:**
 ```rust
-use waproto::whatsapp as wa;
+use whatsapp_rust::prelude::*;
 
 let status_jid = Jid::status_broadcast();
 
-let target_key = wa::MessageKey {
+let target_key = proto!(wa::MessageKey {
     remote_jid: Some(status_jid.to_string()),
     from_me: Some(false),
     id: Some(status_message_id.clone()),
     participant: Some(Jid::pn("15551234567").to_string()),
-};
+});
 
 // React to a status
 client.send_reaction(&status_jid, target_key.clone(), "💚").await?;

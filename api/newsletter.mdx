@@ -232,12 +232,12 @@ The mute state is sent as `ON`/`OFF`; the mute expiration is local database stat
 Newsletter message sending is handled by the unified `client.send_message()` method. See the [Send API reference](/api/send#send_message) for full details.
 
 ```rust
-use waproto::whatsapp as wa;
+use whatsapp_rust::prelude::*;
 
-let message = wa::Message {
+let message = proto!(wa::Message {
     conversation: Some("Hello subscribers!".to_string()),
     ..Default::default()
-};
+});
 
 // Pass a newsletter JID directly to send_message
 let msg_id = client.send_message(newsletter_jid, message).await?;
@@ -296,16 +296,16 @@ pub async fn edit_message(
 **Parameters:**
 - `jid` — Newsletter JID. Non-newsletter JIDs are rejected with an error; use [`Client::edit_message`](/api/send) for DMs and groups.
 - `message_id` — The target message's `message_id` (the wire stanza id, as returned by `send_message` or carried on [`NewsletterMessage`](#newslettermessage)). This is **not** the `server_id` used by reactions. Empty IDs are rejected.
-- `new_content` — Replacement message body. Typically a `wa::Message { conversation: Some(..), .. }` for text edits.
+- `new_content` — Replacement message body. Use `proto!(wa::Message { conversation: "..." })` for text edits.
 
 **Example:**
 ```rust
-use waproto::whatsapp as wa;
+use whatsapp_rust::prelude::*;
 
-let new_body = wa::Message {
+let new_body = proto!(wa::Message {
     conversation: Some("edited text".to_string()),
     ..Default::default()
-};
+});
 
 client.newsletter()
     .edit_message(&newsletter_jid, original_message_id, new_body)

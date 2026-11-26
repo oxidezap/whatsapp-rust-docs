@@ -506,13 +506,12 @@ Prefer the typed wrappers (`pin_chat`, `mute_chat`, `archive_chat`, label method
 **Example:**
 ```rust
 use whatsapp_rust::schemas;
-use whatsapp_rust::waproto::whatsapp as wa;
+use whatsapp_rust::prelude::*;
 
-let value = wa::SyncActionValue {
-    clear_chat_action: Some(Default::default()),
+let value = proto!(wa::SyncActionValue {
+    clear_chat_action: wa::sync_action_value::ClearChatAction::default(),
     timestamp: Some(1_700_000_000_000),
-    ..Default::default()
-};
+});
 
 // CLEAR_CHAT's non-literal index parts are [chatJid, deleteStarred, deleteMedia].
 client
