@@ -51,7 +51,7 @@ tokio = { version = "1.53", features = ["macros", "rt-multi-thread"] }
 
 </CodeGroup>
 
-O crate principal reexporta `whatsapp_rust::waproto::whatsapp` como `wa` no prelude, além de `wacore`, `wacore_binary` e das implementações de armazenamento e transporte. O módulo `whatsapp_rust::protobuf` contém os tipos e traits de protobuf. O prelude também oferece `MessageField`, `ProtoMessage`, `ProtoMessageView` e `protobuf_codec` para operações comuns. O caminho histórico `whatsapp_rust::buffa` aponta para o mesmo módulo.
+O crate principal reexporta `whatsapp_rust::waproto::whatsapp` como `wa` no prelude, além de `wacore`, `wacore_binary` e das implementações de armazenamento e transporte. O módulo `whatsapp_rust::protobuf` contém os tipos e traits de protobuf. O prelude também oferece `MessageField`, `ProtoMessage`, `ProtoMessageView`, `ProtoDecodeOptions`, `OwnedView` e `protobuf_codec` para operações comuns. O mesmo prelude de protobuf está disponível em `waproto::prelude`. O caminho histórico `whatsapp_rust::buffa` aponta para o mesmo módulo.
 
 ## Feature flags
 
