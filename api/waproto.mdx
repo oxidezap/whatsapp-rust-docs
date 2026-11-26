@@ -77,6 +77,8 @@ Views expose `has_*` methods for required fields. For example, `ConversationView
 
 Decoders discard unknown fields and limit how many they skip across a message tree. Use `DecodeOptions::with_unknown_field_limit` to set that limit. Preserve the original bytes when forwarding fields outside the current schema.
 
+`with_element_memory_limit` limits the summed sizes of repeated and map elements. It is not a total heap limit: payload buffers, spare container capacity, and singular messages are excluded. Set `with_max_message_size` separately for untrusted input; values above the protobuf maximum are capped. Custom `Message` and `MessageView` implementations must enforce and forward the supplied decode context; custom views implement `decode_view_with_ctx` explicitly.
+
 ## Key message types
 
 ### Core message types
